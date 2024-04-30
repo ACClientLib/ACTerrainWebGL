@@ -265,8 +265,6 @@ export class camera2d {
 
       var landblock = (((Math.min(Math.floor(offset.x / 192.), 0xFE))  * Math.pow(2, 24)) + (Math.min(Math.floor(offset.y / 192.), 0xFE) << 16));
 
-      console.log(toHexStr(landblock))
-
       return new Coordinates(landblock, offset.x % 192, offset.y % 192, 0);
   }
 }
