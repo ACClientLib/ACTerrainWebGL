@@ -16,7 +16,7 @@ function GetLandblockFromCoordinates(EW: number, NS: number) {
 }
 
 function LandblockToNS(landcell: number, yOffset: number) {
-  const num = (landcell & 0xFF0000) / 8192;
+  const num = (landcell & 0x00FF0000) / 8192;
   const num2 = ((yOffset / 24.0 + num) - 1019.5) / 10.0;
   return num2;
 }
@@ -28,7 +28,7 @@ function LandblockToEW(landcell: number, xOffset: number) {
 }
 
 function NSToLandblock(landcell: number, ns: number) {
-  const num = (landcell & 0xFF0000) / 8192;
+  const num = (landcell & 0x00FF0000) / 8192;
   const num2 = ((ns * 10.0 - num) + 1019.5) * 24.0;
   return num2;
 }
@@ -74,7 +74,7 @@ export default class Coordinates {
   }
 
   #CalculateOutdoorLandcell() {
-      this.LandCell |= (Math.floor(this.LocalX / 24) * 8) + Math.ceil(this.LocalY / 24);
+      //this.LandCell |= (Math.floor(this.LocalX / 24) * 8) + Math.ceil(this.LocalY / 24);
   }
   
   LBX() {

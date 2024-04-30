@@ -26,6 +26,9 @@ uniform sampler2D terrainData;
 // texture array of all the terrain textures from the dat
 uniform sampler2DArray terrainAtlas;
 
+// current drawing scale
+uniform float scale;
+
 in vec4 someColor;
 in vec3 pos;
 in vec3 wpos;
@@ -48,8 +51,12 @@ void main() {
   int tCode = int(texelFetch(terrainData, ivec2(cPos + vec2(0, 0)), 0).g * 255.0);
   vec3 tColor = terrainColors[tCode];
 
-  FragColor = texture(terrainAtlas, vec3(cPos.xy, tCode));
-  //FragColor = vec4(tColor, 1);
+  if (scale > 0.2) {
+    FragColor = texture(terrainAtlas, vec3(cPos.xy, tCode));
+  }
+  else {
+    FragColor = vec4(tColor, 1);
+  }
 
   //highlightLandcells();
 }

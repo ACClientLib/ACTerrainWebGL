@@ -24,7 +24,7 @@ export class TerrainRenderer {
 
   // uniform locations
   #xWorldLoc : WebGLUniformLocation | null = null;
-  #someColorLoc : WebGLUniformLocation | null = null;
+  #scaleLoc : WebGLUniformLocation | null = null;
   #renderViewLoc : WebGLUniformLocation | null = null;
   #terrainDataLoc: WebGLUniformLocation | null = null;
   #terrainAtlasLoc: WebGLUniformLocation | null = null;
@@ -102,7 +102,7 @@ export class TerrainRenderer {
     this.gl.useProgram(this.program);
 
     this.#xWorldLoc = this.gl.getUniformLocation(this.program!, 'xWorld');
-    this.#someColorLoc = this.gl.getUniformLocation(this.program!, 'someColor');
+    this.#scaleLoc = this.gl.getUniformLocation(this.program!, 'scale');
     this.#renderViewLoc = this.gl.getUniformLocation(this.program!, 'renderView');
     this.#terrainDataLoc = this.gl.getUniformLocation(this.program!, "terrainData");
     this.#terrainAtlasLoc = this.gl.getUniformLocation(this.program!, "terrainAtlas");
@@ -157,12 +157,14 @@ export class TerrainRenderer {
     this.camera.ViewportSize.x = this.canvas.width;
     this.camera.ViewportSize.y = this.canvas.height;
 
+    this.camera.update(dt);
+
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
     this.gl.uniform1i(this.#terrainDataLoc, 0);
     this.gl.uniform1i(this.#terrainAtlasLoc, 1);
 
-    this.gl.uniform4f(this.#someColorLoc!, 1, 1, 1, 1);
+    this.gl.uniform1f(this.#scaleLoc!, this.camera.Zoom);
     this.gl.uniformMatrix4fv(this.#xWorldLoc!, false, this.camera.Transform);
     this.gl.uniform4f(this.#renderViewLoc!, 0, 0, 255, 255);
     
