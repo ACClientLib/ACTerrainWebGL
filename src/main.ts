@@ -14,7 +14,7 @@ function draw(dt: number) {
 
 window.requestAnimationFrame(draw);
 
-window.renderer = renderer;
+//window.renderer = renderer;
 
 /*
 let times: number[] = [];
