@@ -1,29 +1,44 @@
-import { Vector3 } from "@math.gl/core";
+import { Vector2, Vector3 } from "@math.gl/core";
 
 export class TextureArray {
-  constructor(gl: WebGL2RenderingContext, imageSources: string[], cb: (idx: number)=>undefined) {
-    const texture = gl.createTexture();
+  imageSources: string[]
+  gl: WebGL2RenderingContext
+  texture: WebGLTexture | null
+  textureUnit: number
+  textureSize: Vector2
+  
+  constructor(gl: WebGL2RenderingContext, imageSources: string[], textureSize: Vector2, textureUnit: number) {
+    this.imageSources = imageSources;
+    this.gl = gl;
+    this.textureUnit = textureUnit;
+    this.textureSize = textureSize;
 
-    gl.activeTexture(gl.TEXTURE0 + 1);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+    this.texture = gl.createTexture()
 
-    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 8, gl.RGBA8, 512, 512, imageSources.length);
+    gl.activeTexture(gl.TEXTURE0 + this.textureUnit);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture);
 
-    let neededToLoad = imageSources.length;
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 8, gl.RGBA8, textureSize.x, textureSize.y, imageSources.length);
+  }
 
-    for (var i = 0; i < imageSources.length; i++) {
+  load(cb: (idx: number)=>void) {
+    let neededToLoad = this.imageSources.length;
+
+    for (var i = 0; i < this.imageSources.length; i++) {
       const idx = i;
       const image = new Image();
-      image.src = imageSources[idx];
+      image.src = this.imageSources[idx];
   
+      const gl = this.gl;
+      const $this = this;
       image.addEventListener('load', function() {
-        gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
-        gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, idx, 512, 512, 1, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, $this.texture);
+        gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, idx, $this.textureSize.x, $this.textureSize.y, 1, gl.RGBA, gl.UNSIGNED_BYTE, image);
 
         gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
 
         cb(idx)
-        if (--neededToLoad) {
+        if (--neededToLoad == 0) {
           cb(-1)
         }
       });

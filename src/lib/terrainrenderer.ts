@@ -12,6 +12,7 @@ import { camera2d } from './cameras/camera2d'
 import gui from './gui'
 import { updateFrameRate } from '../tools/fpscounter'
 import * as codes from '../tools/codes'
+import { Texture } from './texture'
 
 export class TerrainRenderer {
   canvas: HTMLCanvasElement
@@ -27,17 +28,20 @@ export class TerrainRenderer {
   #fps = 0
 
   // uniform locations
-  #xWorldLoc : WebGLUniformLocation | null = null;
-  #scaleLoc : WebGLUniformLocation | null = null;
-  #renderViewLoc : WebGLUniformLocation | null = null;
-  #terrainDataLoc: WebGLUniformLocation | null = null;
-  #terrainAtlasLoc: WebGLUniformLocation | null = null;
-  #minZoomForTexturesLoc: WebGLUniformLocation | null = null;
-  #showLandcellLinesLoc: WebGLUniformLocation | null = null;
-  #showLandblockLinesLoc: WebGLUniformLocation | null = null;
-  #pixelSizeLoc: WebGLUniformLocation | null = null;
+  #xWorldLoc : WebGLUniformLocation | null = null
+  #scaleLoc : WebGLUniformLocation | null = null
+  #renderViewLoc : WebGLUniformLocation | null = null
+  #terrainDataLoc: WebGLUniformLocation | null = null
+  #terrainAtlasLoc: WebGLUniformLocation | null = null
+  #minZoomForTexturesLoc: WebGLUniformLocation | null = null
+  #showLandcellLinesLoc: WebGLUniformLocation | null = null
+  #showLandblockLinesLoc: WebGLUniformLocation | null = null
+  #pixelSizeLoc: WebGLUniformLocation | null = null
 
-  #terrainTextureArray: TextureArray;
+  #dataTexture!: Texture
+  #terrainTextureArray!: TextureArray
+  #alphaTextureArray!: TextureArray
+
   hasTerrainTexture: number[] = []
 
   // ac data
@@ -47,36 +51,34 @@ export class TerrainRenderer {
   mousePos = new Vector2()
 
   constructor(canvas: HTMLCanvasElement, overlay: Element, loader: Element, quality: number) {
-    this.canvas = canvas;
-    this.overlay = overlay;
-    this.loader = loader;
-    this.gl = canvas.getContext("webgl2")!;
-    this.quality = quality;
+    this.canvas = canvas
+    this.overlay = overlay
+    this.loader = loader
+    this.gl = canvas.getContext("webgl2")!
+    this.quality = quality
     this.camera = new camera2d(this.canvas)
 
-    glhelpers.resizeCanvasToDisplaySize(canvas);
+    glhelpers.resizeCanvasToDisplaySize(canvas)
 
     if (!this.gl) {
-      this.throwError("No Canvas / webgl2?");
+      this.throwError("No Canvas / webgl2?")
     }
 
     this.#addSettings()
     this.#setupGL()
     this.#setupInputs()
 
-    this.#makeDataTexture()
-    this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, (idx) => {
-      if (idx >= 0) {
-        this.hasTerrainTexture[idx] = 1;
-      }
-    })
+    this.#makeTextures()
 
+    // resize map to fit
     if (canvas.height > canvas.width) {
       this.camera.Zoom = canvas.height / this.camera.MapSize.y
     }
     else {
       this.camera.Zoom = canvas.width / this.camera.MapSize.x
     }
+
+    // center map
     this.camera.CenterOnVec(this.camera.MapSize.clone().divide(new Vector3(2, 2, 1)))
   }
 
@@ -139,35 +141,25 @@ export class TerrainRenderer {
     this.#pixelSizeLoc = this.gl.getUniformLocation(this.program!, 'pixelSize');
   }
 
-  #makeDataTexture() {
-    // Create a texture.
-    var texture = this.gl.createTexture();
+  #makeTextures() {
+    this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1)
+    //this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1)
 
-    // use texture unit 0
-    this.gl.activeTexture(this.gl.TEXTURE0 + 0);
-
-    // bind to the TEXTURE_2D bind point of texture unit 0
-    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-
-    // Asynchronously load an image
-    var image = new Image();
-    image.src = "textures/terrain.png";
-
-    const gl = this.gl;
-    const $this = this;
-    image.addEventListener('load', function() {
-      // Now that the image has loaded make copy it to the texture.
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA,gl.UNSIGNED_BYTE, image);
-      gl.generateMipmap(gl.TEXTURE_2D);
-
-      $this.#onready()
-    });
+    this.#dataTexture = new Texture(this.gl, "textures/terrain.png", new Vector2(2041, 2041), 0);
+    this.#dataTexture.load(() => {
+      this.#onready()
+    })
   }
 
   #onready() {
     glhelpers.resizeCanvasToDisplaySize(this.canvas)
     document.body.classList.add('loaded')
+
+    this.#terrainTextureArray.load((idx) => {
+      if (idx >= 0) {
+        this.hasTerrainTexture[idx] = 1;
+      }
+    })
   }
 
   #buildData() {
@@ -200,8 +192,8 @@ export class TerrainRenderer {
 
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
-    this.gl.uniform1i(this.#terrainDataLoc, 0);
-    this.gl.uniform1i(this.#terrainAtlasLoc, 1);
+    this.gl.uniform1i(this.#terrainDataLoc, this.#dataTexture.textureUnit);
+    this.gl.uniform1i(this.#terrainAtlasLoc, this.#terrainTextureArray.textureUnit);
 
     this.gl.uniform1f(this.#scaleLoc!, this.camera.Zoom);
     this.gl.uniformMatrix4fv(this.#xWorldLoc!, false, this.camera.Transform);
