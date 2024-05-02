@@ -252,7 +252,7 @@ export class camera2d {
 
   CoordsToScreen(coords: Coordinates) {
       let offset = new Vector3((coords.LBX()) * 192 + coords.LocalX, coords.LBY() * 192 + coords.LocalY);
-      offset = offset.divide(new Vector3(256 * 192, 256 * 192, 1)).multiply(this.MapSize);
+      offset = offset.divide(new Vector3(255 * 192, 255 * 192, 1)).multiply(this.MapSize);
       return this.WorldToScreen(new Vector3(offset.x, this.MapSize.y - offset.y));
   }
 

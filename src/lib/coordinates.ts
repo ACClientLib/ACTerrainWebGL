@@ -1,22 +1,20 @@
-function GetLandblockFromCoordinates(EW: number, NS: number) {
-  NS -= 0.5;
-  EW -= 0.5;
-  NS *= 10.0;
-  EW *= 10.0;
-  const num = EW + 1024.0;
-  const num2 = NS + 1024.0;
+// nothing here is good... but it works so..
+// todo: rewrite and clean up
 
-  const b = (num >> 3) & 0xFF;
-  const b2 = (num2 >> 3) & 0xFF;
-  const b3 = (num & 7) & 0xFF;
-  const b4 = (num2 & 7) & 0xFF;
-  const num3 = (b << 8) | b2;
-  const num4 = (b3 << 3) | b4;
-  return ((num3 << 16) | (num4 + 1));
+import { toHexStr } from "./util";
+
+const minCoord = -101.95;
+const maxCoord = 102.05;
+
+function GetLandblockFromCoordinates(EW: number, NS: number) {
+   const lbX = Math.floor((EW + Math.abs(minCoord)) / (maxCoord - minCoord) * 255);
+   const lbY = Math.floor((NS + Math.abs(minCoord)) / (maxCoord - minCoord) * 255);
+
+   return ((lbX << 24) >>> 0) | ((lbY << 16) >>> 0)
 }
 
 function LandblockToNS(landcell: number, yOffset: number) {
-  const num = (landcell & 0x00FF0000) / 8192;
+  const num = ((landcell & 0x00FF0000) >>> 0)  / 8192;
   const num2 = ((yOffset / 24.0 + num) - 1019.5) / 10.0;
   return num2;
 }
@@ -28,13 +26,13 @@ function LandblockToEW(landcell: number, xOffset: number) {
 }
 
 function NSToLandblock(landcell: number, ns: number) {
-  const num = (landcell & 0x00FF0000) / 8192;
+  const num = ((landcell & 0x00FF0000) >>> 0)  / 8192;
   const num2 = ((ns * 10.0 - num) + 1019.5) * 24.0;
   return num2;
 }
 
 function EWToLandblock(landcell: number, ew: number) {
-    const num = (landcell & 0xFF000000) / 2097152;
+    const num = ((landcell & 0xFF000000) >>> 0) / 2097152;
     const num2 = ((ew * 10.0 - num) + 1019.5) * 24.0;
     return num2;
 }
@@ -90,10 +88,6 @@ export default class Coordinates {
   }
 }
 
-function toHexStr(n: number) {
-  return ('00000000' + n.toString(16)).substr(-8);
-};
-
 Coordinates.prototype.toString = function() {
-  return `${Math.abs(this.NS).toFixed(3)}${(this.NS >= 0) ? "N" : "S"}, ${Math.abs(this.EW).toFixed(3)}${(this.EW >= 0) ? "E" : "W"}, ${(this.LocalZ / 240).toFixed(3)}Z [0x${toHexStr(this.LandCell)} ${this.LocalX.toFixed(3)}, ${this.LocalY.toFixed(3)}, ${this.LocalZ.toFixed(3)}]`;
+  return `${Math.abs(this.NS).toFixed(3)}${(this.NS >= 0) ? "N" : "S"}, ${Math.abs(this.EW).toFixed(3)}${(this.EW >= 0) ? "E" : "W"}, ${(this.LocalZ / 240).toFixed(3)}Z [0x${toHexStr(this.LandCell)} ${this.LocalX.toFixed(2)}, ${this.LocalY.toFixed(2)}, ${this.LocalZ.toFixed(2)}]`;
 }

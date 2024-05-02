@@ -8,6 +8,11 @@ precision highp sampler2DArray;
 // the height lookup table from dat region file
 uniform float heightTable[255];
 
+
+// array of floats, where index is texture atlas idx.
+// if 0, terrain texture is not loaded, if 1 is loaded.
+uniform float hasTerrainTexture[32];
+
 // terrain color lookup
 uniform vec3 terrainColors[32];
 
@@ -51,7 +56,7 @@ void main() {
   int tCode = int(texelFetch(terrainData, ivec2(cPos + vec2(0, 0)), 0).g * 255.0);
   vec3 tColor = terrainColors[tCode];
 
-  if (scale > 0.2) {
+  if (scale > 0.2 && hasTerrainTexture[tCode] >= 0.5) {
     FragColor = texture(terrainAtlas, vec3(cPos.xy, tCode));
   }
   else {
