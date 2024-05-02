@@ -43,6 +43,9 @@ uniform sampler2D terrainData;
 // texture array of all the terrain textures from the dat
 uniform sampler2DArray terrainAtlas;
 
+// texture array of all the terrain alpha overlay textures from the dat
+uniform sampler2DArray alphaAtlas;
+
 // current drawing scale
 uniform float scale;
 

@@ -22,7 +22,7 @@ function draw(dt: number) {
   renderer.update(dt);
   renderer.draw(dt);
 
-  const centerPos = new Vector3(window.innerWidth / 2.0, window.innerHeight / 2.0, 0);
+  const centerPos = new Vector3(canvas.width / 2.0, canvas.height / 2.0, 0);
   updateRoute(renderer.camera.ScreenToCoords(centerPos), renderer.camera.Zoom);
 
   window.requestAnimationFrame(draw);

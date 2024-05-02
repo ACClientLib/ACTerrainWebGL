@@ -7,6 +7,8 @@ function isTouchDevice() {
 }
 
 export class camera2d {
+  _zoom = 0.08;
+
   _didPinch = false;
   _mouseDown = false;
   _isDragging = false;
@@ -18,11 +20,15 @@ export class camera2d {
 
   canvas: HTMLCanvasElement;
   Position: Vector3 = new Vector3(0, 0, 0)
-  Zoom: number = 0.08
   ViewportSize: Vector3 = new Vector3(1, 1, 1)
   MapSize: Vector3 = new Vector3(255 * 192, 255 * 192, 700)
 
   mousePos = new Vector2(0, 0);
+
+  get Zoom() { return this._zoom; }
+  set Zoom(v) { this._zoom = v; }
+
+  get Scale() { return this.Zoom / settings.data.renderScale; }
 
   get ViewPortCenter() {
     return new Vector3(this.ViewportSize.x / 2.0, this.ViewportSize.y / 2.0, 1);
@@ -30,9 +36,10 @@ export class camera2d {
 
   get TranslationMatrix() {
     this.Position.z = 1;
-    const offset = this.ViewportSize.clone().divide(new Vector3(this.Zoom, this.Zoom, 1)).divide(new Vector3(2, 2, 1))
+    const zoomVec = new Vector3(this.Scale, this.Scale, 1);
+    const offset = this.ViewportSize.clone().divide(zoomVec).divide(new Vector3(2, 2, 1))
     return Matrix4.IDENTITY.clone()
-      .scale(new Vector3(this.Zoom, this.Zoom, this.Zoom))
+      .scale(zoomVec.clone())
       .translate(this.Position.clone().multiply(new Vector3(-1, -1, 1)).add(offset));
   }
 
@@ -254,7 +261,8 @@ export class camera2d {
 
   ScreenToWorld(screenPosition: Vector3) {
     screenPosition = screenPosition.clone()
-    var x = this.ViewPortCenter.clone().multiply(this.MapSize.clone().multiply(new Vector3(this.Zoom, this.Zoom, 1)))
+    const scale = (new Vector3(this.Zoom, this.Zoom, 1))
+    var x = this.ViewPortCenter.clone().multiply(this.MapSize.clone().multiply(scale))
     return screenPosition.transform(this.TranslationMatrix.clone().invert());
   }
 

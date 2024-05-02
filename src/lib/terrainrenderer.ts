@@ -6,8 +6,7 @@ import { TerrainVertSource } from '../shaders/terrain.vert'
 import { TerrainFragSource } from '../shaders/terrain.frag'
 
 import * as settings from '../settings'
-import { terrainColors } from '../data/terraincolors'
-import { terrainTextures } from '../data/terraintextures'
+import { terrainTextures, alphaTextures, terrainColors } from '../data/terrain'
 import { camera2d } from './cameras/camera2d'
 import gui from './gui'
 import { updateFrameRate } from '../tools/fpscounter'
@@ -58,7 +57,7 @@ export class TerrainRenderer {
     this.quality = quality
     this.camera = new camera2d(this.canvas)
 
-    glhelpers.resizeCanvasToDisplaySize(canvas)
+    this.#handleResize()
 
     if (!this.gl) {
       this.throwError("No Canvas / webgl2?")
@@ -69,6 +68,8 @@ export class TerrainRenderer {
     this.#setupInputs()
 
     this.#makeTextures()
+
+    this.#setConstantUniforms()
 
     // resize map to fit
     if (canvas.height > canvas.width) {
@@ -83,6 +84,10 @@ export class TerrainRenderer {
   }
 
   #addSettings() {
+    gui.add(settings.data, settings.labels.renderQuality, settings.data.minRenderQuality, settings.data.maxRenderQuality, 1)
+      .onChange(() => {
+        this.#handleResize()
+      })
     gui.add(settings.data, settings.labels.badWireframe)
     gui.add(settings.data, settings.labels.showLandblockLines)
     gui.add(settings.data, settings.labels.showLandcellLines)
@@ -93,7 +98,7 @@ export class TerrainRenderer {
     this.mousePos = new Vector2(0, 0);
 
     addEventListener("resize", () => {
-      glhelpers.resizeCanvasToDisplaySize(this.canvas)
+      this.#handleResize()
     })
 
     addEventListener("mousemove", (event) => {
@@ -141,18 +146,32 @@ export class TerrainRenderer {
     this.#pixelSizeLoc = this.gl.getUniformLocation(this.program!, 'pixelSize');
   }
 
+  #setConstantUniforms() {
+    for (var i = 0; i < this.heightTable.length; i++) {
+      const heightTableLoc = this.gl.getUniformLocation(this.program!, `heightTable[${i}]`);
+      this.gl.uniform1f(heightTableLoc, this.heightTable[i]);
+    }
+    for (var i = 0; i < terrainColors.length; i++) {
+      const terrainColorLoc = this.gl.getUniformLocation(this.program!, `terrainColors[${i}]`);
+      this.gl.uniform3f(terrainColorLoc, terrainColors[i].x, terrainColors[i].y, terrainColors[i].z);
+    }
+
+    this.gl.uniform1i(this.#terrainDataLoc, this.#dataTexture.textureUnit);
+    this.gl.uniform1i(this.#terrainAtlasLoc, this.#terrainTextureArray.textureUnit);
+  }
+
   #makeTextures() {
     this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1)
-    //this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1)
+    this.#alphaTextureArray = new TextureArray(this.gl, alphaTextures, new Vector2(512, 512), 2)
 
-    this.#dataTexture = new Texture(this.gl, "textures/terrain.png", new Vector2(2041, 2041), 0);
+    this.#dataTexture = new Texture(this.gl, "textures/terrain.png", new Vector2(2041, 2041), 0)
     this.#dataTexture.load(() => {
       this.#onready()
     })
   }
 
   #onready() {
-    glhelpers.resizeCanvasToDisplaySize(this.canvas)
+    this.#handleResize()
     document.body.classList.add('loaded')
 
     this.#terrainTextureArray.load((idx) => {
@@ -160,6 +179,10 @@ export class TerrainRenderer {
         this.hasTerrainTexture[idx] = 1;
       }
     })
+  }
+
+  #handleResize() {
+    glhelpers.resizeCanvasToDisplaySize(this.canvas, settings.data.maxRenderQuality + 1 - settings.data.renderQuality)
   }
 
   #buildData() {
@@ -192,9 +215,6 @@ export class TerrainRenderer {
 
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
-    this.gl.uniform1i(this.#terrainDataLoc, this.#dataTexture.textureUnit);
-    this.gl.uniform1i(this.#terrainAtlasLoc, this.#terrainTextureArray.textureUnit);
-
     this.gl.uniform1f(this.#scaleLoc!, this.camera.Zoom);
     this.gl.uniformMatrix4fv(this.#xWorldLoc!, false, this.camera.Transform);
     this.gl.uniform4f(this.#renderViewLoc!, 0, 0, 255, 255);
@@ -204,23 +224,14 @@ export class TerrainRenderer {
 
     const pixelSize = ((this.canvas.width > this.canvas.height ? this.canvas.width : this.canvas.height) / this.camera.MapSize.x) /  this.camera.Zoom;
     this.gl.uniform1f(this.#pixelSizeLoc, pixelSize);
-    
-    // TODO: put this in a 1d texture array?
-    for (var i = 0; i < this.heightTable.length; i++) {
-      const heightTableLoc = this.gl.getUniformLocation(this.program!, `heightTable[${i}]`);
-      this.gl.uniform1f(heightTableLoc, this.heightTable[i]);
-    }
-    for (var i = 0; i < terrainColors.length; i++) {
-      const terrainColorLoc = this.gl.getUniformLocation(this.program!, `terrainColors[${i}]`);
-      this.gl.uniform3f(terrainColorLoc, terrainColors[i].x, terrainColors[i].y, terrainColors[i].z);
-    }
+
     for (var i = 0; i < this.hasTerrainTexture.length; i++) {
       const hasTerrainTextureLoc = this.gl.getUniformLocation(this.program!, `hasTerrainTexture[${i}]`);
       this.gl.uniform1f(hasTerrainTextureLoc, this.hasTerrainTexture[i]);
     }
 
     this.overlay.innerHTML = `
-    Coords: ${this.camera.ScreenToCoords(new Vector3(this.mousePos.x, this.mousePos.y, 1))}<br />
+    Coords: ${this.camera.ScreenToCoords(new Vector3(this.mousePos.x / settings.data.renderScale, this.mousePos.y / settings.data.renderScale, 1))}<br />
     FPS: ${this.#fps}<br />
     `;
   }

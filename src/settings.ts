@@ -4,7 +4,8 @@ const labels = {
   minZoomForTextures: 'minZoomForTextures',
   showLandcellLines: 'showLandcellLines',
   showLandblockLines: 'showLandblockLines',
-  badWireframe: 'badWireframe'
+  badWireframe: 'badWireframe',
+  renderQuality: 'renderQuality'
 }
 
 const data =  {
@@ -13,10 +14,16 @@ const data =  {
   minZoomForTextures: 0.02,
   showLandcellLines: false,
   showLandblockLines: false,
-  badWireframe: false
+  badWireframe: false,
+  maxRenderQuality: 10,
+  minRenderQuality: 1,
+  renderQuality: 10,
+  get renderScale() {
+    return data.maxRenderQuality + 1 - data.renderQuality;
+  },
 }
 
 export {
   data,
-  labels
+  labels,
 };

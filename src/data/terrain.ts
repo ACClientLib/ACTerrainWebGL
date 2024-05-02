@@ -1,4 +1,53 @@
 import { Vector3 } from '@math.gl/core'
+
+export const alphaTextures = [
+	"textures/05001371.png",
+	"textures/0500143E.png",
+	"textures/0500143F.png",
+	"textures/05001440.png",
+	"textures/05001441.png",
+	"textures/0500168E.png",
+	"textures/0500168C.png",
+	"textures/0500168D.png",
+	"textures/0500168D.png",
+]
+
+export const terrainTextures = [
+	"textures/0500145C.png",
+	"textures/05001459.png",
+	"textures/05001468.png",
+	"textures/05002F6F.png",
+	"textures/05001467.png",
+	"textures/05001462.png",
+	"textures/05001463.png",
+	"textures/05001465.png",
+	"textures/0500145B.png",
+	"textures/05001457.png",
+	"textures/0500145D.png",
+	"textures/0500145F.png",
+	"textures/0500145E.png",
+	"textures/050014A7.png",
+	"textures/0500145A.png",
+	"textures/05001464.png",
+	"textures/0500146A.png",
+	"textures/05001461.png",
+	"textures/0500146C.png",
+	"textures/05001469.png",
+	"textures/0500146B.png",
+	"textures/05001466.png",
+	"textures/0500146A.png",
+	"textures/05001827.png",
+	"textures/0500145C.png",
+	"textures/0500181F.png",
+	"textures/05001924.png",
+	"textures/05001900.png",
+	"textures/05001C3A.png",
+	"textures/05001C3B.png",
+	"textures/05001C3C.png",
+	"textures/0500145C.png",	
+	"textures/05001458.png",
+]
+
 export const terrainColors = [
   new Vector3(0.4, 0.3490196, 0.282353),
   new Vector3(0.3490196, 0.3686275, 0.1843137),
@@ -33,4 +82,4 @@ export const terrainColors = [
   new Vector3(0.2745098, 0.2235294, 0.2196078),
   new Vector3(0.4, 0.3490196, 0.282353),
   new Vector3(0.4392157, 0.454902, 0.4117647),
-  ];
+]
