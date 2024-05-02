@@ -5,10 +5,13 @@ import { TextureArray } from './texturearray'
 import { TerrainVertSource } from '../shaders/terrain.vert'
 import { TerrainFragSource } from '../shaders/terrain.frag'
 
+import * as settings from '../settings'
 import { terrainColors } from '../data/terraincolors'
 import { terrainTextures } from '../data/terraintextures'
 import { camera2d } from './cameras/camera2d'
+import gui from './gui'
 import { updateFrameRate } from '../tools/fpscounter'
+import * as codes from '../tools/codes'
 
 export class TerrainRenderer {
   canvas: HTMLCanvasElement
@@ -23,15 +26,16 @@ export class TerrainRenderer {
 
   #fps = 0
 
-  #viewProjection: Matrix4 = new Matrix4()
-  #world: Matrix4 = Matrix4.IDENTITY.clone()
-
   // uniform locations
   #xWorldLoc : WebGLUniformLocation | null = null;
   #scaleLoc : WebGLUniformLocation | null = null;
   #renderViewLoc : WebGLUniformLocation | null = null;
   #terrainDataLoc: WebGLUniformLocation | null = null;
   #terrainAtlasLoc: WebGLUniformLocation | null = null;
+  #minZoomForTexturesLoc: WebGLUniformLocation | null = null;
+  #showLandcellLinesLoc: WebGLUniformLocation | null = null;
+  #showLandblockLinesLoc: WebGLUniformLocation | null = null;
+  #pixelSizeLoc: WebGLUniformLocation | null = null;
 
   #terrainTextureArray: TextureArray;
   hasTerrainTexture: number[] = []
@@ -56,8 +60,9 @@ export class TerrainRenderer {
       this.throwError("No Canvas / webgl2?");
     }
 
-    this.setupGL()
-    this.setupInputs()
+    this.#addSettings()
+    this.#setupGL()
+    this.#setupInputs()
 
     this.#makeDataTexture()
     this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, (idx) => {
@@ -75,7 +80,14 @@ export class TerrainRenderer {
     this.camera.CenterOnVec(this.camera.MapSize.clone().divide(new Vector3(2, 2, 1)))
   }
 
-  setupInputs() {
+  #addSettings() {
+    gui.add(settings.data, settings.labels.badWireframe)
+    gui.add(settings.data, settings.labels.showLandblockLines)
+    gui.add(settings.data, settings.labels.showLandcellLines)
+    gui.add(settings.data, settings.labels.minZoomForTextures, 0.0001, 5, 0.005)
+  }
+
+  #setupInputs() {
     this.mousePos = new Vector2(0, 0);
 
     addEventListener("resize", () => {
@@ -86,9 +98,14 @@ export class TerrainRenderer {
       this.mousePos.x = event.clientX
       this.mousePos.y = event.clientY
     })
+
+    codes.setupCodes()
+    codes.addCode('idkfa', () => {
+      console.log('idkfa')
+    });
   }
 
-  setupGL() {
+  #setupGL() {
     if (!this.#createShaders()) {
       this.throwError("Unable to create shaders!")
       return false;
@@ -116,6 +133,10 @@ export class TerrainRenderer {
     this.#renderViewLoc = this.gl.getUniformLocation(this.program!, 'renderView');
     this.#terrainDataLoc = this.gl.getUniformLocation(this.program!, "terrainData");
     this.#terrainAtlasLoc = this.gl.getUniformLocation(this.program!, "terrainAtlas");
+    this.#minZoomForTexturesLoc = this.gl.getUniformLocation(this.program!, 'minZoomForTextures');
+    this.#showLandcellLinesLoc = this.gl.getUniformLocation(this.program!, 'showLandcellLines');
+    this.#showLandblockLinesLoc = this.gl.getUniformLocation(this.program!, 'showLandblockLines');
+    this.#pixelSizeLoc = this.gl.getUniformLocation(this.program!, 'pixelSize');
   }
 
   #makeDataTexture() {
@@ -145,6 +166,7 @@ export class TerrainRenderer {
   }
 
   #onready() {
+    glhelpers.resizeCanvasToDisplaySize(this.canvas)
     document.body.classList.add('loaded')
   }
 
@@ -184,6 +206,12 @@ export class TerrainRenderer {
     this.gl.uniform1f(this.#scaleLoc!, this.camera.Zoom);
     this.gl.uniformMatrix4fv(this.#xWorldLoc!, false, this.camera.Transform);
     this.gl.uniform4f(this.#renderViewLoc!, 0, 0, 255, 255);
+    this.gl.uniform1f(this.#minZoomForTexturesLoc!, settings.data.minZoomForTextures);
+    this.gl.uniform1f(this.#showLandcellLinesLoc, settings.data.showLandcellLines ? 1.0 : 0.0)
+    this.gl.uniform1f(this.#showLandblockLinesLoc, settings.data.showLandblockLines ? 1.0 : 0.0)
+
+    const pixelSize = ((this.canvas.width > this.canvas.height ? this.canvas.width : this.canvas.height) / this.camera.MapSize.x) /  this.camera.Zoom;
+    this.gl.uniform1f(this.#pixelSizeLoc, pixelSize);
     
     // TODO: put this in a 1d texture array?
     for (var i = 0; i < this.heightTable.length; i++) {
@@ -209,7 +237,12 @@ export class TerrainRenderer {
     const numVerts = 8 * 8 * 2 * 3; // 8 cells per lb, 2 tris per cell
     const numInstances = 255 * 255; // one for each landblock
 
-    this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, numVerts, numInstances);
+    if (settings.data.badWireframe) {
+      this.gl.drawArraysInstanced(this.gl.LINE_STRIP, 0, numVerts, numInstances);
+    }
+    else {
+      this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, numVerts, numInstances);
+    }
   }
 
   throwError(message: string) {

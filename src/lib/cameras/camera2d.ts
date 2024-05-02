@@ -1,4 +1,5 @@
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
+import * as settings from '../../settings'
 import Coordinates from "../coordinates";
 
 function isTouchDevice() {
@@ -83,12 +84,15 @@ export class camera2d {
           );
 
           if (this.lastDistance != 0) {
+            let newZoom = 0
             if (this.lastDistance > this.distance) {
-              const newZoom = this.Zoom / Math.pow(2, (this.lastDistance - this.distance) * 0.0075);
-              this.Zoom = Math.max(0.002, Math.min(200, newZoom));
+              newZoom = this.Zoom / Math.pow(2, (this.lastDistance - this.distance) * 0.0075);
             } else if (this.lastDistance < this.distance) {
-              const newZoom = this.Zoom * Math.pow(2, (this.distance - this.lastDistance) * 0.0075);
-              this.Zoom = Math.max(0.002, Math.min(200, newZoom));
+              newZoom = this.Zoom * Math.pow(2, (this.distance - this.lastDistance) * 0.0075);
+            }
+
+            if (newZoom > 0) {
+              this.Zoom = this.#capZoom(newZoom)
             }
           }
 
@@ -124,7 +128,7 @@ export class camera2d {
         // multiply the wheel movement by the current zoom level
         // so we zoom less when zoomed in and more when zoomed out
         const newZoom = this.Zoom * Math.pow(2, event.deltaY * -0.005);
-        this.Zoom = Math.max(0.002, Math.min(200, newZoom));
+        this.Zoom = this.#capZoom(newZoom)
         
         // position after zooming
         const postZoom = this.Transform.clone().invert().transform(clipPos)
@@ -134,6 +138,10 @@ export class camera2d {
         this.Position.y += preZoom[1] - postZoom[1];
       });
     }
+  }
+
+  #capZoom(zoom: number) {
+    return Math.max(settings.data.minZoom, Math.min(settings.data.maxZoom, zoom));
   }
 
   update(dt: number) {
