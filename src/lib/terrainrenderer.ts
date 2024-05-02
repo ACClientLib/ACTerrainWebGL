@@ -200,7 +200,7 @@ export class TerrainRenderer {
     }
 
     this.overlay.innerHTML = `
-    Coords: ${this.camera.ScreenToCoords(new Vector3(window.innerWidth / 2.0, window.innerHeight / 2.0, 0))}<br />
+    Coords: ${this.camera.ScreenToCoords(new Vector3(this.mousePos.x, this.mousePos.y, 1))}<br />
     FPS: ${this.#fps}<br />
     `;
   }
