@@ -28,9 +28,18 @@ export function updateRoute(coords: Coordinates, zoom: number) {
 
 export function parseRoute(route: string) { 
   const parts = route.split(",");
-  const coords = Coordinates.FromCoordinates(parseFloat(parts[0]), parseFloat(parts[1]), 0);
+  if (parts.length != 3) return;
+
+  const zoom = parseFloat(parts[2]);
+  let ns = parseFloat(parts[0]);
+  let ew = parseFloat(parts[1]);
+  
+  if (parts[0].toLowerCase().includes('s')) ns *= -1;
+  if (parts[1].toLowerCase().includes('w')) ew *= -1;
+
+  const coords = Coordinates.FromCoordinates(ns, ew, 0);
   return {
     coords,
-    zoom: parseFloat(parts[2])
+    zoom
   }
 }
