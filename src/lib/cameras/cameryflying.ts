@@ -147,7 +147,7 @@ export class CameraFlying extends BaseCamera {
   }
 
   private handleKeyboardInput(dt: number) {
-    const moveDistance = (this._moveSpeed / 10000) * dt;
+    const moveDistance = (this._moveSpeed / 50000) * dt;
 
     // WASD movement
     if (this._keys['keyw'] || this._keys['arrowup']) {
