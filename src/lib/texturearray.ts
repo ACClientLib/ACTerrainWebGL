@@ -6,12 +6,16 @@ export class TextureArray {
   texture: WebGLTexture | null
   textureUnit: number
   textureSize: Vector2
+  textureWrap: number
+  minFilter: number
   
-  constructor(gl: WebGL2RenderingContext, imageSources: string[], textureSize: Vector2, textureUnit: number) {
+  constructor(gl: WebGL2RenderingContext, imageSources: string[], textureSize: Vector2, textureUnit: number, textureWrap: number, minFilter: number) {
     this.imageSources = imageSources;
     this.gl = gl;
     this.textureUnit = textureUnit;
     this.textureSize = textureSize;
+    this.textureWrap = textureWrap;
+    this.minFilter = minFilter;
 
     this.texture = gl.createTexture()
 
@@ -34,6 +38,10 @@ export class TextureArray {
       image.addEventListener('load', function() {
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, $this.texture);
         gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, idx, $this.textureSize.x, $this.textureSize.y, 1, gl.RGBA, gl.UNSIGNED_BYTE, image);
+
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, $this.textureWrap);
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, $this.textureWrap);
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, $this.minFilter);
 
         gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
 
