@@ -13,8 +13,8 @@ const hash = (window.location.hash || "").replace("#", "")
 if (hash.length > 0) {
   const route = parseRoute(hash);
   if (route) {
-    renderer.camera.Zoom = route.zoom
-    renderer.camera.CenterOnCoords(route.coords)
+    //renderer.currentCamera.Zoom = route.zoom
+    //renderer.currentCamera.CenterOnCoords(route.coords)
   }
 }
 
@@ -23,7 +23,7 @@ function draw(dt: number) {
   renderer.draw(dt);
 
   const centerPos = new Vector3(canvas.width / 2.0, canvas.height / 2.0, 0);
-  updateRoute(renderer.camera.ScreenToCoords(centerPos), renderer.camera.Zoom);
+  //updateRoute(renderer.currentCamera.ScreenToCoords(centerPos), renderer.currentCamera.Zoom);
 
   window.requestAnimationFrame(draw);
 }
