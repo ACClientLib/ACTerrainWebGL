@@ -63,7 +63,7 @@ void main() {
 
   // add landblock offsets
   cellX = cellX + (float(lbx) * 192.0);
-  cellY = (255.0 * 192.0) - (cellY + 24. + (float(lby) * 192.0));
+  cellY = (255.0 * 192.0) - (cellY + cellSize + (float(lby) * 192.0));
   
   float split = step(splitDir * 0.00000000023283064, 0.5);
   int vIdm = gl_VertexID % 6;
@@ -75,19 +75,19 @@ void main() {
       v = vec2(cellX, cellY);
     }
     else if (vIdm == 1) {
-      v = vec2(cellX + 24.0, cellY);
+      v = vec2(cellX + cellSize, cellY);
     }
     else if (vIdm == 2) {
-      v = vec2(cellX, cellY + 24.0);
+      v = vec2(cellX, cellY + cellSize);
     }
     else if (vIdm == 3) {
-      v = vec2(cellX + 24.0, cellY + 24.0);
+      v = vec2(cellX + cellSize, cellY + cellSize);
     }
     else if (vIdm == 4) {
-      v = vec2(cellX, cellY + 24.0);
+      v = vec2(cellX, cellY + cellSize);
     }
     else if (vIdm == 5) {
-      v = vec2(cellX + 24.0, cellY);
+      v = vec2(cellX + cellSize, cellY);
     }
   }
   else  {
@@ -95,19 +95,19 @@ void main() {
       v = vec2(cellX, cellY);
     }
     else if (vIdm == 1) {
-      v = vec2(cellX + 24.0, cellY);
+      v = vec2(cellX + cellSize, cellY);
     }
     else if (vIdm == 2) {
-      v = vec2(cellX + 24.0, cellY + 24.0);
+      v = vec2(cellX + cellSize, cellY + cellSize);
     }
     else if (vIdm == 3) {
       v = vec2(cellX, cellY);
     }
     else if (vIdm == 4) {
-      v = vec2(cellX + 24.0, cellY + 24.0);
+      v = vec2(cellX + cellSize, cellY + cellSize);
     }
     else if (vIdm == 5) {
-      v = vec2(cellX, cellY + 24.0);
+      v = vec2(cellX, cellY + cellSize);
     }
   }
 

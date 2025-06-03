@@ -32,6 +32,7 @@ export class TerrainRenderer {
   #renderViewLoc : WebGLUniformLocation | null = null
   #terrainDataLoc: WebGLUniformLocation | null = null
   #terrainAtlasLoc: WebGLUniformLocation | null = null
+  #alphaAtlasLoc: WebGLUniformLocation | null = null
   #minZoomForTexturesLoc: WebGLUniformLocation | null = null
   #showLandcellLinesLoc: WebGLUniformLocation | null = null
   #showLandblockLinesLoc: WebGLUniformLocation | null = null
@@ -128,18 +129,18 @@ export class TerrainRenderer {
     // Tell WebGL how to convert from clip space to pixels
     this.gl.viewport(0, 0, this.gl.canvas.width, this.gl.canvas.height);
 
-    // Clear the canvas
-    this.gl.clearColor(0, 0, 0, 0);
-    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-
     // Tell it to use our program (pair of shaders)
     this.gl.useProgram(this.program);
+
+    this.gl.enable(this.gl.BLEND);
+    this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
 
     this.#xWorldLoc = this.gl.getUniformLocation(this.program!, 'xWorld');
     this.#scaleLoc = this.gl.getUniformLocation(this.program!, 'scale');
     this.#renderViewLoc = this.gl.getUniformLocation(this.program!, 'renderView');
     this.#terrainDataLoc = this.gl.getUniformLocation(this.program!, "terrainData");
     this.#terrainAtlasLoc = this.gl.getUniformLocation(this.program!, "terrainAtlas");
+    this.#alphaAtlasLoc = this.gl.getUniformLocation(this.program!, "alphaAtlas");
     this.#minZoomForTexturesLoc = this.gl.getUniformLocation(this.program!, 'minZoomForTextures');
     this.#showLandcellLinesLoc = this.gl.getUniformLocation(this.program!, 'showLandcellLines');
     this.#showLandblockLinesLoc = this.gl.getUniformLocation(this.program!, 'showLandblockLines');
@@ -158,11 +159,12 @@ export class TerrainRenderer {
 
     this.gl.uniform1i(this.#terrainDataLoc, this.#dataTexture.textureUnit);
     this.gl.uniform1i(this.#terrainAtlasLoc, this.#terrainTextureArray.textureUnit);
+    this.gl.uniform1i(this.#alphaAtlasLoc, this.#alphaTextureArray.textureUnit);
   }
 
   #makeTextures() {
-    this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1)
-    this.#alphaTextureArray = new TextureArray(this.gl, alphaTextures, new Vector2(512, 512), 2)
+    this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1, this.gl.REPEAT, this.gl.NEAREST_MIPMAP_NEAREST),
+    this.#alphaTextureArray = new TextureArray(this.gl, alphaTextures, new Vector2(512, 512), 2, this.gl.REPEAT, this.gl.NEAREST_MIPMAP_NEAREST)
 
     this.#dataTexture = new Texture(this.gl, "textures/terrain.png", new Vector2(2041, 2041), 0)
     this.#dataTexture.load(() => {
@@ -174,11 +176,15 @@ export class TerrainRenderer {
     this.#handleResize()
     document.body.classList.add('loaded')
 
-    this.#terrainTextureArray.load((idx) => {
-      if (idx >= 0) {
-        this.hasTerrainTexture[idx] = 1;
+    this.#alphaTextureArray.load((idx) => {
+      if (idx < 0) {
+        this.#terrainTextureArray.load((idx) => {
+          if (idx >= 0) {
+            this.hasTerrainTexture[idx] = 1;
+          }
+        })
       }
-    })
+    });
   }
 
   #handleResize() {
@@ -207,6 +213,7 @@ export class TerrainRenderer {
   }
 
   update(dt: number) {
+
     this.#fps = updateFrameRate()
     this.camera.ViewportSize.x = this.canvas.width;
     this.camera.ViewportSize.y = this.canvas.height;
@@ -214,6 +221,10 @@ export class TerrainRenderer {
     this.camera.update(dt);
 
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+    // Clear the canvas
+    this.gl.clearColor(1, 0, 0, 1);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
     this.gl.uniform1f(this.#scaleLoc!, this.camera.Zoom);
     this.gl.uniformMatrix4fv(this.#xWorldLoc!, false, this.camera.Transform);
