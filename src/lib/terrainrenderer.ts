@@ -182,7 +182,7 @@ export class TerrainRenderer {
         this.flyingCamera.Position = new Vector3(pos2D.x, height, pos2D.y)
         
         // Look down towards the terrain
-        this.flyingCamera.SetRotation(0, -Math.PI / 6, 0)
+        this.flyingCamera.SetRotation(0, Math.PI / 2, 0)
       }
       
       console.log('Switched to Flying Camera')

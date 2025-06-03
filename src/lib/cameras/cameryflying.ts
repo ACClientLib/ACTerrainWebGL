@@ -142,6 +142,7 @@ export class CameraFlying extends BaseCamera {
   }
 
   private handleKeyboardInput(dt: number) {
+    if (this.renderer.currentCamera != this) return;
     const moveDistance = (this._moveSpeed / 50000) * dt;
 
     // WASD movement
@@ -152,10 +153,10 @@ export class CameraFlying extends BaseCamera {
       this.Position.subtract(this._forward.clone().scale(moveDistance));
     }
     if (this._keys['keya'] || this._keys['arrowleft']) {
-      this.Position.subtract(this._right.clone().scale(moveDistance));
+      this.Position.add(this._right.clone().scale(moveDistance));
     }
     if (this._keys['keyd'] || this._keys['arrowright']) {
-      this.Position.add(this._right.clone().scale(moveDistance));
+      this.Position.subtract(this._right.clone().scale(moveDistance));
     }
 
     // Vertical movement (Z-axis, since Z is up)
