@@ -223,7 +223,7 @@ export class TerrainRenderer {
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
     // Clear the canvas
-    this.gl.clearColor(0, 0, 0, 1);
+    this.gl.clearColor(27/255, 45/255, 135/255, 1);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
     this.gl.uniform1f(this.#scaleLoc!, this.camera.Zoom);
