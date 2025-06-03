@@ -114,6 +114,7 @@ export class Camera2D extends BaseCamera {
   }
 
   private handlePinch(event: TouchEvent) {
+    if (this.renderer.currentCamera != this) return;
     const touch0 = new Vector2(event.touches[0].clientX, event.touches[0].clientY);
     const touch1 = new Vector2(event.touches[1].clientX, event.touches[1].clientY);
 
@@ -139,6 +140,7 @@ export class Camera2D extends BaseCamera {
   }
 
   private handleWheel(event: WheelEvent) {
+    if (this.renderer.currentCamera != this) return;
     const clipPos = this.getClipSpaceMousePosition(event.clientX, event.clientY);
     const preZoom = this.Transform.clone().invert().transform(clipPos);
 
@@ -152,6 +154,7 @@ export class Camera2D extends BaseCamera {
   }
 
   protected handleDrag(delta: Vector2) {
+    if (this.renderer.currentCamera != this) return;
     const p = delta.divide(new Vector2(this.Zoom, this.Zoom));
     this.Position.x += p.x;
     this.Position.y += p.y;
@@ -162,6 +165,7 @@ export class Camera2D extends BaseCamera {
   }
 
   update(dt: number) {
+    if (this.renderer.currentCamera != this) return;
     if (!this._mouseDown && this._isDragging) {
       this._isDragging = false;
     }
@@ -169,12 +173,14 @@ export class Camera2D extends BaseCamera {
 
   // Original 2D camera methods
   AdjustZoom(amount: number, position: Vector3) {
+    if (this.renderer.currentCamera != this) return;
     const za = 0.1;
     amount = amount < 0 ? za : -za;
     this.Zoom += this.Zoom * amount;
   }
 
   MoveCamera(cameraMovement: Vector3, clampToMap = false) {
+    if (this.renderer.currentCamera != this) return;
     const newPosition = this.Position.clone().add(cameraMovement);
     if (clampToMap) {
       this.Position = this.MapClampedPosition(newPosition);

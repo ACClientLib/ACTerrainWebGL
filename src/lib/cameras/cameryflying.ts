@@ -3,21 +3,21 @@ import { BaseCamera } from "./basecamera";
 
 // Flying 3D Camera implementation
 export class CameraFlying extends BaseCamera {
-  private _yaw = 0;     // Rotation around Y axis (left/right)
+  private _yaw = 0;     // Rotation around Z axis (left/right, since Y is forward)
   private _pitch = 0;   // Rotation around X axis (up/down)
-  private _roll = 0;    // Rotation around Z axis (banking)
+  private _roll = 0;    // Rotation around Y axis (banking)
   
   private _fov = 45;    // Field of view in degrees
   private _near = 0.1;
   private _far = 100000000;
   
   private _moveSpeed = 100;
-  private _rotateSpeed = 2;
-  private _mouseSensitivity = 0.002;
+  private _rotateSpeed = 0.00001;
+  private _mouseSensitivity = 0.005; // Increased slightly as per previous suggestion
   
-  private _forward = new Vector3(0, 0, -1);
+  private _forward = new Vector3(0, -1, 0); // Y-forward
   private _right = new Vector3(1, 0, 0);
-  private _up = new Vector3(0, 1, 0);
+  private _up = new Vector3(0, 0, 1); // Z-up
   
   private _keys: { [key: string]: boolean } = {};
 
@@ -108,12 +108,16 @@ export class CameraFlying extends BaseCamera {
   }
 
   private handleMouseLook(deltaX: number, deltaY: number) {
-    this.Yaw += deltaX * this._mouseSensitivity;
-    this.Pitch -= deltaY * this._mouseSensitivity;
+    if (this.renderer.currentCamera != this) return;
+    const maxDelta = 100;
+    deltaX = Math.max(-maxDelta, Math.min(maxDelta, deltaX));
+    deltaY = Math.max(-maxDelta, Math.min(maxDelta, deltaY));
+    this.Yaw -= deltaX * this._mouseSensitivity;
+    this.Pitch += deltaY * this._mouseSensitivity;
   }
 
   protected handleDrag(delta: Vector2) {
-    // For flying camera, dragging rotates the view
+    if (this.renderer.currentCamera != this) return;
     if (this._isDragging) {
       this.Yaw += delta.x * this._mouseSensitivity;
       this.Pitch -= delta.y * this._mouseSensitivity;
@@ -121,28 +125,19 @@ export class CameraFlying extends BaseCamera {
   }
 
   private updateVectors() {
-    // Calculate forward vector from yaw and pitch
-    this._forward.x = Math.cos(this._yaw) * Math.cos(this._pitch);
-    this._forward.y = Math.sin(this._pitch);
-    this._forward.z = Math.sin(this._yaw) * Math.cos(this._pitch);
-    this._forward.normalize();
+    // Rotation order: yaw (Z-axis), pitch (X-axis), roll (Y-axis)
+    const rotationMatrix = new Matrix4()
+      .rotateZ(this._yaw)  // Yaw around Z-axis (since Y is forward)
+      .rotateX(this._pitch) // Pitch around X-axis
+      .rotateY(this._roll); // Roll around Y-axis (forward axis)
 
-    // Calculate right vector (cross product of forward and world up)
-    const worldUp = new Vector3(0, 1, 0);
-    this._right = this._forward.clone().cross(worldUp).normalize();
-
-    // Calculate up vector (cross product of right and forward)
-    this._up = this._right.clone().cross(this._forward).normalize();
-
-    // Apply roll rotation to up and right vectors
-    if (this._roll !== 0) {
-      const rollMatrix = new Matrix4().rotateZ(this._roll);
-      this._up = this._up.clone().transform(rollMatrix);
-      this._right = this._right.clone().transform(rollMatrix);
-    }
+    this._forward = new Vector3(0, -1, 0).transform(rotationMatrix).normalize();
+    this._right = new Vector3(1, 0, 0).transform(rotationMatrix).normalize();
+    this._up = new Vector3(0, 0, 1).transform(rotationMatrix).normalize();
   }
 
   update(dt: number) {
+    if (this.renderer.currentCamera != this) return;
     this.handleKeyboardInput(dt);
   }
 
@@ -163,7 +158,7 @@ export class CameraFlying extends BaseCamera {
       this.Position.add(this._right.clone().scale(moveDistance));
     }
 
-    // Vertical movement
+    // Vertical movement (Z-axis, since Z is up)
     if (this._keys['space']) {
       this.Position.add(this._up.clone().scale(moveDistance));
     }
@@ -180,11 +175,10 @@ export class CameraFlying extends BaseCamera {
     }
   }
 
-  // Utility methods for flying camera
   LookAt(target: Vector3) {
     const direction = target.clone().subtract(this.Position).normalize();
-    this._yaw = Math.atan2(direction.z, direction.x);
-    this._pitch = Math.asin(direction.y);
+    this._yaw = Math.atan2(direction.x, -direction.y); // Y-forward
+    this._pitch = Math.asin(direction.z); // Z-up
     this.updateVectors();
   }
 
@@ -198,7 +192,6 @@ export class CameraFlying extends BaseCamera {
   GetRight() { return this._right.clone(); }
   GetUp() { return this._up.clone(); }
 
-  // Screen/World conversion methods (simplified for 3D)
   WorldToScreen(worldPosition: Vector3): Vector3 {
     const clipSpace = worldPosition.clone().transform(this.Transform);
     const ndc = clipSpace.clone().scale(1 / 1);
@@ -212,7 +205,6 @@ export class CameraFlying extends BaseCamera {
   ScreenToWorldRay(screenX: number, screenY: number): { origin: Vector3, direction: Vector3 } {
     const clipPos = this.getClipSpaceMousePosition(screenX, screenY);
     
-    // Create ray from camera through the clicked point
     const nearPoint = new Vector3(clipPos.x, clipPos.y, -1);
     const farPoint = new Vector3(clipPos.x, clipPos.y, 1);
     
