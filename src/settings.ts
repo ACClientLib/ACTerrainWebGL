@@ -13,7 +13,7 @@ const data =  {
   maxZoom: 1000,
   minZoomForTextures: 0.02,
   showLandcellLines: false,
-  showLandblockLines: true,
+  showLandblockLines: false,
   badWireframe: false,
   maxRenderQuality: 10,
   minRenderQuality: 1,
