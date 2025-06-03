@@ -384,7 +384,6 @@ export class TerrainRenderer {
       // Flying camera specific uniforms
       this.gl.uniform1f(this.#scaleLoc!, 1.0); 
       this.gl.uniform1f(this.#pixelSizeLoc, 1.0);
-      this.gl.uniform1i(this.#cameraMode, 1);console.log(this.currentCamera.Transform.toString());
     }
 
     // Set terrain texture availability
