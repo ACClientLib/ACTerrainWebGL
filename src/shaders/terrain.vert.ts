@@ -17,6 +17,8 @@ out vec3 wpos;  // World-space position
 out vec4 color;
 out vec2 cellUV; // local cell UV
 flat out ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
+flat out uint paletteCode;
+flat out int baseTerrainCode;
 
 const int sideCount = 8;
 const int numVertsPerCell = 6;
@@ -27,6 +29,12 @@ const float mapSize = 255.0 * 192.0; // Total map size
 float getHeight(vec2 pos) {
   int heightIdx = int(texelFetch(terrainData, ivec2(pos.xy * 255. * 8.), 0).r * 255.);
   return heightTable[heightIdx] / maxHeight;
+}
+
+uint getPalCode(int r1, int r2, int r3, int r4, int t1, int t2, int t3, int t4) {
+  int terrainBits = (t1 << 15) | (t2 << 10) | (t3 << 5) | t4;
+  int roadBits = (r1 << 26) | (r2 << 24) | (r3 << 22) | (r4 << 20);
+  return uint((1 << 28) | roadBits | terrainBits);
 }
 
 void main() {
@@ -62,16 +70,13 @@ void main() {
   cellX = cellX + (float(lbx) * 192.0);
   cellY = mapSize - (cellY + cellSize + (float(lby) * 192.0)); // Flip Y to match original orientation
 
-  // Triangle splitting logic
   uint seedA = uint((lbx * 8 + cellIdxD) * 214614067);
   uint seedB = uint((lbx * 8 + cellIdxD) * 1109124029);
   uint magicA = seedA + 1813693831u;
   uint magicB = seedB;
   float splitDir = float(uint(lby * 8 + cellIdyD) * magicA - magicB - 1369149221u);
-  float split = step(splitDir * 0.00000000023283064, 0.5);
   int vIdm = gl_VertexID % 6;
 
-  // Vertex position based on split direction
   vec2 v = vec2(0.0, 0.0);
   vec2 uv = vec2(0.0, 0.0);
   if (splitDir * 2.3283064e-10 >= 0.5) {
@@ -123,6 +128,15 @@ void main() {
   cellUV = uv;
   terrainCell = ivec2(lbx * sideCount + cellIdxD,
       2040 - (lby * sideCount + cellIdyD + 1));
+
+  vec4 p1 = texelFetch(terrainData, terrainCell + ivec2(0, 1), 0);
+  vec4 p2 = texelFetch(terrainData, terrainCell + ivec2(1, 1), 0);
+  vec4 p3 = texelFetch(terrainData, terrainCell + ivec2(1, 0), 0);
+  vec4 p4 = texelFetch(terrainData, terrainCell + ivec2(0, 0), 0);
+  paletteCode = getPalCode(
+      int(p1.b * 255.0), int(p2.b * 255.0), int(p3.b * 255.0), int(p4.b * 255.0),
+      int(p1.g * 255.0), int(p2.g * 255.0), int(p3.g * 255.0), int(p4.g * 255.0));
+  baseTerrainCode = int(p1.g * 255.0);
 
   // World-space position: adjust for 2D or 3D
   if (cameraMode == 0) {

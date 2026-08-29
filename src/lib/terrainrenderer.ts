@@ -51,6 +51,7 @@ export class TerrainRenderer {
   #alphaTextureArray!: TextureArray
 
   hasTerrainTexture: number[] = []
+  #visibleLandblockCount = 255 * 255
 
   // ac data
   heightTable: number[] = []
@@ -267,8 +268,7 @@ export class TerrainRenderer {
     // Tell it to use our program (pair of shaders)
     this.gl.useProgram(this.program);
 
-    this.gl.enable(this.gl.BLEND);
-    this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
+    // Terrain is opaque. Blending is enabled only for translucent overlays.
 
     this.#xWorldLoc = this.gl.getUniformLocation(this.program!, 'xWorld');
     this.#scaleLoc = this.gl.getUniformLocation(this.program!, 'scale');
@@ -393,12 +393,24 @@ export class TerrainRenderer {
       this.gl.uniform1f(this.#pixelSizeLoc, pixelSize);
       this.gl.uniform1i(this.#cameraMode, 0);
 
-      // TODO: we can use this to clip the rendered area
-      this.gl.uniform4f(this.#renderViewLoc!, 0, 0, 255, 255);
+      const topLeft = camera2D.ScreenToWorld(new Vector3(0, 0, 1));
+      const bottomRight = camera2D.ScreenToWorld(new Vector3(this.canvas.width, this.canvas.height, 1));
+      const minX = Math.max(0, Math.floor(Math.min(topLeft.x, bottomRight.x) / 192) - 1);
+      const visibleMinY = Math.min(topLeft.y, bottomRight.y);
+      const visibleMaxY = Math.max(topLeft.y, bottomRight.y);
+      const minY = Math.max(0, Math.floor((camera2D.MapSize.y - visibleMaxY) / 192) - 1);
+      const maxX = Math.min(255, Math.ceil(Math.max(topLeft.x, bottomRight.x) / 192) + 1);
+      const maxY = Math.min(255, Math.ceil((camera2D.MapSize.y - visibleMinY) / 192) + 1);
+      const countX = Math.max(1, maxX - minX);
+      const countY = Math.max(1, maxY - minY);
+      this.#visibleLandblockCount = countX * countY;
+      this.gl.uniform4f(this.#renderViewLoc!, minX, minY, countX, countY);
     } else {
       // Flying camera specific uniforms
       this.gl.uniform1f(this.#scaleLoc!, 1.0); 
       this.gl.uniform1f(this.#pixelSizeLoc, 1.0);
+      this.#visibleLandblockCount = 255 * 255;
+      this.gl.uniform4f(this.#renderViewLoc!, 0, 0, 255, 255);
     }
 
     // Set terrain texture availability
@@ -436,8 +448,9 @@ export class TerrainRenderer {
 
   draw(dt: number) {
     const numVerts = 8 * 8 * 2 * 3; // 8 cells per lb, 2 tris per cell
-    const numInstances = 255 * 255; // one for each landblock
+    const numInstances = this.#visibleLandblockCount;
 
+    this.gl.disable(this.gl.BLEND);
     if (settings.data.badWireframe) {
       this.gl.drawArraysInstanced(this.gl.LINE_STRIP, 0, numVerts, numInstances);
     }
@@ -446,6 +459,8 @@ export class TerrainRenderer {
     }
 
     if (this.currentCameraMode === CameraMode.Camera2D) {
+      this.gl.enable(this.gl.BLEND);
+      this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
       this.#buildings.render(this.camera2D, settings.data.showBuildings)
     }
   }

@@ -43,7 +43,9 @@ uniform float scale;
 in vec3 pos;  // Map coordinates (0.0-1.0, x right, y up)
 in vec3 wpos; // World-space position
 in vec2 cellUV; // local cell UV
-flat in ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
+  flat in ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
+  flat in uint paletteCode;
+  flat in int baseTerrainCode;
 
 out vec4 FragColor;
 
@@ -278,26 +280,16 @@ ivec4 rot2(int rot, ivec4 t) {
 // Replace your existing terrain overlay logic with this corrected version:
 
 vec4 getSplattedTerrainColor(vec3 pos) {
-    // The data texture has 2041 shared vertices, which define 2040 cells.
-    vec2 tPos = vec2(terrainCell);
-
-    // Fetch terrain data for the four corners
-    vec4 p1 = texelFetch(terrainData, ivec2(tPos + vec2(0, 1)), 0); // NorthWest
-    vec4 p2 = texelFetch(terrainData, ivec2(tPos + vec2(1, 1)), 0); // NorthEast
-    vec4 p3 = texelFetch(terrainData, ivec2(tPos + vec2(1, 0)), 0); // SouthEast
-    vec4 p4 = texelFetch(terrainData, ivec2(tPos + vec2(0, 0)), 0); // SouthWest
-
-    int t1 = int(p1.g * 255.0);
-    int t2 = int(p2.g * 255.0);
-    int t3 = int(p3.g * 255.0);
-    int t4 = int(p4.g * 255.0);
-
-    int r1 = int(p1.b * 255.0);
-    int r2 = int(p2.b * 255.0);
-    int r3 = int(p3.b * 255.0);
-    int r4 = int(p4.b * 255.0);
-
-    uint pcode = getPalCode(r1, r2, r3, r4, t1, t2, t3, t4);
+    uint pcode = paletteCode;
+    ivec4 terrainCodes = getTerrainCodes(pcode);
+    int t1 = terrainCodes.x;
+    int t2 = terrainCodes.y;
+    int t3 = terrainCodes.z;
+    int t4 = terrainCodes.w;
+    int r1 = int((pcode >> 26) & 0x3u);
+    int r2 = int((pcode >> 24) & 0x3u);
+    int r3 = int((pcode >> 22) & 0x3u);
+    int r4 = int((pcode >> 20) & 0x3u);
     ivec3 roadCode = getRoadCode(pcode);
     
     // Check for all-road case first
@@ -306,7 +298,6 @@ vec4 getSplattedTerrainColor(vec3 pos) {
         return vec4(roadColor.rgb, 1.0);
     }
 
-    ivec4 terrainCodes = getTerrainCodes(pcode);
     ivec3 tcodes;
     ivec4 terrainTexIndices; // This will hold the actual terrain texture indices to use
     
@@ -386,12 +377,11 @@ vec4 getSplattedTerrainColor(vec3 pos) {
 }
 
 void main() {
-    int tCode = int(texelFetch(terrainData, terrainCell + ivec2(0, 1), 0).g * 255.0);
-    vec3 tColor = terrainColors[tCode];
+    vec3 tColor = terrainColors[baseTerrainCode];
 
     vec4 finalColor;
 
-    if (scale > minZoomForTextures && hasTerrainTexture[tCode] >= 0.5) {
+    if (scale > minZoomForTextures && hasTerrainTexture[baseTerrainCode] >= 0.5) {
         finalColor = getSplattedTerrainColor(pos);
     } else {
         finalColor = vec4(tColor, 1.0);
