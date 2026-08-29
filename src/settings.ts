@@ -5,6 +5,7 @@ const labels = {
   showLandcellLines: 'showLandcellLines',
   showLandblockLines: 'showLandblockLines',
   badWireframe: 'badWireframe',
+  showBuildings: 'showBuildings',
   renderQuality: 'renderQuality'
 }
 
@@ -15,6 +16,7 @@ const data =  {
   showLandcellLines: false,
   showLandblockLines: false,
   badWireframe: false,
+  showBuildings: false,
   maxRenderQuality: 10,
   minRenderQuality: 1,
   renderQuality: 10,

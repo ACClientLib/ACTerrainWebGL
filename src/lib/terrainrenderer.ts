@@ -15,6 +15,7 @@ import gui from './gui'
 import { updateFrameRate } from '../tools/fpscounter'
 import * as codes from '../tools/codes'
 import { Texture } from './texture'
+import { BuildingOverlay } from './buildingsoverlay'
 
 export class TerrainRenderer {
   canvas: HTMLCanvasElement
@@ -42,6 +43,8 @@ export class TerrainRenderer {
   #pixelSizeLoc: WebGLUniformLocation | null = null
   #cameraMode: WebGLUniformLocation | null = null
   #renderView: WebGLUniformLocation | null = null
+  #buildings!: BuildingOverlay
+  #showBuildingsController: any
 
   #dataTexture!: Texture
   #terrainTextureArray!: TextureArray
@@ -91,6 +94,15 @@ export class TerrainRenderer {
     
     // Initialize flying camera setup
     this.#initializeFlyingCamera()
+
+    this.#buildings = new BuildingOverlay(this.gl)
+    this.#buildings.load().then((loaded) => {
+      if (loaded) {
+        this.#showBuildingsController.enable()
+        settings.data.showBuildings = true
+        this.#showBuildingsController.updateDisplay()
+      }
+    })
   }
 
   #initialize2DCamera() {
@@ -127,6 +139,8 @@ export class TerrainRenderer {
     gui.add(settings.data, settings.labels.showLandblockLines)
     gui.add(settings.data, settings.labels.showLandcellLines)
     gui.add(settings.data, settings.labels.minZoomForTextures, 0.0001, 5, 0.005)
+    this.#showBuildingsController = gui.add(settings.data, settings.labels.showBuildings).name('Show Buildings')
+    this.#showBuildingsController.disable()
     
     // Add camera switching control
     const cameraController = {
@@ -365,6 +379,7 @@ export class TerrainRenderer {
   }
 
   #setUniforms() {
+    this.gl.useProgram(this.program)
     this.gl.uniformMatrix4fv(this.#xWorldLoc!, false, this.currentCamera.Transform);
     this.gl.uniform1f(this.#minZoomForTexturesLoc!, settings.data.minZoomForTextures);
     this.gl.uniform1f(this.#showLandcellLinesLoc, settings.data.showLandcellLines ? 1.0 : 0.0)
@@ -428,6 +443,10 @@ export class TerrainRenderer {
     }
     else {
       this.gl.drawArraysInstanced(this.gl.TRIANGLES, 0, numVerts, numInstances);
+    }
+
+    if (this.currentCameraMode === CameraMode.Camera2D) {
+      this.#buildings.render(this.camera2D, settings.data.showBuildings)
     }
   }
 
