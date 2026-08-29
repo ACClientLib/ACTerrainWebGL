@@ -39,6 +39,7 @@ uniform sampler2DArray alphaAtlas;
 
 // Current drawing scale
 uniform float scale;
+uniform int cameraMode; // 0 for Camera2D, 1 for CameraFlying
 
 in vec3 pos;  // Map coordinates (0.0-1.0, x right, y up)
 in vec3 wpos; // World-space position
@@ -66,6 +67,30 @@ struct RoadData {
 
 vec3 saturate(vec3 value) {
     return clamp(value, 0.0, 1.0);
+}
+
+float sampleHeight(ivec2 coordinate) {
+    coordinate = clamp(coordinate, ivec2(0), ivec2(2040));
+    int heightIdx = int(texelFetch(terrainData, coordinate, 0).r * 255.0);
+    return heightTable[heightIdx];
+}
+
+float directionalShade(vec2 mapPosition) {
+    ivec2 coordinate = ivec2(mapPosition * 2040.0);
+    float heightWest = sampleHeight(coordinate + ivec2(-1, 0));
+    float heightEast = sampleHeight(coordinate + ivec2(1, 0));
+    float heightSouth = sampleHeight(coordinate + ivec2(0, -1));
+    float heightNorth = sampleHeight(coordinate + ivec2(0, 1));
+
+    // The height texture has samples every 6 world units.
+    vec3 normal = normalize(vec3(
+        -(heightEast - heightWest) / 12.0,
+        -(heightNorth - heightSouth) / 12.0,
+        1.0));
+    vec3 lightDirection = normalize(vec3(-0.45, 0.55, 0.85));
+    float diffuse = max(dot(normal, lightDirection), 0.0);
+
+    return mix(0.72, 1.12, diffuse);
 }
 
 uint getPalCode(int r1, int r2, int r3, int r4, int t1, int t2, int t3, int t4) {
@@ -385,6 +410,11 @@ void main() {
         finalColor = getSplattedTerrainColor(pos);
     } else {
         finalColor = vec4(tColor, 1.0);
+    }
+
+    // Add directional terrain shading in the 2D view.
+    if (cameraMode == 0) {
+        finalColor.rgb *= directionalShade(pos.xy);
     }
 
     // Highlight landcell/landblock lines
