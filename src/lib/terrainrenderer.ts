@@ -122,7 +122,7 @@ export class TerrainRenderer {
   #initializeFlyingCamera() {
     // Position flying camera above the center of the map at a reasonable height
     const mapCenter = this.camera2D.MapSize.clone().divide(new Vector3(2, 2, 1))
-    this.flyingCamera.Position = new Vector3(mapCenter.x, mapCenter.y, 500) // Y is up in 3D
+    this.flyingCamera.Position = new Vector3(mapCenter.x, 500, mapCenter.y) // Y is up in 3D
     
     // Look down at the map initially
     this.flyingCamera.SetRotation(0, -Math.PI / 4, 0) // Look down at 45 degrees
@@ -197,7 +197,7 @@ export class TerrainRenderer {
         this.flyingCamera.Position = new Vector3(pos2D.x, height, pos2D.y)
         
         // Look down towards the terrain
-        this.flyingCamera.SetRotation(0, Math.PI / 2, 0)
+        this.flyingCamera.SetRotation(0, -Math.PI / 2, 0)
       }
       
       console.log('Switched to Flying Camera')
@@ -211,6 +211,10 @@ export class TerrainRenderer {
 
   #setupInputs() {
     this.mousePos = new Vector2(0, 0);
+
+    this.canvas.addEventListener("pointerdown", () => {
+      this.canvas.focus({ preventScroll: true });
+    });
 
     addEventListener("resize", () => {
       this.#handleResize()
@@ -264,6 +268,8 @@ export class TerrainRenderer {
     
     // Tell WebGL how to convert from clip space to pixels
     this.gl.viewport(0, 0, this.gl.canvas.width, this.gl.canvas.height);
+    this.gl.enable(this.gl.DEPTH_TEST);
+    this.gl.depthFunc(this.gl.LESS);
 
     // Tell it to use our program (pair of shaders)
     this.gl.useProgram(this.program);
@@ -369,7 +375,7 @@ export class TerrainRenderer {
 
     // Clear the canvas
     this.gl.clearColor(29/255, 34/255, 60/255, 1);
-    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
 
     // Set uniforms based on camera type
     this.#setUniforms();

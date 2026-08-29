@@ -9,13 +9,13 @@ export class CameraFlying extends BaseCamera {
   
   private _fov = 45;    // Field of view in degrees
   private _near = 0.1;
-  private _far = 100000000;
+  private _far = 100000;
   
   private _moveSpeed = 100;
   private _rotateSpeed = 0.00001;
   private _mouseSensitivity = 0.005; // Increased slightly as per previous suggestion
   
-  private _forward = new Vector3(0, -1, 0); // Y-forward
+  private _forward = new Vector3(0, 1, 0); // Y-forward
   private _right = new Vector3(1, 0, 0);
   private _up = new Vector3(0, 0, 1); // Z-up
   
@@ -56,7 +56,11 @@ export class CameraFlying extends BaseCamera {
   }
 
   get Transform() {
-    return this.ViewMatrix.multiplyLeft(this.ViewProjection);
+    // Mirror view-space X so world +X moves in the same screen direction as 2D.
+    const mirroredView = new Matrix4()
+      .scale([-1, 1, 1])
+      .multiplyRight(this.ViewMatrix);
+    return mirroredView.multiplyLeft(this.ViewProjection);
   }
 
   protected setupEventListeners() {
@@ -83,6 +87,9 @@ export class CameraFlying extends BaseCamera {
       if (this.renderer.currentCamera != this) return;
       if (this._mouseDown && document.pointerLockElement === this.canvas) {
         this.handleMouseLook(event.movementX, event.movementY);
+        this.mousePos.x = event.clientX;
+        this.mousePos.y = event.clientY;
+        return;
       }
       this.handleMove(event.clientX, event.clientY);
     });
@@ -112,15 +119,15 @@ export class CameraFlying extends BaseCamera {
     const maxDelta = 100;
     deltaX = Math.max(-maxDelta, Math.min(maxDelta, deltaX));
     deltaY = Math.max(-maxDelta, Math.min(maxDelta, deltaY));
-    this.Yaw -= deltaX * this._mouseSensitivity;
-    this.Pitch += deltaY * this._mouseSensitivity;
+    this.Yaw += deltaX * this._mouseSensitivity;
+    this.Pitch -= deltaY * this._mouseSensitivity;
   }
 
   protected handleDrag(delta: Vector2) {
     if (this.renderer.currentCamera != this) return;
     if (this._isDragging) {
-      this.Yaw += delta.x * this._mouseSensitivity;
-      this.Pitch -= delta.y * this._mouseSensitivity;
+      this.Yaw -= delta.x * this._mouseSensitivity;
+      this.Pitch += delta.y * this._mouseSensitivity;
     }
   }
 
@@ -131,7 +138,7 @@ export class CameraFlying extends BaseCamera {
       .rotateX(this._pitch) // Pitch around X-axis
       .rotateY(this._roll); // Roll around Y-axis (forward axis)
 
-    this._forward = new Vector3(0, -1, 0).transform(rotationMatrix).normalize();
+    this._forward = new Vector3(0, 1, 0).transform(rotationMatrix).normalize();
     this._right = new Vector3(1, 0, 0).transform(rotationMatrix).normalize();
     this._up = new Vector3(0, 0, 1).transform(rotationMatrix).normalize();
   }
@@ -178,8 +185,8 @@ export class CameraFlying extends BaseCamera {
 
   LookAt(target: Vector3) {
     const direction = target.clone().subtract(this.Position).normalize();
-    this._yaw = Math.atan2(direction.x, -direction.y); // Y-forward
-    this._pitch = Math.asin(direction.z); // Z-up
+    this._yaw = Math.atan2(direction.x, direction.y); // Y-forward
+    this._pitch = Math.asin(direction.z); // Z-up; negative pitch looks down
     this.updateVectors();
   }
 
