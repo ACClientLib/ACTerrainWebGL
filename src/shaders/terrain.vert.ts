@@ -16,6 +16,7 @@ out vec3 pos;   // Normalized position (0 to 1, for texture lookup)
 out vec3 wpos;  // World-space position
 out vec4 color;
 out vec2 cellUV; // local cell UV
+flat out float triangleShade;
 flat out ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
 flat out uint paletteCode;
 flat out int baseTerrainCode;
@@ -35,6 +36,21 @@ uint getPalCode(int r1, int r2, int r3, int r4, int t1, int t2, int t3, int t4) 
   int terrainBits = (t1 << 15) | (t2 << 10) | (t3 << 5) | t4;
   int roadBits = (r1 << 26) | (r2 << 24) | (r3 << 22) | (r4 << 20);
   return uint((1 << 28) | roadBits | terrainBits);
+}
+
+float getTriangleShade(vec2 p0, vec2 p1, vec2 p2) {
+  vec3 v0 = vec3(p0, getHeight(p0 / mapSize) * maxHeight);
+  vec3 v1 = vec3(p1, getHeight(p1 / mapSize) * maxHeight);
+  vec3 v2 = vec3(p2, getHeight(p2 / mapSize) * maxHeight);
+  vec3 normal = normalize(cross(v1 - v0, v2 - v0));
+
+  if (normal.z < 0.0) {
+    normal = -normal;
+  }
+
+  vec3 lightDirection = normalize(vec3(-0.45, 0.55, 0.85));
+  float diffuse = max(dot(normal, lightDirection), 0.0);
+  return mix(0.72, 1.12, diffuse);
 }
 
 void main() {
@@ -76,6 +92,32 @@ void main() {
   uint magicB = seedB;
   float splitDir = float(uint(lby * 8 + cellIdyD) * magicA - magicB - 1369149221u);
   int vIdm = gl_VertexID % 6;
+
+  vec2 triangle0;
+  vec2 triangle1;
+  vec2 triangle2;
+  if (splitDir * 2.3283064e-10 >= 0.5) {
+    if (vIdm < 3) {
+      triangle0 = vec2(cellX, cellY);
+      triangle1 = vec2(cellX + cellSize, cellY);
+      triangle2 = vec2(cellX, cellY + cellSize);
+    } else {
+      triangle0 = vec2(cellX + cellSize, cellY + cellSize);
+      triangle1 = vec2(cellX, cellY + cellSize);
+      triangle2 = vec2(cellX + cellSize, cellY);
+    }
+  } else {
+    if (vIdm < 3) {
+      triangle0 = vec2(cellX, cellY);
+      triangle1 = vec2(cellX + cellSize, cellY);
+      triangle2 = vec2(cellX + cellSize, cellY + cellSize);
+    } else {
+      triangle0 = vec2(cellX, cellY);
+      triangle1 = vec2(cellX + cellSize, cellY + cellSize);
+      triangle2 = vec2(cellX, cellY + cellSize);
+    }
+  }
+  triangleShade = getTriangleShade(triangle0, triangle1, triangle2);
 
   vec2 v = vec2(0.0, 0.0);
   vec2 uv = vec2(0.0, 0.0);

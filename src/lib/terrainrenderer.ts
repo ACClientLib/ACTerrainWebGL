@@ -467,7 +467,9 @@ export class TerrainRenderer {
     if (this.currentCameraMode === CameraMode.Camera2D) {
       this.gl.enable(this.gl.BLEND);
       this.gl.blendFunc(this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA);
+      this.gl.disable(this.gl.DEPTH_TEST);
       this.#buildings.render(this.camera2D, settings.data.showBuildings)
+      this.gl.enable(this.gl.DEPTH_TEST);
     }
   }
 
