@@ -286,8 +286,8 @@ export class TerrainRenderer {
   }
 
   #makeTextures() {
-    this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1, this.gl.REPEAT, this.gl.NEAREST_MIPMAP_NEAREST),
-    this.#alphaTextureArray = new TextureArray(this.gl, alphaTextures, new Vector2(512, 512), 2, this.gl.REPEAT, this.gl.NEAREST_MIPMAP_NEAREST)
+    this.#terrainTextureArray = new TextureArray(this.gl, terrainTextures, new Vector2(512, 512), 1, this.gl.CLAMP_TO_EDGE, this.gl.NEAREST_MIPMAP_NEAREST),
+    this.#alphaTextureArray = new TextureArray(this.gl, alphaTextures, new Vector2(512, 512), 2, this.gl.CLAMP_TO_EDGE, this.gl.NEAREST_MIPMAP_NEAREST)
 
     this.#dataTexture = new Texture(this.gl, "textures/terrain.png", new Vector2(2041, 2041), 0)
     this.#dataTexture.load(() => {

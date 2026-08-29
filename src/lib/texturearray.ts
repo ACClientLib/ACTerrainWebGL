@@ -22,7 +22,8 @@ export class TextureArray {
     gl.activeTexture(gl.TEXTURE0 + this.textureUnit);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture);
 
-    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 8, gl.RGBA8, textureSize.x, textureSize.y, imageSources.length);
+    const mipLevels = Math.floor(Math.log2(Math.max(textureSize.x, textureSize.y))) + 1;
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, mipLevels, gl.RGBA8, textureSize.x, textureSize.y, imageSources.length);
   }
 
   load(cb: (idx: number)=>void) {

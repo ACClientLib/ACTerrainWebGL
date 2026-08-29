@@ -15,6 +15,8 @@ uniform int cameraMode; // 0 for Camera2D, 1 for CameraFlying
 out vec3 pos;   // Normalized position (0 to 1, for texture lookup)
 out vec3 wpos;  // World-space position
 out vec4 color;
+out vec2 cellUV; // local cell UV
+flat out ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
 
 const int sideCount = 8;
 const int numVertsPerCell = 6;
@@ -71,33 +73,46 @@ void main() {
 
   // Vertex position based on split direction
   vec2 v = vec2(0.0, 0.0);
+  vec2 uv = vec2(0.0, 0.0);
   if (splitDir * 2.3283064e-10 >= 0.5) {
     if (vIdm == 0) {
       v = vec2(cellX, cellY);
+      uv = vec2(0.0, 0.0);
     } else if (vIdm == 1) {
       v = vec2(cellX + cellSize, cellY);
+      uv = vec2(1.0, 0.0);
     } else if (vIdm == 2) {
       v = vec2(cellX, cellY + cellSize);
+      uv = vec2(0.0, 1.0);
     } else if (vIdm == 3) {
       v = vec2(cellX + cellSize, cellY + cellSize);
+      uv = vec2(1.0, 1.0);
     } else if (vIdm == 4) {
       v = vec2(cellX, cellY + cellSize);
+      uv = vec2(0.0, 1.0);
     } else if (vIdm == 5) {
       v = vec2(cellX + cellSize, cellY);
+      uv = vec2(1.0, 0.0);
     }
   } else {
     if (vIdm == 0) {
       v = vec2(cellX, cellY);
+      uv = vec2(0.0, 0.0);
     } else if (vIdm == 1) {
       v = vec2(cellX + cellSize, cellY);
+      uv = vec2(1.0, 0.0);
     } else if (vIdm == 2) {
       v = vec2(cellX + cellSize, cellY + cellSize);
+      uv = vec2(1.0, 1.0);
     } else if (vIdm == 3) {
       v = vec2(cellX, cellY);
+      uv = vec2(0.0, 0.0);
     } else if (vIdm == 4) {
       v = vec2(cellX + cellSize, cellY + cellSize);
+      uv = vec2(1.0, 1.0);
     } else if (vIdm == 5) {
       v = vec2(cellX, cellY + cellSize);
+      uv = vec2(0.0, 1.0);
     }
   }
 
@@ -105,6 +120,9 @@ void main() {
   vec2 xy = v / mapSize; // Normalize for texture lookup
   float h = getHeight(xy);
   pos = vec3(xy, h); // Normalized position for fragment shader
+  cellUV = uv;
+  terrainCell = ivec2(lbx * sideCount + cellIdxD,
+      2040 - (lby * sideCount + cellIdyD + 1));
 
   // World-space position: adjust for 2D or 3D
   if (cameraMode == 0) {

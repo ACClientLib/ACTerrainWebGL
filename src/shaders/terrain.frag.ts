@@ -5,7 +5,7 @@ precision highp int;
 precision highp sampler2D;
 precision highp sampler2DArray;
 
-const int roadTextureIdx = 31;
+const int roadTextureIdx = 32;
 const float dataWidth = 2041.0;
 
 // Height lookup table from dat region file
@@ -31,7 +31,7 @@ uniform float pixelSize;
 // RGBA: height (r), terrain type (g, 0-31), road code (b, 0-3), scenery (a)
 uniform sampler2D terrainData;
 
-// Texture atlas for terrain and road textures (indices 0-31, 31 = road)
+// Texture atlas for terrain and road textures (indices 0-31, 32 = road)
 uniform sampler2DArray terrainAtlas;
 
 // Texture atlas for alpha overlays (indices 0-3 corner, 4 side, 5-7 road)
@@ -42,6 +42,8 @@ uniform float scale;
 
 in vec3 pos;  // Map coordinates (0.0-1.0, x right, y up)
 in vec3 wpos; // World-space position
+in vec2 cellUV; // local cell UV
+flat in ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
 
 out vec4 FragColor;
 
@@ -67,7 +69,8 @@ vec3 saturate(vec3 value) {
 uint getPalCode(int r1, int r2, int r3, int r4, int t1, int t2, int t3, int t4) {
     int terrainBits = (t1 << 15) | (t2 << 10) | (t3 << 5) | t4;
     int roadBits = (r1 << 26) | (r2 << 24) | (r3 << 22) | (r4 << 20);
-    return uint(roadBits | terrainBits);
+    int sizeBits = 1 << 28;
+    return uint(sizeBits | roadBits | terrainBits);
 }
 
 ivec3 getRoadCode(uint pcode) {
@@ -126,7 +129,6 @@ ivec3 buildTCodes(ivec4 pcodes, ivec3 tcodes, int i) {
                 tcodes[0] += 1 << k;
             } else {
                 tcodes[1] = 1 << k;
-                tcodes[2] = pcodes[k]; // Third terrain index
             }
             break;
         }
@@ -175,6 +177,7 @@ ivec2 getTerrainAlpha(uint pcode, int tcode) {
 
 ivec2 getRoadAlpha(uint pcode, int rcode) {
     const int numRoadMaps = 3;
+    const int roadMapCodes[3] = int[3](9, 10, 8);
     int prng = int(floor(float(1379576222u * pcode - 1372186442u) * 2.3283064e-10 * float(numRoadMaps)));
     int rot = 0;
     int alphaIdx = -1;
@@ -182,7 +185,7 @@ ivec2 getRoadAlpha(uint pcode, int rcode) {
     for (int i = 0; i < numRoadMaps; i++) {
         int idx = (i + prng) % numRoadMaps;
         rot = 0;
-        int alphaCode = 9;
+        int alphaCode = roadMapCodes[idx];
         alphaIdx = 5 + idx;
 
         for (int j = 0; j < 4; j++) {
@@ -197,10 +200,10 @@ ivec2 getRoadAlpha(uint pcode, int rcode) {
 }
 
 vec2 getRot(int rot, vec2 cPos) {
-    if (rot == 1) return vec2(-cPos.y, cPos.x);   // 90 degrees clockwise
-    if (rot == 2) return vec2(-cPos.x, -cPos.y);  // 180 degrees
-    if (rot == 3) return vec2(cPos.y, -cPos.x);   // 270 degrees clockwise
-    return cPos;                                  // 0 degrees
+    if (rot == 1) return vec2(1.0 - cPos.y, cPos.x); // 90 degrees clockwise
+    if (rot == 2) return vec2(1.0 - cPos.x, 1.0 - cPos.y); // 180 degrees
+    if (rot == 3) return vec2(cPos.y, 1.0 - cPos.x); // 270 degrees clockwise
+    return cPos; // 0 degrees
 }
 
 vec4 maskBlend3(vec4 t0, vec4 t1, vec4 t2, float h0, float h1, float h2) {
@@ -218,24 +221,24 @@ vec4 maskBlend3(vec4 t0, vec4 t1, vec4 t2, float h0, float h1, float h2) {
 }
 
 vec4 combineOverlays(BaseData base, TerrainData terrains) {
-    float h0 = terrains.Overlay0.w >= 0. ? 1. : 0.;
-    float h1 = terrains.Overlay1.w >= 0. ? 1. : 0.;
-    float h2 = terrains.Overlay2.w >= 0. ? 1. : 0.;
+    float h0 = terrains.Overlay0.z >= 0. ? 1. : 0.;
+    float h1 = terrains.Overlay1.z >= 0. ? 1. : 0.;
+    float h2 = terrains.Overlay2.z >= 0. ? 1. : 0.;
 
     vec4 overlay0 = vec4(0, 0, 0, 0);
     vec4 overlay1 = vec4(0, 0, 0, 0);
     vec4 overlay2 = vec4(0, 0, 0, 0);
 
     if (h0 > 0.) {
-        overlay0 = texture(terrainAtlas, vec3(terrains.Overlay0.xy, terrains.Overlay0.z));
+        overlay0 = texture(terrainAtlas, vec3(base.TexUV.xy, terrains.Overlay0.z));
         overlay0.a = texture(alphaAtlas, vec3(terrains.Overlay0.xy, terrains.Overlay0.w)).a;
     }
     if (h1 > 0.) {
-        overlay1 = texture(terrainAtlas, vec3(terrains.Overlay1.xy, terrains.Overlay1.z));
+        overlay1 = texture(terrainAtlas, vec3(base.TexUV.xy, terrains.Overlay1.z));
         overlay1.a = texture(alphaAtlas, vec3(terrains.Overlay1.xy, terrains.Overlay1.w)).a;
     }
     if (h2 > 0.) {
-        overlay2 = texture(terrainAtlas, vec3(terrains.Overlay2.xy, terrains.Overlay2.z));
+        overlay2 = texture(terrainAtlas, vec3(base.TexUV.xy, terrains.Overlay2.z));
         overlay2.a = texture(alphaAtlas, vec3(terrains.Overlay2.xy, terrains.Overlay2.w)).a;
     }
 
@@ -243,13 +246,13 @@ vec4 combineOverlays(BaseData base, TerrainData terrains) {
 }
 
 vec4 combineRoad(BaseData base, RoadData roads) {
-    float h0 = roads.Road0.w >= 0. ? 1. : 0.;
-    float h1 = roads.Road1.w >= 0. ? 1. : 0.;
+    float h0 = roads.Road0.z >= 0. ? 1. : 0.;
+    float h1 = roads.Road1.z >= 0. ? 1. : 0.;
 
     vec4 result = vec4(0, 0, 0, 0);
 
     if (h0 > 0.) {
-        result = texture(terrainAtlas, vec3(roads.Road0.xy, roads.Road0.z));
+        result = texture(terrainAtlas, vec3(base.TexUV.xy, roads.Road0.z));
         vec4 roadAlpha0 = texture(alphaAtlas, vec3(roads.Road0.xy, roads.Road0.w));
         result.a = 1. - roadAlpha0.a;
 
@@ -275,7 +278,8 @@ ivec4 rot2(int rot, ivec4 t) {
 // Replace your existing terrain overlay logic with this corrected version:
 
 vec4 getSplattedTerrainColor(vec3 pos) {
-    vec2 tPos = pos.xy * (dataWidth - 1.);
+    // The data texture has 2041 shared vertices, which define 2040 cells.
+    vec2 tPos = vec2(terrainCell);
 
     // Fetch terrain data for the four corners
     vec4 p1 = texelFetch(terrainData, ivec2(tPos + vec2(0, 1)), 0); // NorthWest
@@ -298,8 +302,7 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     
     // Check for all-road case first
     if (roadCode.z > 0) {
-        vec2 cPos = pos.xy * 255.0 * 8.0;
-        vec4 roadColor = texture(terrainAtlas, vec3(cPos, roadTextureIdx));
+        vec4 roadColor = texture(terrainAtlas, vec3(cellUV, roadTextureIdx));
         return vec4(roadColor.rgb, 1.0);
     }
 
@@ -307,7 +310,7 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     ivec3 tcodes;
     ivec4 terrainTexIndices; // This will hold the actual terrain texture indices to use
     
-    // Check for duplicate terrain codes (matching C# GetTerrain logic)
+    // Check for duplicate terrain codes
     bool foundDuplicate = false;
     for (int i = 0; i < 4 && !foundDuplicate; i++) {
         for (int j = i + 1; j < 4; j++) {
@@ -332,15 +335,15 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     
     if (!foundDuplicate) {
         // No duplicates found - use all 4 terrain types
-        tcodes = ivec3(2, 4, 8); // tcodes: 2, 4, 8 as per C# logic
+        tcodes = ivec3(2, 4, 8); // tcodes: 2, 4, 8
         terrainTexIndices = terrainCodes; // Use all 4 terrain codes directly
     }
 
     // UV for texture sampling
-    vec2 cPos = pos.xy * 255.0 * 8.0;
+    vec2 uv = cellUV;
 
     // Base terrain texture
-    vec4 c1 = texture(terrainAtlas, vec3(cPos, terrainTexIndices[0]));
+    vec4 c1 = texture(terrainAtlas, vec3(uv, terrainTexIndices[0]));
 
     // Check if we need overlays
     bool singleTypeCell = t1 == t2 && t1 == t3 && t1 == t4;
@@ -356,9 +359,9 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     ivec2 tAlpha2 = tcodes.z > 0 ? getTerrainAlpha(pcode, tcodes.z) : ivec2(0, -1);
 
     TerrainData terrains = TerrainData(
-        vec4(getRot(tAlpha0.x, cPos), tAlpha0.y >= 0 ? terrainTexIndices[1] : -1, tAlpha0.y),
-        vec4(getRot(tAlpha1.x, cPos), tAlpha1.y >= 0 ? terrainTexIndices[2] : -1, tAlpha1.y),
-        vec4(getRot(tAlpha2.x, cPos), tAlpha2.y >= 0 ? terrainTexIndices[3] : -1, tAlpha2.y)
+        vec4(getRot(tAlpha0.x, uv), tAlpha0.y >= 0 ? terrainTexIndices[1] : -1, tAlpha0.y),
+        vec4(getRot(tAlpha1.x, uv), tAlpha1.y >= 0 ? terrainTexIndices[2] : -1, tAlpha1.y),
+        vec4(getRot(tAlpha2.x, uv), tAlpha2.y >= 0 ? terrainTexIndices[3] : -1, tAlpha2.y)
     );
 
     // Calculate road overlays
@@ -366,25 +369,24 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     ivec2 rAlpha1 = roadCode.y > 0 ? getRoadAlpha(pcode, roadCode.y) : ivec2(0, -1);
     
     RoadData roads = RoadData(
-        vec4(getRot(rAlpha0.x, cPos), roadCode.x > 0 ? roadTextureIdx : -1, rAlpha0.y),
-        vec4(getRot(rAlpha1.x, cPos), roadCode.y > 0 ? roadTextureIdx : -1, rAlpha1.y)
+        vec4(getRot(rAlpha0.x, uv), roadCode.x > 0 ? roadTextureIdx : -1, rAlpha0.y),
+        vec4(getRot(rAlpha1.x, uv), roadCode.y > 0 ? roadTextureIdx : -1, rAlpha1.y)
     );
 
     // Combine overlays
-    vec4 combinedOverlays = combineOverlays(BaseData(vec3(cPos, terrainTexIndices[0])), terrains);
-    vec4 combinedRoad = combineRoad(BaseData(vec3(cPos, terrainTexIndices[0])), roads);
+    vec4 combinedOverlays = combineOverlays(BaseData(vec3(uv, terrainTexIndices[0])), terrains);
+    vec4 combinedRoad = combineRoad(BaseData(vec3(uv, terrainTexIndices[0])), roads);
 
     // Final blending
-    vec3 baseMasked = c1.rgb * (1. - combinedOverlays.a) * (1. - combinedRoad.a);
-    vec3 overlaysMasked = combinedOverlays.rgb * combinedOverlays.a * (1. - combinedRoad.a);
+    vec3 baseMasked = saturate(c1.rgb * (1. - combinedOverlays.a) * (1. - combinedRoad.a));
+    vec3 overlaysMasked = saturate(combinedOverlays.rgb * combinedOverlays.a * (1. - combinedRoad.a));
     vec3 roadMasked = combinedRoad.rgb * combinedRoad.a;
 
     return vec4(baseMasked + overlaysMasked + roadMasked, 1.0);
 }
 
 void main() {
-    vec2 cPos = pos.xy * (dataWidth - 1.0);
-    int tCode = int(texelFetch(terrainData, ivec2(cPos + vec2(0, 0)), 0).g * 255.0);
+    int tCode = int(texelFetch(terrainData, terrainCell + ivec2(0, 1), 0).g * 255.0);
     vec3 tColor = terrainColors[tCode];
 
     vec4 finalColor;
