@@ -4,7 +4,7 @@ import { BaseCamera } from './cameras/basecamera'
 import { CameraMode } from './cameras/cameramode'
 import { Vector3 } from '@math.gl/core'
 import * as glhelpers from './glhelpers'
-import { AcDatClient, BuildingMaterial, IndexedPlacement } from './acdatclient'
+import { AcDatClient, IndexedPlacement, ObjectMaterial } from './acdatclient'
 import { Building3DVertSource } from '../shaders/building3d.vert'
 import { Building3DFragSource } from '../shaders/building3d.frag'
 import { BUILDING_TEXTURE_UNIT } from './dattexture'
@@ -26,7 +26,7 @@ interface GpuBatch {
   buffer: WebGLBuffer
   count: number
   materialResourceId: number
-  material?: BuildingMaterial
+  material?: ObjectMaterial
   materialError?: string
 }
 
@@ -228,7 +228,14 @@ export class Building3DRenderer {
     }
     if (pending.length === 0) return
     this.dats.loadVisible(visible).then(() => {
-      for (const [x, y] of pending) this.landblocks.set(`${x},${y}`, { x, y, buildings: this.dats.landblock(x, y) })
+      for (const [x, y] of pending) {
+        const chunk = this.dats.chunk(x, y)
+        this.landblocks.set(`${x},${y}`, {
+          x,
+          y,
+          buildings: chunk ? this.dats.placementsForChunk(chunk, 0) : []
+        })
+      }
     }).catch(error => {
       if (error instanceof DOMException && error.name === 'AbortError') return
       console.error('Unable to load ACTerrain building resources', error)

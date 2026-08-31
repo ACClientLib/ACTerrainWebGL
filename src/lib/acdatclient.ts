@@ -669,7 +669,7 @@ export class AcDatClient {
         this.activeRequests--
         this.profiler.record('HTTP', performance.now() - started)
       }
-      await this.waitForRetry(init?.signal, (attempt + 1) ** 2 * 100 + Math.random() * 100)
+      await this.waitForRetry(init?.signal ?? undefined, (attempt + 1) ** 2 * 100 + Math.random() * 100)
     }
     throw new Error('ACTerrain API request failed')
   }
