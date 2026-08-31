@@ -64,29 +64,31 @@ export class Camera2D extends BaseCamera {
   }
 
   private setupTouchEvents() {
+    const touchOptions: AddEventListenerOptions = { passive: false, capture: true };
+
     this.canvas.addEventListener("touchstart", (event) => {
       if (this.renderer.currentCamera != this) return;
       event.preventDefault();
       this._mouseDown = true;
       this.lastDistance = 0;
       this.distance = 0;
-    });
+    }, touchOptions);
 
     this.canvas.addEventListener("touchend", (event) => {
       if (this.renderer.currentCamera != this) return;
       event.preventDefault();
       this._mouseDown = false;
-    });
+    }, touchOptions);
 
     this.canvas.addEventListener("touchmove", (event) => {
       if (this.renderer.currentCamera != this) return;
       event.preventDefault();
       if (event.touches.length == 1) {
-        this.handleMove(event.touches[0].pageX, event.touches[0].clientY);
+        this.handleMove(event.touches[0].clientX, event.touches[0].clientY);
       } else {
         this.handlePinch(event);
       }
-    });
+    }, touchOptions);
   }
 
   private setupMouseEvents() {
@@ -131,6 +133,14 @@ export class Camera2D extends BaseCamera {
     );
 
     if (this.lastDistance != 0) {
+      const midpoint = new Vector2(
+        (touch0.x + touch1.x) / 2,
+        (touch0.y + touch1.y) / 2
+      );
+      const pinchWorldBefore = this.ScreenToWorld(
+        new Vector3(midpoint.x, midpoint.y, 1)
+      );
+
       let newZoom = 0;
       if (this.lastDistance > this.distance) {
         newZoom = this.Zoom / Math.pow(2, (this.lastDistance - this.distance) * 0.0075);
@@ -140,6 +150,12 @@ export class Camera2D extends BaseCamera {
 
       if (newZoom > 0) {
         this.Zoom = this.capZoom(newZoom);
+
+        const pinchWorldAfter = this.ScreenToWorld(
+          new Vector3(midpoint.x, midpoint.y, 1)
+        );
+        this.Position.x += pinchWorldBefore.x - pinchWorldAfter.x;
+        this.Position.y += pinchWorldBefore.y - pinchWorldAfter.y;
       }
     }
 

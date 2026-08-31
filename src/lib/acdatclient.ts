@@ -294,16 +294,8 @@ export class AcDatClient {
   }
 
   private async parseIndex(source: ArrayBuffer): Promise<void> {
-    let buffer = source
-    const bytes = new Uint8Array(buffer)
-    if (bytes.length < 6 || new DataView(buffer).getUint32(0, true) !== ACIX_MAGIC) {
-      try {
-        const BrotliDecompressionStream = DecompressionStream as unknown as new (format: string) => TransformStream
-        buffer = await new Response(new Blob([source]).stream().pipeThrough(new BrotliDecompressionStream('br'))).arrayBuffer()
-      } catch {
-        throw new Error('Invalid ACTerrain exterior index')
-      }
-    }
+    const buffer = source
+    if (buffer.byteLength < 6 || new DataView(buffer).getUint32(0, true) !== ACIX_MAGIC) throw new Error('Invalid ACTerrain exterior index')
     const reader = new DataView(buffer)
     let offset = 0
     const u16 = () => { const value = reader.getUint16(offset, true); offset += 2; return value }

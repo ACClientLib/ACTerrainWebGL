@@ -22,6 +22,11 @@ export class CameraFlying extends BaseCamera {
   private _up = new Vector3(0, 0, 1); // Z-up
   
   private _keys: { [key: string]: boolean } = {};
+  private _touchPointers = new Map<number, Vector2>();
+  private _touchLastDistance = 0;
+  private _touchLastMidpoint: Vector2 | null = null;
+  private _touchLastAngle = 0;
+  private _pointerTouchActive = false;
 
   get Yaw() { return this._yaw; }
   set Yaw(v) { this._yaw = v; this.updateVectors(); }
@@ -66,6 +71,8 @@ export class CameraFlying extends BaseCamera {
   }
 
   protected setupEventListeners() {
+    this.setupTouchEvents();
+
     // Mouse events for looking around
     this.canvas.addEventListener("mousedown", (event) => {
       if (this.renderer.currentCamera != this) return;
@@ -116,6 +123,161 @@ export class CameraFlying extends BaseCamera {
       this._moveSpeed = Math.max(0.01, Math.min(400, this._moveSpeed));
       this.renderer.updateFlyingCameraControls();
     });
+  }
+
+  private setupTouchEvents() {
+    const touchOptions: AddEventListenerOptions = { passive: false, capture: true };
+
+    // Pointer Events are the primary path on newer mobile browsers.
+    window.addEventListener("pointerdown", (event) => {
+      if (this.renderer.currentCamera != this || event.pointerType === "mouse") return;
+      event.preventDefault();
+      this._pointerTouchActive = true;
+      this.canvas.setPointerCapture(event.pointerId);
+      this._touchPointers.set(event.pointerId, new Vector2(event.clientX, event.clientY));
+      this._touchLastDistance = this.touchDistance();
+      this._touchLastMidpoint = this.touchMidpoint();
+      this._touchLastAngle = this.touchAngle();
+    }, touchOptions);
+
+    window.addEventListener("pointermove", (event) => {
+      if (this.renderer.currentCamera != this || event.pointerType === "mouse") return;
+      const previous = this._touchPointers.get(event.pointerId);
+      if (!previous) return;
+      event.preventDefault();
+      const previousPositions = new Map(this._touchPointers);
+      this._touchPointers.set(event.pointerId, new Vector2(event.clientX, event.clientY));
+      this.processTouchMovement(previousPositions);
+    }, touchOptions);
+
+    const endPointerTouch = (event: PointerEvent) => {
+      if (event.pointerType === "mouse") return;
+      this._touchPointers.delete(event.pointerId);
+      this._pointerTouchActive = this._touchPointers.size > 0;
+      if (this._touchPointers.size < 2) {
+        this._touchLastDistance = 0;
+        this._touchLastMidpoint = this.touchMidpoint();
+        this._touchLastAngle = 0;
+      }
+    };
+
+    window.addEventListener("pointerup", endPointerTouch);
+    window.addEventListener("pointercancel", endPointerTouch);
+
+    window.addEventListener("touchstart", (event) => {
+      if (this.renderer.currentCamera != this || this._pointerTouchActive) return;
+      event.preventDefault();
+      if (event.touches.length === 1) this._touchPointers.clear();
+      for (const touch of Array.from(event.changedTouches)) {
+        this._touchPointers.set(touch.identifier, new Vector2(touch.clientX, touch.clientY));
+      }
+      this._touchLastDistance = this.touchDistance();
+      this._touchLastMidpoint = this.touchMidpoint();
+      this._touchLastAngle = this.touchAngle();
+    }, touchOptions);
+
+    window.addEventListener("touchmove", (event) => {
+      if (this.renderer.currentCamera != this || this._pointerTouchActive) return;
+      event.preventDefault();
+
+      const previousPositions = new Map(this._touchPointers);
+      const activeIds = new Set(Array.from(event.touches).map(touch => touch.identifier));
+      for (const identifier of this._touchPointers.keys()) {
+        if (!activeIds.has(identifier)) this._touchPointers.delete(identifier);
+      }
+      for (const touch of Array.from(event.touches)) {
+        this._touchPointers.set(touch.identifier, new Vector2(touch.clientX, touch.clientY));
+      }
+
+      this.processTouchMovement(previousPositions);
+    }, touchOptions);
+
+    const endTouch = (event: TouchEvent) => {
+      if (this.renderer.currentCamera != this) return;
+      event.preventDefault();
+      for (const touch of Array.from(event.changedTouches)) {
+        this._touchPointers.delete(touch.identifier);
+      }
+      if (this._touchPointers.size < 2) {
+        this._touchLastDistance = 0;
+        this._touchLastMidpoint = this.touchMidpoint();
+        this._touchLastAngle = 0;
+      }
+    };
+
+    window.addEventListener("touchend", endTouch, touchOptions);
+    window.addEventListener("touchcancel", endTouch, touchOptions);
+  }
+
+  private processTouchMovement(previousPositions: Map<number, Vector2>) {
+    if (this._touchPointers.size === 1) {
+      const [identifier, current] = Array.from(this._touchPointers.entries())[0];
+      const previous = previousPositions.get(identifier);
+      if (previous) {
+        this.handleMouseLook(current.x - previous.x, current.y - previous.y);
+      }
+      return;
+    }
+
+    if (this._touchPointers.size !== 2) return;
+    const midpoint = this.touchMidpoint()!;
+    const previousMidpoint = this._touchLastMidpoint ?? midpoint;
+    this.moveFromScreenDelta(
+      midpoint.x - previousMidpoint.x,
+      midpoint.y - previousMidpoint.y
+    );
+
+    const angle = this.touchAngle();
+    let angleDelta = angle - this._touchLastAngle;
+    if (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+    if (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+    this.Yaw += angleDelta;
+    this._touchLastAngle = angle;
+
+    const distance = this.touchDistance();
+    if (this._touchLastDistance > 0) {
+      const dolly = (distance - this._touchLastDistance) * this.touchMoveScale();
+      this.Position.add(this._forward.clone().scale(dolly));
+    }
+    this._touchLastDistance = distance;
+    this._touchLastMidpoint = midpoint;
+  }
+
+  private touchDistance() {
+    const points = Array.from(this._touchPointers.values());
+    if (points.length < 2) return 0;
+    const dx = points[0].x - points[1].x;
+    const dy = points[0].y - points[1].y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  private touchMidpoint() {
+    const points = Array.from(this._touchPointers.values());
+    if (points.length < 2) return null;
+    return points[0].clone().add(points[1]).scale(0.5);
+  }
+
+  private touchAngle() {
+    const points = Array.from(this._touchPointers.values());
+    if (points.length < 2) return 0;
+    return Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x);
+  }
+
+  private touchMoveScale() {
+    return Math.max(0.5, this.Position.z * 0.002);
+  }
+
+  private moveFromScreenDelta(deltaX: number, deltaY: number) {
+    const horizontalForward = new Vector3(this._forward.x, this._forward.y, 0);
+    const horizontalLength = Math.sqrt(
+      horizontalForward.x * horizontalForward.x +
+      horizontalForward.y * horizontalForward.y
+    );
+    if (horizontalLength > 0) horizontalForward.scale(1 / horizontalLength);
+
+    const scale = this.touchMoveScale();
+    this.Position.add(this._right.clone().scale(deltaX * scale));
+    this.Position.add(horizontalForward.scale(deltaY * scale));
   }
 
   private handleMouseLook(deltaX: number, deltaY: number) {

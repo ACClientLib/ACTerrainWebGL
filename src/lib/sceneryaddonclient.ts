@@ -131,10 +131,7 @@ export class SceneryAddonClient {
          source = await response.arrayBuffer()
          void this.cache.set(this.cacheKey('index'), this.cached(source, 0)).catch(() => undefined)
        }
-       if (new DataView(source).getUint32(0, true) !== 0x49534341) {
-        const stream = new Response(new Blob([source]).stream().pipeThrough(new (DecompressionStream as any)('br')))
-        source = await stream.arrayBuffer()
-      }
+       if (source.byteLength < 8 || new DataView(source).getUint32(0, true) !== 0x49534341) throw new Error('Invalid ACTerrain scenery index')
       const view = new DataView(source); let offset = 0
       const u16 = () => { const value = view.getUint16(offset, true); offset += 2; return value }
       const u32 = () => { const value = view.getUint32(offset, true); offset += 4; return value }
