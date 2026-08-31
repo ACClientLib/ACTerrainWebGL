@@ -5,8 +5,13 @@ const labels = {
   showLandcellLines: 'showLandcellLines',
   showLandblockLines: 'showLandblockLines',
   badWireframe: 'badWireframe',
-  showBuildings: 'showBuildings',
-  renderQuality: 'renderQuality'
+  showDebug: 'showDebug',
+  showObjects: 'showObjects',
+  showServerSpawns: 'showServerSpawns',
+  showParticles: 'showParticles',
+  minZoomFor3DObjects: 'minZoomFor3DObjects',
+  renderQuality: 'renderQuality',
+  sceneryEnabled: 'sceneryEnabled'
 }
 
 const data =  {
@@ -16,10 +21,15 @@ const data =  {
   showLandcellLines: false,
   showLandblockLines: false,
   badWireframe: false,
-  showBuildings: false,
+  showDebug: false,
+  showObjects: true,
+  showServerSpawns: true,
+  showParticles: true,
+  minZoomFor3DObjects: 0.25,
   maxRenderQuality: 10,
   minRenderQuality: 1,
   renderQuality: 10,
+  sceneryEnabled: true,
   get renderScale() {
     return data.maxRenderQuality + 1 - data.renderQuality;
   },

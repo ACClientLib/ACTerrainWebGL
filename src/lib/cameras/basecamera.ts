@@ -13,6 +13,8 @@ export abstract class BaseCamera {
   public Position: Vector3 = new Vector3(0, 0, 0);
   public ViewportSize: Vector3 = new Vector3(1, 1, 1);
   public mousePos = new Vector2(0, 0);
+  private frameTransform: Matrix4 | null = null;
+  private frameInverseTransform: Matrix4 | null = null;
 
   constructor(canvas: HTMLCanvasElement, renderer: TerrainRenderer) {
     this.canvas = canvas;
@@ -24,6 +26,26 @@ export abstract class BaseCamera {
   
   abstract get ViewProjection(): Matrix4;
   abstract get Transform(): Matrix4;
+
+  // Build the camera matrix once after input/update and reuse it for the
+  // complete render and culling pass.
+  prepareFrame(): void {
+    this.frameTransform = this.Transform;
+    this.frameInverseTransform = this.frameTransform.clone().invert();
+  }
+
+  get FrameTransform(): Matrix4 {
+    return this.frameTransform ?? this.Transform;
+  }
+
+  get FrameInverseTransform(): Matrix4 {
+    return this.frameInverseTransform ?? this.FrameTransform.clone().invert();
+  }
+
+  // Camera-relative particle expansion basis. The 2D camera lies in the
+  // world XY plane, while 3D cameras override these with their view basis.
+  get ParticleRight(): Vector3 { return new Vector3(1, 0, 0); }
+  get ParticleUp(): Vector3 { return new Vector3(0, 1, 0); }
   
   abstract update(dt: number): void;
   

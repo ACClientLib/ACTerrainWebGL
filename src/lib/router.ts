@@ -1,45 +1,72 @@
-import Coordinates from "./coordinates";
 import { debounce } from "lodash"
-import { toHexStr } from "./util";
+
+export type CameraRoute = {
+  mode: "2d" | "3d"
+  position: { x: number, y: number, z: number }
+  zoom?: number
+  yaw?: number
+  pitch?: number
+  roll?: number
+  fov?: number
+}
 
 let currentRoute = ''
-let lastRouteSet = Date.now()
 
-const updateHash = debounce((newRoute) => {
+const updateHash = debounce((newRoute: string) => {
   location.hash = newRoute;
 }, 300, {
   trailing: true,
 })
 
-function makeRoute(coords: Coordinates, zoom: number) {
-  if (coords.IsOutside()) {
-    return `${Math.abs(coords.NS).toFixed(3)}${(coords.NS >= 0) ? "N" : "S"},${Math.abs(coords.EW).toFixed(3)}${(coords.EW >= 0) ? "E" : "W"},${zoom.toFixed(3)}`
-  }
-  return `#${coords.toString()}@${zoom}`
+function format(value: number) {
+  return value.toFixed(2)
 }
 
-export function updateRoute(coords: Coordinates, zoom: number) {
-  const newRoute = makeRoute(coords, zoom);
+function makeRoute(route: CameraRoute) {
+  if (route.mode === "2d") {
+    return `2d,${format(route.position.x)},${format(route.position.y)},${format(route.zoom!)}`
+  }
+
+  return `3d,${format(route.position.x)},${format(route.position.y)},${format(route.position.z)},` +
+    `${format(route.yaw!)},${format(route.pitch!)},${format(route.roll!)},${format(route.fov!)}`
+}
+
+export function updateCameraRoute(route: CameraRoute) {
+  const newRoute = makeRoute(route);
   if (currentRoute != newRoute) {
     currentRoute = newRoute;
     updateHash(newRoute);
   }
 }
 
-export function parseRoute(route: string) { 
-  const parts = route.split(",");
-  if (parts.length != 3) return;
+function parseNumber(value: string) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
 
-  const zoom = parseFloat(parts[2]);
-  let ns = parseFloat(parts[0]);
-  let ew = parseFloat(parts[1]);
-  
-  if (parts[0].toLowerCase().includes('s')) ns *= -1;
-  if (parts[1].toLowerCase().includes('w')) ew *= -1;
+export function parseRoute(route: string): CameraRoute | undefined {
+  const parts = route.replace(/^#+/, '').split(",")
+  const values = parts.slice(1).map(parseNumber)
+  if (values.some(value => value === undefined)) return undefined
 
-  const coords = Coordinates.FromCoordinates(ns, ew, 0);
-  return {
-    coords,
-    zoom
+  if (parts[0] === "2d" && values.length === 3) {
+    return {
+      mode: "2d",
+      position: { x: values[0]!, y: values[1]!, z: 1 },
+      zoom: values[2]
+    }
   }
+
+  if (parts[0] === "3d" && values.length === 7) {
+    return {
+      mode: "3d",
+      position: { x: values[0]!, y: values[1]!, z: values[2]! },
+      yaw: values[3],
+      pitch: values[4],
+      roll: values[5],
+      fov: values[6]
+    }
+  }
+
+  return undefined
 }

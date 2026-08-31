@@ -8,11 +8,13 @@ export class CameraFlying extends BaseCamera {
   private _roll = 0;    // Rotation around Y axis (banking)
   
   private _fov = 45;    // Field of view in degrees
-  private _near = 0.1;
+  // A very small near plane wastes most of the 24-bit depth buffer when the
+  // scene spans the whole map. Keep it above sub-unit distances to improve
+  // terrain/building depth separation in the 3D view.
+  private _near = 1;
   private _far = 100000;
   
-  private _moveSpeed = 100;
-  private _rotateSpeed = 0.00001;
+  private _moveSpeed = 25;
   private _mouseSensitivity = 0.005; // Increased slightly as per previous suggestion
   
   private _forward = new Vector3(0, 1, 0); // Y-forward
@@ -34,7 +36,7 @@ export class CameraFlying extends BaseCamera {
   set FOV(v) { this._fov = Math.max(1, Math.min(179, v)); }
 
   get MoveSpeed() { return this._moveSpeed; }
-  set MoveSpeed(v) { this._moveSpeed = v; }
+  set MoveSpeed(v) { this._moveSpeed = Math.max(0.1, Math.min(400, v)); }
 
   get ViewProjection() {
     const aspect = this.canvas.width / this.canvas.height;
@@ -109,8 +111,10 @@ export class CameraFlying extends BaseCamera {
     this.canvas.addEventListener("wheel", (event) => {
       if (this.renderer.currentCamera != this) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       this._moveSpeed *= event.deltaY > 0 ? 0.9 : 1.1;
-      this._moveSpeed = Math.max(1, Math.min(1000, this._moveSpeed));
+      this._moveSpeed = Math.max(0.01, Math.min(400, this._moveSpeed));
+      this.renderer.updateFlyingCameraControls();
     });
   }
 
@@ -150,7 +154,8 @@ export class CameraFlying extends BaseCamera {
 
   private handleKeyboardInput(dt: number) {
     if (this.renderer.currentCamera != this) return;
-    const moveDistance = (this._moveSpeed / 50000) * dt;
+    const speedMultiplier = this._keys['shiftleft'] || this._keys['shiftright'] ? 2 : 1;
+    const moveDistance = (this._moveSpeed * speedMultiplier / 50000) * dt;
 
     // WASD movement
     if (this._keys['keyw'] || this._keys['arrowup']) {
@@ -166,21 +171,15 @@ export class CameraFlying extends BaseCamera {
       this.Position.subtract(this._right.clone().scale(moveDistance));
     }
 
-    // Vertical movement (Z-axis, since Z is up)
+    // Vertical movement always follows AC's world Z axis, independent of view pitch.
+    const worldUp = new Vector3(0, 0, 1);
     if (this._keys['space']) {
-      this.Position.add(this._up.clone().scale(moveDistance));
+      this.Position.add(worldUp.clone().scale(moveDistance));
     }
-    if (this._keys['shiftleft'] || this._keys['shiftright']) {
-      this.Position.subtract(this._up.clone().scale(moveDistance));
+    if (this._keys['controlleft'] || this._keys['controlright']) {
+      this.Position.subtract(worldUp.scale(moveDistance));
     }
 
-    // Roll controls
-    if (this._keys['keyq']) {
-      this.Roll += this._rotateSpeed * dt;
-    }
-    if (this._keys['keye']) {
-      this.Roll -= this._rotateSpeed * dt;
-    }
   }
 
   LookAt(target: Vector3) {
@@ -199,6 +198,29 @@ export class CameraFlying extends BaseCamera {
   GetForward() { return this._forward.clone(); }
   GetRight() { return this._right.clone(); }
   GetUp() { return this._up.clone(); }
+  get ParticleRight() {
+    // These are upright Z-axis billboards, so only the camera's horizontal
+    // facing direction determines their rotation. Deriving the axis from the
+    // controller direction avoids mixing view-matrix rows/columns. Account
+    // for the Y conversion and view-space X mirror used by object rendering.
+    const forward = this.GetForward()
+    return new Vector3(forward.y, forward.x, 0).normalize()
+  }
+  get ParticleUp() {
+    return new Vector3(0, 0, 1)
+  }
+
+  GetMapPosition(): Vector3 {
+    const ray = this.ScreenToWorldRay(this.canvas.width / 2, this.canvas.height / 2);
+    if (Math.abs(ray.direction.z) > 0.000001) {
+      const groundHeight = this.renderer.getTerrainHeightAt(this.Position.x, this.Position.y);
+      const distance = (groundHeight - ray.origin.z) / ray.direction.z;
+      if (distance >= 0) {
+        return ray.origin.clone().add(ray.direction.clone().scale(distance));
+      }
+    }
+    return this.Position.clone();
+  }
 
   WorldToScreen(worldPosition: Vector3): Vector3 {
     const clipSpace = worldPosition.clone().transform(this.Transform);
@@ -210,29 +232,17 @@ export class CameraFlying extends BaseCamera {
     return new Vector3(screenX, screenY, ndc.z);
   }
 
-  ScreenToWorldRay(screenX: number, screenY: number): { origin: Vector3, direction: Vector3 } {
+  ScreenToWorldRay(screenX: number, screenY: number, transform = this.FrameTransform, inverseTransform = transform === this.FrameTransform ? this.FrameInverseTransform : transform.clone().invert()): { origin: Vector3, direction: Vector3 } {
     const clipPos = this.getClipSpaceMousePosition(screenX, screenY);
     
     const nearPoint = new Vector3(clipPos.x, clipPos.y, -1);
     const farPoint = new Vector3(clipPos.x, clipPos.y, 1);
     
-    const inverseTransform = this.Transform.clone().invert();
     const worldNear = nearPoint.transform(inverseTransform);
     const worldFar = farPoint.transform(inverseTransform);
     
     const direction = worldFar.clone().subtract(worldNear).normalize();
     
-    return {
-      origin: this.Position.clone(),
-      direction: direction
-    };
+    return { origin: worldNear, direction };
   }
 }
-
-// Utility function
-function toHexStr(n: number) {
-  return ('00000000' + n.toString(16)).substr(-8);
-}
-
-// Export the camera types for easy access
-export type CameraType = CameraFlying;

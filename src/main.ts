@@ -1,7 +1,7 @@
 import './style.css'
 import { TerrainRenderer } from './lib/terrainrenderer'
-import { updateRoute, parseRoute } from './lib/router';
-import { Vector3 } from '@math.gl/core';
+import { updateCameraRoute, parseRoute } from './lib/router';
+import { CameraMode } from './lib/cameras/cameramode';
 
 const canvas: HTMLCanvasElement = document.querySelector("#canvas")!;
 const overlay = document.querySelector("#overlay")!;
@@ -13,8 +13,7 @@ const hash = (window.location.hash || "").replace("#", "")
 if (hash.length > 0) {
   const route = parseRoute(hash);
   if (route) {
-    //renderer.currentCamera.Zoom = route.zoom
-    //renderer.currentCamera.CenterOnCoords(route.coords)
+    renderer.restoreCameraRoute(route)
   }
 }
 
@@ -22,8 +21,23 @@ function draw(dt: number) {
   renderer.update(dt);
   renderer.draw(dt);
 
-  const centerPos = new Vector3(canvas.width / 2.0, canvas.height / 2.0, 0);
-  //updateRoute(renderer.currentCamera.ScreenToCoords(centerPos), renderer.currentCamera.Zoom);
+  const camera = renderer.currentCamera
+  if (renderer.currentCameraMode === CameraMode.Camera2D) {
+    updateCameraRoute({
+      mode: "2d",
+      position: camera.Position,
+      zoom: renderer.camera2D.Zoom
+    })
+  } else {
+    updateCameraRoute({
+      mode: "3d",
+      position: camera.Position,
+      yaw: renderer.flyingCamera.Yaw,
+      pitch: renderer.flyingCamera.Pitch,
+      roll: renderer.flyingCamera.Roll,
+      fov: renderer.flyingCamera.FOV
+    })
+  }
 
   window.requestAnimationFrame(draw);
 }

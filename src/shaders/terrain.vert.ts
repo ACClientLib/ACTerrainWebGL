@@ -1,3 +1,14 @@
+import {
+  LAND_BLOCK_SIDE,
+  LAND_BLOCK_SIZE,
+  MAP_SIZE,
+  MAX_TERRAIN_HEIGHT,
+  TERRAIN_CELLS_PER_LAND_BLOCK,
+  TERRAIN_CELL_SIZE,
+  TERRAIN_DATA_SIDE
+} from '../lib/worldgeometry'
+import { terrainHeightTable } from '../data/heighttable'
+
 export const TerrainVertSource = `#version 300 es
 
 precision highp float;
@@ -5,10 +16,12 @@ precision highp int;
 precision highp sampler2D;
 precision highp sampler2DArray;
 
+layout(location = 0) in vec2 terrainLandblock;
+
 uniform sampler2D terrainData;
 uniform mat4 xWorld; // Combined transformation matrix (CameraFlying.Transform or Camera2D.Transform)
 uniform vec4 renderView; // Used for 2D camera landblock culling
-uniform float heightTable[255];
+uniform float heightTable[${terrainHeightTable.length}];
 uniform vec4 someColor;
 uniform int cameraMode; // 0 for Camera2D, 1 for CameraFlying
 
@@ -21,14 +34,15 @@ flat out ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
 flat out uint paletteCode;
 flat out int baseTerrainCode;
 
-const int sideCount = 8;
+const int sideCount = ${TERRAIN_CELLS_PER_LAND_BLOCK};
 const int numVertsPerCell = 6;
-const float cellSize = 24.0;
-const float maxHeight = 700.0;
-const float mapSize = 255.0 * 192.0; // Total map size
+const float cellSize = ${TERRAIN_CELL_SIZE.toFixed(1)};
+const float maxHeight = ${MAX_TERRAIN_HEIGHT.toFixed(1)};
+const float mapSize = ${MAP_SIZE.toFixed(1)};
 
 float getHeight(vec2 pos) {
-  int heightIdx = int(texelFetch(terrainData, ivec2(pos.xy * 255. * 8.), 0).r * 255.);
+  int heightIdx = clamp(int(round(texelFetch(terrainData, ivec2(pos.xy * ${LAND_BLOCK_SIDE.toFixed(1)} *
+    ${TERRAIN_CELLS_PER_LAND_BLOCK.toFixed(1)}), 0).r * 255.0)), 0, ${terrainHeightTable.length - 1});
   return heightTable[heightIdx] / maxHeight;
 }
 
@@ -76,27 +90,29 @@ void main() {
     lbx = (lbid % numLandblocksX) + int(renderView.x);
     lby = ((lbid / numLandblocksX) + int(renderView.y));
   } else {
-    // CameraFlying: Assume full 255x255 grid
-    int lbid = gl_InstanceID;
-    lbx = lbid % 255;
-    lby = lbid / 255;
+    // CameraFlying: use the CPU-generated visible landblock list.
+    lbx = int(terrainLandblock.x + 0.5);
+    lby = int(terrainLandblock.y + 0.5);
   }
 
   // Add landblock offsets
-  cellX = cellX + (float(lbx) * 192.0);
-  cellY = mapSize - (cellY + cellSize + (float(lby) * 192.0)); // Flip Y to match original orientation
+  cellX = cellX + (float(lbx) * ${LAND_BLOCK_SIZE.toFixed(1)});
+  cellY = mapSize - (cellY + cellSize + (float(lby) * ${LAND_BLOCK_SIZE.toFixed(1)}));
 
-  uint seedA = uint((lbx * 8 + cellIdxD) * 214614067);
-  uint seedB = uint((lbx * 8 + cellIdxD) * 1109124029);
-  uint magicA = seedA + 1813693831u;
-  uint magicB = seedB;
-  float splitDir = float(uint(lby * 8 + cellIdyD) * magicA - magicB - 1369149221u);
+  uint globalCellX = uint(lbx * sideCount + cellIdxD);
+  uint globalCellY = uint(lby * sideCount + cellIdyD);
+  uint splitDir = globalCellX * globalCellY * 0x0CCAC033u
+      - globalCellX * 0x421BE3BDu
+      + globalCellY * 0x6C1AC587u
+      - 0x519B8F25u;
+
+  bool useSwToNeCut = (splitDir & 0x80000000u) != 0u;
   int vIdm = gl_VertexID % 6;
 
   vec2 triangle0;
   vec2 triangle1;
   vec2 triangle2;
-  if (splitDir * 2.3283064e-10 >= 0.5) {
+  if (useSwToNeCut) {
     if (vIdm < 3) {
       triangle0 = vec2(cellX, cellY);
       triangle1 = vec2(cellX + cellSize, cellY);
@@ -121,7 +137,7 @@ void main() {
 
   vec2 v = vec2(0.0, 0.0);
   vec2 uv = vec2(0.0, 0.0);
-  if (splitDir * 2.3283064e-10 >= 0.5) {
+  if (useSwToNeCut) {
     if (vIdm == 0) {
       v = vec2(cellX, cellY);
       uv = vec2(0.0, 0.0);
@@ -169,7 +185,7 @@ void main() {
   pos = vec3(xy, h); // Normalized position for fragment shader
   cellUV = uv;
   terrainCell = ivec2(lbx * sideCount + cellIdxD,
-      2040 - (lby * sideCount + cellIdyD + 1));
+      ${TERRAIN_DATA_SIDE - 1} - (lby * sideCount + cellIdyD + 1));
 
   vec4 p1 = texelFetch(terrainData, terrainCell + ivec2(0, 1), 0);
   vec4 p2 = texelFetch(terrainData, terrainCell + ivec2(1, 1), 0);
@@ -182,13 +198,14 @@ void main() {
 
   // World-space position: adjust for 2D or 3D
   if (cameraMode == 0) {
-    // Camera2D: Z is 0, height is not scaled
+    // Put the map inside the camera's negative-Z clip range while preserving
+    // AC's ordering, where larger elevations are closer to the viewer.
     wpos = vec3(v.x, v.y, h * maxHeight);
     gl_Position = xWorld * vec4(v.x, v.y, h * maxHeight, 1.0);
   } else {
-    // CameraFlying: Y is height, Z is former Y
-    wpos = vec3(v.x, h * maxHeight, v.y);
-    gl_Position = xWorld * vec4(v.x, h * maxHeight, v.y, 1.0);
+    // Flying world space follows AC: map X/Y with elevation on Z.
+    wpos = vec3(v.x, v.y, h * maxHeight);
+    gl_Position = xWorld * vec4(wpos, 1.0);
   }
 }
 `;

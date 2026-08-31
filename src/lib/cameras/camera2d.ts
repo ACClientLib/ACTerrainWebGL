@@ -3,6 +3,12 @@ import * as settings from '../../settings'
 import Coordinates from "../coordinates";
 import { BaseCamera } from './basecamera';
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
+import {
+  LAND_BLOCK_SIZE,
+  MAP_SIZE,
+  MAX_TERRAIN_HEIGHT,
+  landBlockId
+} from '../worldgeometry';
 
 function isTouchDevice() {
   return typeof window.ontouchstart !== "undefined";
@@ -14,7 +20,7 @@ export class Camera2D extends BaseCamera {
   private lastDistance: number = 0;
   private distance: number = 0;
   
-  public MapSize: Vector3 = new Vector3(255 * 192, 255 * 192, 700);
+  public MapSize: Vector3 = new Vector3(MAP_SIZE, MAP_SIZE, MAX_TERRAIN_HEIGHT);
 
   get Zoom() { return this._zoom; }
   set Zoom(v) { this._zoom = v; }
@@ -40,8 +46,8 @@ export class Camera2D extends BaseCamera {
       top: 0,
       right: this.canvas.width,
       bottom: this.canvas.height,
-      near: 0.000901,
-      far: 100000000000
+      near: -4096,
+      far: 4096
     });
   }
 
@@ -109,6 +115,7 @@ export class Camera2D extends BaseCamera {
     this.canvas.addEventListener("wheel", (event) => {
       if (this.renderer.currentCamera != this) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       this.handleWheel(event);
     });
   }
@@ -223,8 +230,9 @@ export class Camera2D extends BaseCamera {
   }
 
   CoordsToScreen(coords: Coordinates) {
-    let offset = new Vector3((coords.LBX()) * 192 + coords.LocalX, coords.LBY() * 192 + coords.LocalY);
-    offset = offset.divide(new Vector3(255 * 192, 255 * 192, 1)).multiply(this.MapSize);
+    let offset = new Vector3(coords.LBX() * LAND_BLOCK_SIZE + coords.LocalX,
+      coords.LBY() * LAND_BLOCK_SIZE + coords.LocalY);
+    offset = offset.divide(new Vector3(MAP_SIZE, MAP_SIZE, 1)).multiply(this.MapSize);
     return this.WorldToScreen(new Vector3(offset.x, this.MapSize.y - offset.y));
   }
 
@@ -235,7 +243,7 @@ export class Camera2D extends BaseCamera {
     if (offset.x < 0) offset.x = 0;
     if (offset.y < 0) offset.y = 0;
 
-    const landblock = (((Math.min(Math.floor(offset.x / 192.), 0xFE)) * Math.pow(2, 24)) + (Math.min(Math.floor(offset.y / 192.), 0xFE) << 16));
+    const landblock = landBlockId(Math.floor(offset.x / LAND_BLOCK_SIZE), Math.floor(offset.y / LAND_BLOCK_SIZE));
     return new Coordinates(landblock, offset.x % 192, offset.y % 192, 0);
   }
 }

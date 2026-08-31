@@ -1,3 +1,9 @@
+import {
+  LAND_BLOCK_SIZE,
+  TERRAIN_CELL_SIZE,
+  TERRAIN_DATA_SIDE
+} from '../lib/worldgeometry'
+
 export const TerrainFragSource = `#version 300 es
 
 precision highp float;
@@ -6,10 +12,7 @@ precision highp sampler2D;
 precision highp sampler2DArray;
 
 const int roadTextureIdx = 32;
-const float dataWidth = 2041.0;
-
-// Height lookup table from dat region file
-uniform float heightTable[255];
+const float dataWidth = ${TERRAIN_DATA_SIDE.toFixed(1)};
 
 // Array indicating loaded terrain textures (0 = not loaded, 1 = loaded)
 uniform float hasTerrainTexture[32];
@@ -396,9 +399,11 @@ void main() {
 
     // Highlight landcell/landblock lines
     float ep = pixelSize;
-    if (showLandblockLines > 0.5 && (fract(wpos.x / 192.0) < ep / 3. || fract(wpos.y / 192.0) < ep / 3.)) {
+    if (showLandblockLines > 0.5 && (fract(wpos.x / ${LAND_BLOCK_SIZE.toFixed(1)}) < ep / 3. ||
+      fract(wpos.y / ${LAND_BLOCK_SIZE.toFixed(1)}) < ep / 3.)) {
         finalColor = vec4(1.0, 0.0, 0.0, 1.0);
-    } else if (showLandcellLines > 0.5 && (fract(wpos.x / 24.0) < ep * 2.0 || fract(wpos.y / 24.0) < ep * 2.0)) {
+    } else if (showLandcellLines > 0.5 && (fract(wpos.x / ${TERRAIN_CELL_SIZE.toFixed(1)}) < ep * 2.0 ||
+      fract(wpos.y / ${TERRAIN_CELL_SIZE.toFixed(1)}) < ep * 2.0)) {
         finalColor = vec4(1.0, 0.0, 1.0, 1.0);
     }
 
