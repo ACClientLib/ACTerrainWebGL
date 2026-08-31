@@ -1,5 +1,6 @@
 import { LoadingProfiler, type LoadingTimingSnapshot } from './loadingprofiler'
 import type { CacheDiagnostics, CacheNamespace, CacheWorkerMessage, CacheWorkerRequest } from './opfsresourcecacheprotocol'
+import CacheWorker from './opfsresourcecacheworker?worker'
 
 export interface CachedResource {
   formatVersion: number
@@ -34,10 +35,7 @@ class OpfsCacheWorkerClient {
   constructor() {
     this.ready = new Promise(resolve => { this.resolveReady = resolve })
     try {
-      const workerUrl = new URL('./opfsresourcecacheworker.ts', import.meta.url)
-      const configuredMaxBytes = Number(import.meta.env.VITE_ACTERRAIN_CACHE_MAX_BYTES)
-      if (Number.isFinite(configuredMaxBytes) && configuredMaxBytes > 0) workerUrl.searchParams.set('maxBytes', String(configuredMaxBytes))
-      this.worker = new Worker(workerUrl, { type: 'module' })
+      this.worker = new CacheWorker()
       this.worker.onmessage = event => this.handleMessage(event.data as CacheWorkerMessage)
       this.worker.onerror = event => this.disable(event.message || 'OPFS cache worker failed')
       addEventListener('pagehide', () => this.shutdown(), { once: true })
