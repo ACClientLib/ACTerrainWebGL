@@ -13,7 +13,8 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   display: flex;
@@ -43,7 +44,10 @@ canvas {
   top: 0;
   left: 0;
   z-index: 2000;
-  text-shadow: 1px 1px 2px black, 0 0 1em black, 0 0 0.2em black;
+  text-shadow:
+    1px 1px 2px black,
+    0 0 1em black,
+    0 0 0.2em black;
 }
 
 .loaded canvas {
@@ -51,7 +55,6 @@ canvas {
   animation-iteration-count: 1;
   animation-fill-mode: forwards;
 }
-
 
 .loaded #loader {
   animation: fadeOutAnimation ease 0.25s;
@@ -61,19 +64,19 @@ canvas {
 
 @keyframes fadeOutAnimation {
   0% {
-      opacity: 1;
+    opacity: 1;
   }
   100% {
-      opacity: 0;
+    opacity: 0;
   }
 }
 
 @keyframes fadeInAnimation {
   0% {
-      opacity: 0;
+    opacity: 0;
   }
   100% {
-      opacity: 1;
+    opacity: 1;
   }
 }
 
@@ -86,7 +89,7 @@ canvas {
 
 .lds-grid {
   /* change color here */
-  color: #1c4c5b
+  color: #1c4c5b;
 }
 .lds-grid,
 .lds-grid div {
@@ -152,7 +155,8 @@ canvas {
   animation-delay: -1.6s;
 }
 @keyframes lds-grid {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {

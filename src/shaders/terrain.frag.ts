@@ -1,8 +1,8 @@
 import {
   LAND_BLOCK_SIZE,
   TERRAIN_CELL_SIZE,
-  TERRAIN_DATA_SIDE
-} from '../lib/worldgeometry'
+  TERRAIN_DATA_SIDE,
+} from "../lib/worldgeometry";
 
 export const TerrainFragSource = `#version 300 es
 

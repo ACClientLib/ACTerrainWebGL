@@ -1,6 +1,6 @@
-import GUI from 'lil-gui'
+import GUI from "lil-gui";
 
-const gui = new GUI()
-gui.close()
+const gui = new GUI();
+gui.close();
 
-export default gui
+export default gui;

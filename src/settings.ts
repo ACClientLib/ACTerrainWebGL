@@ -1,20 +1,20 @@
 const labels = {
-  minZoom: 'minZoom',
-  maxZoom: 'maxZoom',
-  minZoomForTextures: 'minZoomForTextures',
-  showLandcellLines: 'showLandcellLines',
-  showLandblockLines: 'showLandblockLines',
-  badWireframe: 'badWireframe',
-  showDebug: 'showDebug',
-  showObjects: 'showObjects',
-  showServerSpawns: 'showServerSpawns',
-  showParticles: 'showParticles',
-  minZoomFor3DObjects: 'minZoomFor3DObjects',
-  renderQuality: 'renderQuality',
-  sceneryEnabled: 'sceneryEnabled'
-}
+  minZoom: "minZoom",
+  maxZoom: "maxZoom",
+  minZoomForTextures: "minZoomForTextures",
+  showLandcellLines: "showLandcellLines",
+  showLandblockLines: "showLandblockLines",
+  badWireframe: "badWireframe",
+  showDebug: "showDebug",
+  showObjects: "showObjects",
+  showServerSpawns: "showServerSpawns",
+  showParticles: "showParticles",
+  minZoomFor3DObjects: "minZoomFor3DObjects",
+  renderQuality: "renderQuality",
+  sceneryEnabled: "sceneryEnabled",
+};
 
-const data =  {
+const data = {
   minZoom: 0.002,
   maxZoom: 1000,
   minZoomForTextures: 0.02,
@@ -33,9 +33,6 @@ const data =  {
   get renderScale() {
     return data.maxRenderQuality + 1 - data.renderQuality;
   },
-}
-
-export {
-  data,
-  labels,
 };
+
+export { data, labels };

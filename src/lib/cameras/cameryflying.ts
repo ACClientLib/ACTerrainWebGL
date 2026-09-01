@@ -3,24 +3,24 @@ import { BaseCamera } from "./basecamera";
 
 // Flying 3D Camera implementation
 export class CameraFlying extends BaseCamera {
-  private _yaw = 0;     // Rotation around Z axis (left/right, since Y is forward)
-  private _pitch = 0;   // Rotation around X axis (up/down)
-  private _roll = 0;    // Rotation around Y axis (banking)
-  
-  private _fov = 45;    // Field of view in degrees
+  private _yaw = 0; // Rotation around Z axis (left/right, since Y is forward)
+  private _pitch = 0; // Rotation around X axis (up/down)
+  private _roll = 0; // Rotation around Y axis (banking)
+
+  private _fov = 45; // Field of view in degrees
   // A very small near plane wastes most of the 24-bit depth buffer when the
   // scene spans the whole map. Keep it above sub-unit distances to improve
   // terrain/building depth separation in the 3D view.
   private _near = 1;
   private _far = 100000;
-  
+
   private _moveSpeed = 25;
   private _mouseSensitivity = 0.005; // Increased slightly as per previous suggestion
-  
+
   private _forward = new Vector3(0, 1, 0); // Y-forward
   private _right = new Vector3(1, 0, 0);
   private _up = new Vector3(0, 0, 1); // Z-up
-  
+
   private _keys: { [key: string]: boolean } = {};
   private _touchPointers = new Map<number, Vector2>();
   private _touchLastDistance = 0;
@@ -28,20 +28,46 @@ export class CameraFlying extends BaseCamera {
   private _touchLastAngle = 0;
   private _pointerTouchActive = false;
 
-  get Yaw() { return this._yaw; }
-  set Yaw(v) { this._yaw = v; this.updateVectors(); }
-  
-  get Pitch() { return this._pitch; }
-  set Pitch(v) { this._pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, v)); this.updateVectors(); }
-  
-  get Roll() { return this._roll; }
-  set Roll(v) { this._roll = v; this.updateVectors(); }
+  get Yaw() {
+    return this._yaw;
+  }
+  set Yaw(v) {
+    this._yaw = v;
+    this.updateVectors();
+  }
 
-  get FOV() { return this._fov; }
-  set FOV(v) { this._fov = Math.max(1, Math.min(179, v)); }
+  get Pitch() {
+    return this._pitch;
+  }
+  set Pitch(v) {
+    this._pitch = Math.max(
+      -Math.PI / 2 + 0.01,
+      Math.min(Math.PI / 2 - 0.01, v),
+    );
+    this.updateVectors();
+  }
 
-  get MoveSpeed() { return this._moveSpeed; }
-  set MoveSpeed(v) { this._moveSpeed = Math.max(0.1, Math.min(400, v)); }
+  get Roll() {
+    return this._roll;
+  }
+  set Roll(v) {
+    this._roll = v;
+    this.updateVectors();
+  }
+
+  get FOV() {
+    return this._fov;
+  }
+  set FOV(v) {
+    this._fov = Math.max(1, Math.min(179, v));
+  }
+
+  get MoveSpeed() {
+    return this._moveSpeed;
+  }
+  set MoveSpeed(v) {
+    this._moveSpeed = Math.max(0.1, Math.min(400, v));
+  }
 
   get ViewProjection() {
     const aspect = this.canvas.width / this.canvas.height;
@@ -49,7 +75,7 @@ export class CameraFlying extends BaseCamera {
       fovy: (this._fov * Math.PI) / 180,
       aspect: aspect,
       near: this._near,
-      far: this._far
+      far: this._far,
     });
   }
 
@@ -58,7 +84,7 @@ export class CameraFlying extends BaseCamera {
     return new Matrix4().lookAt({
       eye: this.Position,
       center: target,
-      up: this._up
+      up: this._up,
     });
   }
 
@@ -126,29 +152,54 @@ export class CameraFlying extends BaseCamera {
   }
 
   private setupTouchEvents() {
-    const touchOptions: AddEventListenerOptions = { passive: false, capture: true };
+    const touchOptions: AddEventListenerOptions = {
+      passive: false,
+      capture: true,
+    };
 
     // Pointer Events are the primary path on newer mobile browsers.
-    window.addEventListener("pointerdown", (event) => {
-      if (this.renderer.currentCamera != this || event.pointerType === "mouse") return;
-      event.preventDefault();
-      this._pointerTouchActive = true;
-      this.canvas.setPointerCapture(event.pointerId);
-      this._touchPointers.set(event.pointerId, new Vector2(event.clientX, event.clientY));
-      this._touchLastDistance = this.touchDistance();
-      this._touchLastMidpoint = this.touchMidpoint();
-      this._touchLastAngle = this.touchAngle();
-    }, touchOptions);
+    window.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (
+          this.renderer.currentCamera != this ||
+          event.pointerType === "mouse"
+        )
+          return;
+        event.preventDefault();
+        this._pointerTouchActive = true;
+        this.canvas.setPointerCapture(event.pointerId);
+        this._touchPointers.set(
+          event.pointerId,
+          new Vector2(event.clientX, event.clientY),
+        );
+        this._touchLastDistance = this.touchDistance();
+        this._touchLastMidpoint = this.touchMidpoint();
+        this._touchLastAngle = this.touchAngle();
+      },
+      touchOptions,
+    );
 
-    window.addEventListener("pointermove", (event) => {
-      if (this.renderer.currentCamera != this || event.pointerType === "mouse") return;
-      const previous = this._touchPointers.get(event.pointerId);
-      if (!previous) return;
-      event.preventDefault();
-      const previousPositions = new Map(this._touchPointers);
-      this._touchPointers.set(event.pointerId, new Vector2(event.clientX, event.clientY));
-      this.processTouchMovement(previousPositions);
-    }, touchOptions);
+    window.addEventListener(
+      "pointermove",
+      (event) => {
+        if (
+          this.renderer.currentCamera != this ||
+          event.pointerType === "mouse"
+        )
+          return;
+        const previous = this._touchPointers.get(event.pointerId);
+        if (!previous) return;
+        event.preventDefault();
+        const previousPositions = new Map(this._touchPointers);
+        this._touchPointers.set(
+          event.pointerId,
+          new Vector2(event.clientX, event.clientY),
+        );
+        this.processTouchMovement(previousPositions);
+      },
+      touchOptions,
+    );
 
     const endPointerTouch = (event: PointerEvent) => {
       if (event.pointerType === "mouse") return;
@@ -164,33 +215,52 @@ export class CameraFlying extends BaseCamera {
     window.addEventListener("pointerup", endPointerTouch);
     window.addEventListener("pointercancel", endPointerTouch);
 
-    window.addEventListener("touchstart", (event) => {
-      if (this.renderer.currentCamera != this || this._pointerTouchActive) return;
-      event.preventDefault();
-      if (event.touches.length === 1) this._touchPointers.clear();
-      for (const touch of Array.from(event.changedTouches)) {
-        this._touchPointers.set(touch.identifier, new Vector2(touch.clientX, touch.clientY));
-      }
-      this._touchLastDistance = this.touchDistance();
-      this._touchLastMidpoint = this.touchMidpoint();
-      this._touchLastAngle = this.touchAngle();
-    }, touchOptions);
+    window.addEventListener(
+      "touchstart",
+      (event) => {
+        if (this.renderer.currentCamera != this || this._pointerTouchActive)
+          return;
+        event.preventDefault();
+        if (event.touches.length === 1) this._touchPointers.clear();
+        for (const touch of Array.from(event.changedTouches)) {
+          this._touchPointers.set(
+            touch.identifier,
+            new Vector2(touch.clientX, touch.clientY),
+          );
+        }
+        this._touchLastDistance = this.touchDistance();
+        this._touchLastMidpoint = this.touchMidpoint();
+        this._touchLastAngle = this.touchAngle();
+      },
+      touchOptions,
+    );
 
-    window.addEventListener("touchmove", (event) => {
-      if (this.renderer.currentCamera != this || this._pointerTouchActive) return;
-      event.preventDefault();
+    window.addEventListener(
+      "touchmove",
+      (event) => {
+        if (this.renderer.currentCamera != this || this._pointerTouchActive)
+          return;
+        event.preventDefault();
 
-      const previousPositions = new Map(this._touchPointers);
-      const activeIds = new Set(Array.from(event.touches).map(touch => touch.identifier));
-      for (const identifier of this._touchPointers.keys()) {
-        if (!activeIds.has(identifier)) this._touchPointers.delete(identifier);
-      }
-      for (const touch of Array.from(event.touches)) {
-        this._touchPointers.set(touch.identifier, new Vector2(touch.clientX, touch.clientY));
-      }
+        const previousPositions = new Map(this._touchPointers);
+        const activeIds = new Set(
+          Array.from(event.touches).map((touch) => touch.identifier),
+        );
+        for (const identifier of this._touchPointers.keys()) {
+          if (!activeIds.has(identifier))
+            this._touchPointers.delete(identifier);
+        }
+        for (const touch of Array.from(event.touches)) {
+          this._touchPointers.set(
+            touch.identifier,
+            new Vector2(touch.clientX, touch.clientY),
+          );
+        }
 
-      this.processTouchMovement(previousPositions);
-    }, touchOptions);
+        this.processTouchMovement(previousPositions);
+      },
+      touchOptions,
+    );
 
     const endTouch = (event: TouchEvent) => {
       if (this.renderer.currentCamera != this) return;
@@ -211,7 +281,9 @@ export class CameraFlying extends BaseCamera {
 
   private processTouchMovement(previousPositions: Map<number, Vector2>) {
     if (this._touchPointers.size === 1) {
-      const [identifier, current] = Array.from(this._touchPointers.entries())[0];
+      const [identifier, current] = Array.from(
+        this._touchPointers.entries(),
+      )[0];
       const previous = previousPositions.get(identifier);
       if (previous) {
         this.handleMouseLook(current.x - previous.x, current.y - previous.y);
@@ -224,7 +296,7 @@ export class CameraFlying extends BaseCamera {
     const previousMidpoint = this._touchLastMidpoint ?? midpoint;
     this.moveFromScreenDelta(
       midpoint.x - previousMidpoint.x,
-      midpoint.y - previousMidpoint.y
+      midpoint.y - previousMidpoint.y,
     );
 
     const angle = this.touchAngle();
@@ -236,7 +308,8 @@ export class CameraFlying extends BaseCamera {
 
     const distance = this.touchDistance();
     if (this._touchLastDistance > 0) {
-      const dolly = (distance - this._touchLastDistance) * this.touchMoveScale();
+      const dolly =
+        (distance - this._touchLastDistance) * this.touchMoveScale();
       this.Position.add(this._forward.clone().scale(dolly));
     }
     this._touchLastDistance = distance;
@@ -271,7 +344,7 @@ export class CameraFlying extends BaseCamera {
     const horizontalForward = new Vector3(this._forward.x, this._forward.y, 0);
     const horizontalLength = Math.sqrt(
       horizontalForward.x * horizontalForward.x +
-      horizontalForward.y * horizontalForward.y
+        horizontalForward.y * horizontalForward.y,
     );
     if (horizontalLength > 0) horizontalForward.scale(1 / horizontalLength);
 
@@ -300,7 +373,7 @@ export class CameraFlying extends BaseCamera {
   private updateVectors() {
     // Rotation order: yaw (Z-axis), pitch (X-axis), roll (Y-axis)
     const rotationMatrix = new Matrix4()
-      .rotateZ(this._yaw)  // Yaw around Z-axis (since Y is forward)
+      .rotateZ(this._yaw) // Yaw around Z-axis (since Y is forward)
       .rotateX(this._pitch) // Pitch around X-axis
       .rotateY(this._roll); // Roll around Y-axis (forward axis)
 
@@ -316,32 +389,32 @@ export class CameraFlying extends BaseCamera {
 
   private handleKeyboardInput(dt: number) {
     if (this.renderer.currentCamera != this) return;
-    const speedMultiplier = this._keys['shiftleft'] || this._keys['shiftright'] ? 2 : 1;
-    const moveDistance = (this._moveSpeed * speedMultiplier / 50000) * dt;
+    const speedMultiplier =
+      this._keys["shiftleft"] || this._keys["shiftright"] ? 2 : 1;
+    const moveDistance = ((this._moveSpeed * speedMultiplier) / 50000) * dt;
 
     // WASD movement
-    if (this._keys['keyw'] || this._keys['arrowup']) {
+    if (this._keys["keyw"] || this._keys["arrowup"]) {
       this.Position.add(this._forward.clone().scale(moveDistance));
     }
-    if (this._keys['keys'] || this._keys['arrowdown']) {
+    if (this._keys["keys"] || this._keys["arrowdown"]) {
       this.Position.subtract(this._forward.clone().scale(moveDistance));
     }
-    if (this._keys['keya'] || this._keys['arrowleft']) {
+    if (this._keys["keya"] || this._keys["arrowleft"]) {
       this.Position.add(this._right.clone().scale(moveDistance));
     }
-    if (this._keys['keyd'] || this._keys['arrowright']) {
+    if (this._keys["keyd"] || this._keys["arrowright"]) {
       this.Position.subtract(this._right.clone().scale(moveDistance));
     }
 
     // Vertical movement always follows AC's world Z axis, independent of view pitch.
     const worldUp = new Vector3(0, 0, 1);
-    if (this._keys['space']) {
+    if (this._keys["space"]) {
       this.Position.add(worldUp.clone().scale(moveDistance));
     }
-    if (this._keys['controlleft'] || this._keys['controlright']) {
+    if (this._keys["controlleft"] || this._keys["controlright"]) {
       this.Position.subtract(worldUp.scale(moveDistance));
     }
-
   }
 
   LookAt(target: Vector3) {
@@ -357,25 +430,37 @@ export class CameraFlying extends BaseCamera {
     this.Roll = roll;
   }
 
-  GetForward() { return this._forward.clone(); }
-  GetRight() { return this._right.clone(); }
-  GetUp() { return this._up.clone(); }
+  GetForward() {
+    return this._forward.clone();
+  }
+  GetRight() {
+    return this._right.clone();
+  }
+  GetUp() {
+    return this._up.clone();
+  }
   get ParticleRight() {
     // These are upright Z-axis billboards, so only the camera's horizontal
     // facing direction determines their rotation. Deriving the axis from the
     // controller direction avoids mixing view-matrix rows/columns. Account
     // for the Y conversion and view-space X mirror used by object rendering.
-    const forward = this.GetForward()
-    return new Vector3(forward.y, forward.x, 0).normalize()
+    const forward = this.GetForward();
+    return new Vector3(forward.y, forward.x, 0).normalize();
   }
   get ParticleUp() {
-    return new Vector3(0, 0, 1)
+    return new Vector3(0, 0, 1);
   }
 
   GetMapPosition(): Vector3 {
-    const ray = this.ScreenToWorldRay(this.canvas.width / 2, this.canvas.height / 2);
+    const ray = this.ScreenToWorldRay(
+      this.canvas.width / 2,
+      this.canvas.height / 2,
+    );
     if (Math.abs(ray.direction.z) > 0.000001) {
-      const groundHeight = this.renderer.getTerrainHeightAt(this.Position.x, this.Position.y);
+      const groundHeight = this.renderer.getTerrainHeightAt(
+        this.Position.x,
+        this.Position.y,
+      );
       const distance = (groundHeight - ray.origin.z) / ray.direction.z;
       if (distance >= 0) {
         return ray.origin.clone().add(ray.direction.clone().scale(distance));
@@ -387,24 +472,31 @@ export class CameraFlying extends BaseCamera {
   WorldToScreen(worldPosition: Vector3): Vector3 {
     const clipSpace = worldPosition.clone().transform(this.Transform);
     const ndc = clipSpace.clone().scale(1 / 1);
-    
+
     const screenX = (ndc.x + 1) * 0.5 * this.canvas.width;
     const screenY = (1 - ndc.y) * 0.5 * this.canvas.height;
-    
+
     return new Vector3(screenX, screenY, ndc.z);
   }
 
-  ScreenToWorldRay(screenX: number, screenY: number, transform = this.FrameTransform, inverseTransform = transform === this.FrameTransform ? this.FrameInverseTransform : transform.clone().invert()): { origin: Vector3, direction: Vector3 } {
+  ScreenToWorldRay(
+    screenX: number,
+    screenY: number,
+    transform = this.FrameTransform,
+    inverseTransform = transform === this.FrameTransform
+      ? this.FrameInverseTransform
+      : transform.clone().invert(),
+  ): { origin: Vector3; direction: Vector3 } {
     const clipPos = this.getClipSpaceMousePosition(screenX, screenY);
-    
+
     const nearPoint = new Vector3(clipPos.x, clipPos.y, -1);
     const farPoint = new Vector3(clipPos.x, clipPos.y, 1);
-    
+
     const worldNear = nearPoint.transform(inverseTransform);
     const worldFar = farPoint.transform(inverseTransform);
-    
+
     const direction = worldFar.clone().subtract(worldNear).normalize();
-    
+
     return { origin: worldNear, direction };
   }
 }

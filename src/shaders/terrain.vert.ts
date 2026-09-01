@@ -5,9 +5,9 @@ import {
   MAX_TERRAIN_HEIGHT,
   TERRAIN_CELLS_PER_LAND_BLOCK,
   TERRAIN_CELL_SIZE,
-  TERRAIN_DATA_SIDE
-} from '../lib/worldgeometry'
-import { terrainHeightTable } from '../data/heighttable'
+  TERRAIN_DATA_SIDE,
+} from "../lib/worldgeometry";
+import { terrainHeightTable } from "../data/heighttable";
 
 export const TerrainVertSource = `#version 300 es
 

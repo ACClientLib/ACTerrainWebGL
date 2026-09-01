@@ -18,4 +18,4 @@ void main() {
   float lighting = max(luminosity, 0.35 + max(dot(normalize(normal), lightDirection), 0.0) * max(diffuseAmount, 0.65));
   outColor = vec4(color.rgb, color.a);
 }
-`
+`;

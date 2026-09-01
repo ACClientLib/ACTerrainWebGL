@@ -1,14 +1,13 @@
-
-import * as settings from '../../settings'
+import * as settings from "../../settings";
 import Coordinates from "../coordinates";
-import { BaseCamera } from './basecamera';
+import { BaseCamera } from "./basecamera";
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
 import {
   LAND_BLOCK_SIZE,
   MAP_SIZE,
   MAX_TERRAIN_HEIGHT,
-  landBlockId
-} from '../worldgeometry';
+  landBlockId,
+} from "../worldgeometry";
 
 function isTouchDevice() {
   return typeof window.ontouchstart !== "undefined";
@@ -19,13 +18,19 @@ export class Camera2D extends BaseCamera {
   private _didPinch = false;
   private lastDistance: number = 0;
   private distance: number = 0;
-  
+
   public MapSize: Vector3 = new Vector3(MAP_SIZE, MAP_SIZE, MAX_TERRAIN_HEIGHT);
 
-  get Zoom() { return this._zoom; }
-  set Zoom(v) { this._zoom = v; }
+  get Zoom() {
+    return this._zoom;
+  }
+  set Zoom(v) {
+    this._zoom = v;
+  }
 
-  get Scale() { return this.Zoom / settings.data.renderScale; }
+  get Scale() {
+    return this.Zoom / settings.data.renderScale;
+  }
 
   get ViewPortCenter() {
     return new Vector3(this.ViewportSize.x / 2.0, this.ViewportSize.y / 2.0, 1);
@@ -34,20 +39,26 @@ export class Camera2D extends BaseCamera {
   get TranslationMatrix() {
     this.Position.z = 1;
     const zoomVec = new Vector3(this.Scale, this.Scale, 1);
-    const offset = this.ViewportSize.clone().divide(zoomVec).divide(new Vector3(2, 2, 1));
+    const offset = this.ViewportSize.clone()
+      .divide(zoomVec)
+      .divide(new Vector3(2, 2, 1));
     return Matrix4.IDENTITY.clone()
       .scale(zoomVec.clone())
-      .translate(this.Position.clone().multiply(new Vector3(-1, -1, 1)).add(offset));
+      .translate(
+        this.Position.clone()
+          .multiply(new Vector3(-1, -1, 1))
+          .add(offset),
+      );
   }
 
   get ViewProjection() {
-    return (new Matrix4()).ortho({
+    return new Matrix4().ortho({
       left: 0,
       top: 0,
       right: this.canvas.width,
       bottom: this.canvas.height,
       near: -4096,
-      far: 4096
+      far: 4096,
     });
   }
 
@@ -64,31 +75,46 @@ export class Camera2D extends BaseCamera {
   }
 
   private setupTouchEvents() {
-    const touchOptions: AddEventListenerOptions = { passive: false, capture: true };
+    const touchOptions: AddEventListenerOptions = {
+      passive: false,
+      capture: true,
+    };
 
-    this.canvas.addEventListener("touchstart", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-      this._mouseDown = true;
-      this.lastDistance = 0;
-      this.distance = 0;
-    }, touchOptions);
+    this.canvas.addEventListener(
+      "touchstart",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        event.preventDefault();
+        this._mouseDown = true;
+        this.lastDistance = 0;
+        this.distance = 0;
+      },
+      touchOptions,
+    );
 
-    this.canvas.addEventListener("touchend", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-      this._mouseDown = false;
-    }, touchOptions);
+    this.canvas.addEventListener(
+      "touchend",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        event.preventDefault();
+        this._mouseDown = false;
+      },
+      touchOptions,
+    );
 
-    this.canvas.addEventListener("touchmove", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-      if (event.touches.length == 1) {
-        this.handleMove(event.touches[0].clientX, event.touches[0].clientY);
-      } else {
-        this.handlePinch(event);
-      }
-    }, touchOptions);
+    this.canvas.addEventListener(
+      "touchmove",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        event.preventDefault();
+        if (event.touches.length == 1) {
+          this.handleMove(event.touches[0].clientX, event.touches[0].clientY);
+        } else {
+          this.handlePinch(event);
+        }
+      },
+      touchOptions,
+    );
   }
 
   private setupMouseEvents() {
@@ -124,35 +150,43 @@ export class Camera2D extends BaseCamera {
 
   private handlePinch(event: TouchEvent) {
     if (this.renderer.currentCamera != this) return;
-    const touch0 = new Vector2(event.touches[0].clientX, event.touches[0].clientY);
-    const touch1 = new Vector2(event.touches[1].clientX, event.touches[1].clientY);
+    const touch0 = new Vector2(
+      event.touches[0].clientX,
+      event.touches[0].clientY,
+    );
+    const touch1 = new Vector2(
+      event.touches[1].clientX,
+      event.touches[1].clientY,
+    );
 
     this.distance = Math.sqrt(
       (touch0.x - touch1.x) * (touch0.x - touch1.x) +
-      (touch0.y - touch1.y) * (touch0.y - touch1.y)
+        (touch0.y - touch1.y) * (touch0.y - touch1.y),
     );
 
     if (this.lastDistance != 0) {
       const midpoint = new Vector2(
         (touch0.x + touch1.x) / 2,
-        (touch0.y + touch1.y) / 2
+        (touch0.y + touch1.y) / 2,
       );
       const pinchWorldBefore = this.ScreenToWorld(
-        new Vector3(midpoint.x, midpoint.y, 1)
+        new Vector3(midpoint.x, midpoint.y, 1),
       );
 
       let newZoom = 0;
       if (this.lastDistance > this.distance) {
-        newZoom = this.Zoom / Math.pow(2, (this.lastDistance - this.distance) * 0.0075);
+        newZoom =
+          this.Zoom / Math.pow(2, (this.lastDistance - this.distance) * 0.0075);
       } else if (this.lastDistance < this.distance) {
-        newZoom = this.Zoom * Math.pow(2, (this.distance - this.lastDistance) * 0.0075);
+        newZoom =
+          this.Zoom * Math.pow(2, (this.distance - this.lastDistance) * 0.0075);
       }
 
       if (newZoom > 0) {
         this.Zoom = this.capZoom(newZoom);
 
         const pinchWorldAfter = this.ScreenToWorld(
-          new Vector3(midpoint.x, midpoint.y, 1)
+          new Vector3(midpoint.x, midpoint.y, 1),
         );
         this.Position.x += pinchWorldBefore.x - pinchWorldAfter.x;
         this.Position.y += pinchWorldBefore.y - pinchWorldAfter.y;
@@ -164,14 +198,17 @@ export class Camera2D extends BaseCamera {
 
   private handleWheel(event: WheelEvent) {
     if (this.renderer.currentCamera != this) return;
-    const clipPos = this.getClipSpaceMousePosition(event.clientX, event.clientY);
+    const clipPos = this.getClipSpaceMousePosition(
+      event.clientX,
+      event.clientY,
+    );
     const preZoom = this.Transform.clone().invert().transform(clipPos);
 
     const newZoom = this.Zoom * Math.pow(2, event.deltaY * -0.005);
     this.Zoom = this.capZoom(newZoom);
-    
+
     const postZoom = this.Transform.clone().invert().transform(clipPos);
-  
+
     this.Position.x += preZoom[0] - postZoom[0];
     this.Position.y += preZoom[1] - postZoom[1];
   }
@@ -184,7 +221,10 @@ export class Camera2D extends BaseCamera {
   }
 
   private capZoom(zoom: number) {
-    return Math.max(settings.data.minZoom, Math.min(settings.data.maxZoom, zoom));
+    return Math.max(
+      settings.data.minZoom,
+      Math.min(settings.data.maxZoom, zoom),
+    );
   }
 
   update(dt: number) {
@@ -246,20 +286,27 @@ export class Camera2D extends BaseCamera {
   }
 
   CoordsToScreen(coords: Coordinates) {
-    let offset = new Vector3(coords.LBX() * LAND_BLOCK_SIZE + coords.LocalX,
-      coords.LBY() * LAND_BLOCK_SIZE + coords.LocalY);
-    offset = offset.divide(new Vector3(MAP_SIZE, MAP_SIZE, 1)).multiply(this.MapSize);
+    let offset = new Vector3(
+      coords.LBX() * LAND_BLOCK_SIZE + coords.LocalX,
+      coords.LBY() * LAND_BLOCK_SIZE + coords.LocalY,
+    );
+    offset = offset
+      .divide(new Vector3(MAP_SIZE, MAP_SIZE, 1))
+      .multiply(this.MapSize);
     return this.WorldToScreen(new Vector3(offset.x, this.MapSize.y - offset.y));
   }
 
   ScreenToCoords(screenPosition: Vector3) {
     const worldPos = this.ScreenToWorld(screenPosition);
     let offset = new Vector3(worldPos.x, this.MapSize.y - worldPos.y);
-      
+
     if (offset.x < 0) offset.x = 0;
     if (offset.y < 0) offset.y = 0;
 
-    const landblock = landBlockId(Math.floor(offset.x / LAND_BLOCK_SIZE), Math.floor(offset.y / LAND_BLOCK_SIZE));
+    const landblock = landBlockId(
+      Math.floor(offset.x / LAND_BLOCK_SIZE),
+      Math.floor(offset.y / LAND_BLOCK_SIZE),
+    );
     return new Coordinates(landblock, offset.x % 192, offset.y % 192, 0);
   }
 }

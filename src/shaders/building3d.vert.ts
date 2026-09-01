@@ -1,4 +1,4 @@
-import { MAP_SIZE } from '../lib/worldgeometry'
+import { MAP_SIZE } from "../lib/worldgeometry";
 
 export const Building3DVertSource = `#version 300 es
 precision highp float;
@@ -31,4 +31,4 @@ void main() {
   uv = textureUv;
   gl_Position = xWorld * vec4(worldPosition, 1.0);
 }
-`
+`;

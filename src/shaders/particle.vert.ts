@@ -1,4 +1,4 @@
-import { MAP_SIZE } from '../lib/worldgeometry'
+import { MAP_SIZE } from "../lib/worldgeometry";
 
 export const ParticleVertSource = `#version 300 es
 precision highp float;
@@ -21,4 +21,4 @@ void main() {
   vec3 offset = billboard > 0.5 ? cameraRight * local.x + cameraUp * local.z : qrot(qrot(local, planeOrientation), rotation);
   vec3 p = center + offset;
   gl_Position = xWorld * vec4(p.x, ${MAP_SIZE.toFixed(1)} - p.y, p.z, 1.0);
-}`
+}`;
