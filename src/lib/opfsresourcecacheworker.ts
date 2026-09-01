@@ -150,7 +150,7 @@ function readExact(
   handle: SyncAccessHandle,
   length: number,
   at: number,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const result = new Uint8Array(new ArrayBuffer(length));
   if (handle.read(result, { at }) !== length)
     throw new Error("Unexpected end of OPFS cache file");
