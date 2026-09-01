@@ -779,8 +779,9 @@ export class AcDatClient {
     if (uncached.length === 0) return [];
     this.activeCacheReads++;
     const cacheStarted = performance.now();
+    const cacheAbort = new AbortController();
     const cacheRead = this.cache
-      .getMany(uncached.map((id) => this.cacheKey(id)))
+      .getMany(uncached.map((id) => this.cacheKey(id)), cacheAbort.signal)
       .catch(() => null)
       .finally(() => {
         this.activeCacheReads--;
@@ -790,7 +791,10 @@ export class AcDatClient {
         );
       });
     const timeout = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), CACHE_OPERATION_TIMEOUT_MS),
+      setTimeout(() => {
+        cacheAbort.abort();
+        resolve(null);
+      }, CACHE_OPERATION_TIMEOUT_MS),
     );
     const entries = await Promise.race([cacheRead, timeout]);
     if (entries === null) return uncached;

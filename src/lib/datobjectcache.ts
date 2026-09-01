@@ -68,6 +68,7 @@ class OpfsCacheWorkerClient {
   async getMany(
     namespace: CacheNamespace,
     keys: string[],
+    signal?: AbortSignal,
   ): Promise<(CachedResource | null)[]> {
     if (keys.length === 0) return [];
     if (!(await this.ready) || !this.worker) return keys.map(() => null);
@@ -76,7 +77,7 @@ class OpfsCacheWorkerClient {
       namespace,
       keys,
       queuedAt: Date.now(),
-    });
+    }, signal);
     return values ?? keys.map(() => null);
   }
 
@@ -119,11 +120,25 @@ class OpfsCacheWorkerClient {
 
   private request(
     request: AwaitedCacheRequest,
+    signal?: AbortSignal,
   ): Promise<(CachedResource | null)[] | undefined> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        resolve();
+        return;
+      }
       this.pending.set(id, { resolve, reject });
       this.worker!.postMessage({ ...request, id } as CacheWorkerRequest);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          if (!this.pending.delete(id)) return;
+          this.worker?.postMessage({ operation: "cancel", id });
+          resolve();
+        },
+        { once: true },
+      );
     });
   }
 
@@ -213,8 +228,11 @@ export class DatObjectCache {
     return (await sharedWorker.getMany(this.namespace, [key]))[0];
   }
 
-  getMany(keys: string[]): Promise<(CachedResource | null)[]> {
-    return sharedWorker.getMany(this.namespace, keys);
+  getMany(
+    keys: string[],
+    signal?: AbortSignal,
+  ): Promise<(CachedResource | null)[]> {
+    return sharedWorker.getMany(this.namespace, keys, signal);
   }
 
   set(key: string, value: CachedResource): Promise<void> {

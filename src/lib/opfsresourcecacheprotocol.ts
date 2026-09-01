@@ -22,6 +22,7 @@ export type CacheWorkerRequest =
       keys: string[];
       queuedAt: number;
     }
+  | { operation: "cancel"; id: number }
   | {
       operation: "setMany";
       namespace: CacheNamespace;

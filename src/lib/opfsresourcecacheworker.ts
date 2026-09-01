@@ -25,7 +25,8 @@ const MAX_CACHE_BYTES =
     ? configuredMaxBytes
     : 384 * 1024 * 1024;
 const EVICTION_TARGET_BYTES = Math.floor(MAX_CACHE_BYTES * 0.85);
-const COMPACTION_PHYSICAL_FACTOR = 1.15;
+const COMPACTION_PHYSICAL_FACTOR = 1.75;
+const COMPACTION_SLICE_MS = 3;
 const QUOTA_RESERVE_BYTES = 32 * 1024 * 1024;
 const ESTIMATE_INTERVAL_MS = 30_000;
 
@@ -92,6 +93,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const states = new Map<CacheNamespace, NamespaceState>();
 const readQueue: ReadTask[] = [];
+const cancelledReads = new Set<number>();
 const controlQueue: ControlTask[] = [];
 const pendingWrites = new Map<CacheNamespace, Map<string, CachedResource>>([
   ["terrain", new Map()],
@@ -102,7 +104,6 @@ let enabled = false;
 let processing = false;
 let flushDue = false;
 let compactionDue = false;
-let indexPersistenceDue = false;
 let flushTimer: number | undefined;
 let estimatedUsage = 0;
 let estimatedQuota = 0;
@@ -443,14 +444,14 @@ async function updateEstimate(force = false): Promise<void> {
   }
 }
 
-function recordHeader(length: number, checksum: number): Uint8Array {
+function recordHeader(length: number): Uint8Array {
   const bytes = new Uint8Array(RECORD_HEADER_BYTES);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, RECORD_MAGIC, true);
   view.setUint16(4, FORMAT_VERSION, true);
   view.setUint16(6, RECORD_HEADER_BYTES, true);
   view.setUint32(8, length, true);
-  view.setUint32(12, checksum, true);
+  view.setUint32(12, 0);
   return bytes;
 }
 
@@ -462,25 +463,8 @@ function isQuotaError(error: unknown): boolean {
   );
 }
 
-function validateRecord(state: NamespaceState, entry: IndexEntry): Uint8Array {
-  const header = readExact(
-    state.packHandle,
-    RECORD_HEADER_BYTES,
-    entry.offset - RECORD_HEADER_BYTES,
-  );
-  const view = new DataView(header.buffer);
-  if (
-    view.getUint32(0, true) !== RECORD_MAGIC ||
-    view.getUint16(4, true) !== FORMAT_VERSION ||
-    view.getUint16(6, true) !== RECORD_HEADER_BYTES ||
-    view.getUint32(8, true) !== entry.length ||
-    view.getUint32(12, true) !== entry.checksum
-  )
-    throw new Error("Invalid OPFS cache record");
-  const bytes = readExact(state.packHandle, entry.length, entry.offset);
-  if (crc32(bytes) !== entry.checksum)
-    throw new Error("Invalid OPFS cache payload checksum");
-  return bytes;
+function readRecord(state: NamespaceState, entry: IndexEntry): Uint8Array {
+  return readExact(state.packHandle, entry.length, entry.offset);
 }
 
 async function readValues(task: ReadTask): Promise<void> {
@@ -489,17 +473,16 @@ async function readValues(task: ReadTask): Promise<void> {
   const started = performance.now();
   const values: (CachedResource | null)[] = [];
   const transfers: Transferable[] = [];
-  let indexDirty = false;
   for (const key of task.keys) {
+    if (cancelledReads.delete(task.id)) return;
     const entry = state.entries.get(key);
     if (!entry) {
       values.push(null);
       continue;
     }
     try {
-      const bytes = validateRecord(state, entry);
+      const bytes = readRecord(state, entry);
       entry.lastAccess = Date.now();
-      indexDirty = true;
       values.push({
         formatVersion: entry.formatVersion,
         datasetVersion: entry.datasetVersion,
@@ -519,26 +502,6 @@ async function readValues(task: ReadTask): Promise<void> {
   }
   timing("OPFS read", performance.now() - started);
   post({ type: "result", id: task.id, values }, transfers);
-  if (indexDirty) scheduleIndexPersistence();
-}
-
-let indexPersistenceTimer: number | undefined;
-
-function scheduleIndexPersistence(): void {
-  if (indexPersistenceTimer !== undefined) return;
-  indexPersistenceTimer = setTimeout(() => {
-    indexPersistenceTimer = undefined;
-    if (!enabled) return;
-    indexPersistenceDue = true;
-    void pump();
-  }, 5000) as unknown as number;
-}
-
-function persistIndexes(): void {
-  indexPersistenceDue = false;
-  const started = performance.now();
-  for (const state of states.values()) persistIndex(state);
-  timing("OPFS flush", performance.now() - started);
 }
 
 function queueFlush(): void {
@@ -642,8 +605,7 @@ async function flushWrites(): Promise<void> {
     for (let batchIndex = 0; batchIndex < batch.length; batchIndex++) {
       const [key, value] = batch[batchIndex];
       const bytes = new Uint8Array(value.bytes);
-      const checksum = crc32(bytes);
-      const header = recordHeader(bytes.byteLength, checksum);
+      const header = recordHeader(bytes.byteLength);
       const previous = state.entries.get(key);
       const recordOffset = state.packSize;
       const payloadOffset = recordOffset + RECORD_HEADER_BYTES;
@@ -672,7 +634,7 @@ async function flushWrites(): Promise<void> {
         kind: value.kind,
         encoding: value.encoding,
         lastAccess: Date.now(),
-        checksum,
+        checksum: 0,
       });
       if (batchIndex + 1 < batch.length) {
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -787,9 +749,10 @@ async function compactNamespace(namespace: CacheNamespace): Promise<void> {
   const target = await createSlot(namespace, targetSlot, source.generation + 1);
   try {
     let copiedSinceYield = 0;
+    let sliceStarted = performance.now();
     for (const entry of source.entries.values()) {
-      const bytes = validateRecord(source, entry);
-      const header = recordHeader(entry.length, entry.checksum);
+      const bytes = readRecord(source, entry);
+      const header = recordHeader(entry.length);
       writeExact(target.packHandle, header, target.packSize);
       const offset = target.packSize + RECORD_HEADER_BYTES;
       await writeBytes(target.packHandle, bytes, offset);
@@ -797,9 +760,14 @@ async function compactNamespace(namespace: CacheNamespace): Promise<void> {
       target.packSize = offset + entry.length;
       target.activeBytes += RECORD_HEADER_BYTES + entry.length;
       copiedSinceYield += RECORD_HEADER_BYTES + entry.length;
-      if (copiedSinceYield >= WRITE_CHUNK_BYTES) {
+      if (
+        copiedSinceYield >= WRITE_CHUNK_BYTES ||
+        performance.now() - sliceStarted >= COMPACTION_SLICE_MS
+      ) {
         copiedSinceYield = 0;
         await drainReads();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        sliceStarted = performance.now();
       }
     }
     target.packHandle.flush();
@@ -845,10 +813,6 @@ async function pump(): Promise<void> {
         await flushWrites();
         continue;
       }
-      if (indexPersistenceDue) {
-        persistIndexes();
-        continue;
-      }
       if (compactionDue) {
         await new Promise((resolve) => setTimeout(resolve, 0));
         if (readQueue.length === 0 && !flushDue) await compact();
@@ -865,7 +829,6 @@ async function pump(): Promise<void> {
       (readQueue.length > 0 ||
         controlQueue.length > 0 ||
         flushDue ||
-        indexPersistenceDue ||
         compactionDue)
     )
       void pump();
@@ -953,6 +916,15 @@ scope.onmessage = (event) => {
   if (request.operation === "getMany") {
     readQueue.push(request);
     void pump();
+    return;
+  }
+  if (request.operation === "cancel") {
+    cancelledReads.add(request.id);
+    const index = readQueue.findIndex((task) => task.id === request.id);
+    if (index >= 0) {
+      readQueue.splice(index, 1);
+      cancelledReads.delete(request.id);
+    }
     return;
   }
   if (request.operation === "setMany") {
