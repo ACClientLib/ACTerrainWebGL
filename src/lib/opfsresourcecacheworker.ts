@@ -486,6 +486,7 @@ async function readValues(task: ReadTask): Promise<void> {
     }
     try {
       const bytes = readRecord(state, entry);
+      const buffer = bytes.buffer as ArrayBuffer;
       entry.lastAccess = Date.now();
       values.push({
         formatVersion: entry.formatVersion,
@@ -493,9 +494,9 @@ async function readValues(task: ReadTask): Promise<void> {
         resourceId: entry.resourceId,
         kind: entry.kind,
         encoding: entry.encoding,
-        bytes: bytes.buffer,
+        bytes: buffer,
       });
-      transfers.push(bytes.buffer);
+      transfers.push(buffer);
     } catch {
       state.entries.delete(key);
       state.activeBytes -= RECORD_HEADER_BYTES + entry.length;
