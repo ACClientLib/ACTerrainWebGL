@@ -570,12 +570,17 @@ export class WorldObjectRenderer {
       [camera.ViewportSize.x, camera.ViewportSize.y], [camera.ViewportSize.x / 2, camera.ViewportSize.y / 2]]
     for (const [screenX, screenY] of samples) {
       const ray = camera.ScreenToWorldRay(screenX, screenY, camera.FrameTransform, camera.FrameInverseTransform)
-      let distance = maximumDistance
+      // Keep the full ray endpoint as well as the ground intersection. The
+      // ground hit only describes where terrain enters the frustum; using it
+      // as the endpoint drops tall objects that are visible beyond that hit.
+      const farPoint = ray.origin.clone().add(ray.direction.clone().scale(maximumDistance))
+      points.push(farPoint)
       if (ray.direction.z < -0.000001) {
         const groundDistance = -ray.origin.z / ray.direction.z
-        if (groundDistance >= 0) distance = Math.min(distance, groundDistance)
+        if (groundDistance >= 0 && groundDistance <= maximumDistance) {
+          points.push(ray.origin.clone().add(ray.direction.clone().scale(groundDistance)))
+        }
       }
-      points.push(ray.origin.clone().add(ray.direction.clone().scale(distance)))
     }
     const minX = Math.max(0, Math.floor(Math.min(...points.map(point => point.x)) / LAND_BLOCK_SIZE) - 1)
     const maxX = Math.min(MAX_LAND_BLOCK_INDEX, Math.floor(Math.max(...points.map(point => point.x)) / LAND_BLOCK_SIZE) + 1)
