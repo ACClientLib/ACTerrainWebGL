@@ -125,7 +125,7 @@ class OpfsCacheWorkerClient {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
-        resolve();
+        resolve(undefined);
         return;
       }
       this.pending.set(id, { resolve, reject });
@@ -135,7 +135,7 @@ class OpfsCacheWorkerClient {
         () => {
           if (!this.pending.delete(id)) return;
           this.worker?.postMessage({ operation: "cancel", id });
-          resolve();
+          resolve(undefined);
         },
         { once: true },
       );

@@ -151,7 +151,7 @@ function readExact(
   length: number,
   at: number,
 ): Uint8Array {
-  const result = new Uint8Array(length);
+  const result = new Uint8Array(new ArrayBuffer(length));
   if (handle.read(result, { at }) !== length)
     throw new Error("Unexpected end of OPFS cache file");
   return result;
@@ -473,8 +473,12 @@ async function readValues(task: ReadTask): Promise<void> {
   const started = performance.now();
   const values: (CachedResource | null)[] = [];
   const transfers: Transferable[] = [];
+  let indexDirty = false;
   for (const key of task.keys) {
-    if (cancelledReads.delete(task.id)) return;
+    if (cancelledReads.delete(task.id)) {
+      if (indexDirty) persistIndex(state);
+      return;
+    }
     const entry = state.entries.get(key);
     if (!entry) {
       values.push(null);
@@ -500,6 +504,7 @@ async function readValues(task: ReadTask): Promise<void> {
       compactionDue = true;
     }
   }
+  if (indexDirty) persistIndex(state);
   timing("OPFS read", performance.now() - started);
   post({ type: "result", id: task.id, values }, transfers);
 }
