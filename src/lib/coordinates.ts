@@ -1,9 +1,10 @@
 // nothing here is good... but it works so..
 // todo: rewrite and clean up
 
-import { toHexStr } from "./util";
 import {
   LAND_BLOCK_SIDE,
+  LAND_BLOCK_SIZE,
+  MAP_SIZE,
   TERRAIN_CELLS_PER_LAND_BLOCK,
   TERRAIN_CELL_SIZE,
   landBlockId
@@ -97,5 +98,23 @@ export default class Coordinates {
 }
 
 Coordinates.prototype.toString = function() {
-  return `${Math.abs(this.NS).toFixed(3)}${(this.NS >= 0) ? "N" : "S"}, ${Math.abs(this.EW).toFixed(3)}${(this.EW >= 0) ? "E" : "W"}, ${(this.LocalZ / 240).toFixed(3)}Z [0x${toHexStr(this.LandCell)} ${this.LocalX.toFixed(2)}, ${this.LocalY.toFixed(2)}, ${this.LocalZ.toFixed(2)}]`;
+  return formatMapCoordinates(this)
+}
+
+export function formatMapCoordinates(coords: Coordinates): string {
+  return `${Math.abs(coords.NS).toFixed(3)}${coords.NS >= 0 ? 'N' : 'S'}, ${Math.abs(coords.EW).toFixed(3)}${coords.EW >= 0 ? 'E' : 'W'}, ${(coords.LocalZ / 240).toFixed(3)}Z`
+}
+
+export function worldToMapCoordinates(position: { x: number, y: number, z: number }): Coordinates {
+  const eastWest = position.x / MAP_SIZE * 204.0 - 101.95
+  const northSouth = (MAP_SIZE - position.y) / MAP_SIZE * 204.0 - 101.95
+  return Coordinates.FromCoordinates(northSouth, eastWest, position.z)
+}
+
+export function mapCoordinatesToWorld(coords: Coordinates): { x: number, y: number, z: number } {
+  return {
+    x: coords.LBX() * LAND_BLOCK_SIZE + coords.LocalX,
+    y: MAP_SIZE - (coords.LBY() * LAND_BLOCK_SIZE + coords.LocalY),
+    z: coords.LocalZ
+  }
 }

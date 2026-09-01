@@ -12,6 +12,7 @@ import { CameraMode } from './cameras/cameramode'
 import { Camera2D } from './cameras/camera2d'
 import { BaseCamera } from './cameras/basecamera'
 import { CameraFlying } from './cameras/cameryflying'
+import { formatMapCoordinates, worldToMapCoordinates } from './coordinates'
 import { CameraRoute } from './router'
 import gui from './gui'
 import { getFrameStats, recordCpuFrameTime, recordGpuFrameTime, updateFrameRate } from '../tools/fpscounter'
@@ -664,14 +665,14 @@ export class TerrainRenderer {
     
     if (this.currentCameraMode === CameraMode.Camera2D) {
       const camera2D = this.currentCamera as Camera2D
-      coordsInfo = `Coords: ${camera2D.ScreenToCoords(new Vector3(this.mousePos.x / settings.data.renderScale, this.mousePos.y / settings.data.renderScale, 1))}`
+      coordsInfo = formatMapCoordinates(worldToMapCoordinates({
+        x: camera2D.Position.x,
+        y: camera2D.Position.y,
+        z: 0
+      }))
     } else {
       const flyingCam = this.currentCamera as CameraFlying
-      const pos = flyingCam.Position
-      const mapPos = flyingCam.GetMapPosition()
-      
-      coordsInfo = `3D Position: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}) | ` +
-        `Map: (${mapPos.x.toFixed(1)}, ${(this.camera2D.MapSize.y - mapPos.y).toFixed(1)})`
+      coordsInfo = formatMapCoordinates(worldToMapCoordinates(flyingCam.Position))
     }
 
     const frameStats = getFrameStats()
