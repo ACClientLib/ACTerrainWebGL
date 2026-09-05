@@ -470,8 +470,9 @@ vec2 terrainGridEdges() {
 
     bool leftLandblockEdge = terrainCellIndex.x % 8 == 0;
     bool rightLandblockEdge = terrainCellIndex.x % 8 == 7;
-    bool bottomLandblockEdge = terrainCellIndex.y % 8 == 0;
-    bool topLandblockEdge = terrainCellIndex.y % 8 == 7;
+    // Cell indices increase opposite to world Y and cellUV.y.
+    bool bottomLandblockEdge = terrainCellIndex.y % 8 == 7;
+    bool topLandblockEdge = terrainCellIndex.y % 8 == 0;
     float landblockDistance = 1.0;
     if (leftLandblockEdge) landblockDistance = min(landblockDistance, cellUV.x);
     if (rightLandblockEdge) landblockDistance = min(landblockDistance, 1.0 - cellUV.x);
