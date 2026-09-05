@@ -39,8 +39,15 @@ export class TerrainDataClient {
     this.texture = texture;
   }
 
-  async load(source: Promise<ArrayBuffer>): Promise<void> {
+  shutdown(): void {
+    this.pixels = null;
+    this.catalog = null;
+    this.gl.deleteTexture(this.texture);
+  }
+
+  async load(source: Promise<ArrayBuffer>, signal: AbortSignal): Promise<void> {
     const bytes = await source;
+    signal.throwIfAborted();
     const view = new DataView(bytes);
     if (
       bytes.byteLength < 24 ||
@@ -59,13 +66,20 @@ export class TerrainDataClient {
     });
     const image = new Image();
     const imageUrl = URL.createObjectURL(png);
+    let cancel: (() => void) | undefined;
     try {
       await new Promise<void>((resolve, reject) => {
+        cancel = () => {
+          image.src = "";
+          reject(signal.reason);
+        };
+        signal.addEventListener("abort", cancel, { once: true });
         image.onload = () => resolve();
         image.onerror = () =>
           reject(new Error("Unable to decode terrain control PNG"));
         image.src = imageUrl;
       });
+      signal.throwIfAborted();
       if (
         image.naturalWidth !== TERRAIN_DATA_SIDE ||
         image.naturalHeight !== TERRAIN_DATA_SIDE
@@ -104,6 +118,10 @@ export class TerrainDataClient {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     } finally {
+      if (cancel) signal.removeEventListener("abort", cancel);
+      image.onload = null;
+      image.onerror = null;
+      image.src = "";
       URL.revokeObjectURL(imageUrl);
     }
   }

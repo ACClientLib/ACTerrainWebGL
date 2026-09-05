@@ -141,7 +141,7 @@ export class CameraFlying extends BaseCamera {
         this.canvas.requestPointerLock();
         event.preventDefault();
       }
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("mouseup", (event) => {
       if (this.renderer.currentCamera != this) return;
@@ -150,7 +150,7 @@ export class CameraFlying extends BaseCamera {
         document.exitPointerLock();
         event.preventDefault();
       }
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("mousemove", (event) => {
       if (this.renderer.currentCamera != this) return;
@@ -161,18 +161,18 @@ export class CameraFlying extends BaseCamera {
         return;
       }
       this.handleMove(event.clientX, event.clientY);
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     // Keyboard events for movement
     window.addEventListener("keydown", (event) => {
       if (this.renderer.currentCamera != this) return;
       this._keys[event.code.toLowerCase()] = true;
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     window.addEventListener("keyup", (event) => {
       if (this.renderer.currentCamera != this) return;
       this._keys[event.code.toLowerCase()] = false;
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     // Mouse wheel for speed adjustment
     this.canvas.addEventListener("wheel", (event) => {
@@ -182,7 +182,7 @@ export class CameraFlying extends BaseCamera {
       this._moveSpeed *= event.deltaY > 0 ? 0.9 : 1.1;
       this._moveSpeed = Math.max(0.1, Math.min(2000, this._moveSpeed));
       this.renderer.updateFlyingCameraControls();
-    });
+    }, { signal: this.renderer.shutdownSignal });
   }
 
   private setupMobileJoysticks() {
@@ -260,18 +260,18 @@ export class CameraFlying extends BaseCamera {
         }
         element.classList.add("active");
         update(event.clientX, event.clientY);
-      });
+      }, { signal: this.renderer.shutdownSignal });
       element.addEventListener("pointermove", (event) => {
         if (event.pointerId !== pointerId) return;
         event.preventDefault();
         update(event.clientX, event.clientY);
-      });
+      }, { signal: this.renderer.shutdownSignal });
       element.addEventListener("pointerup", (event) => {
         if (event.pointerId === pointerId) clear();
-      });
+      }, { signal: this.renderer.shutdownSignal });
       element.addEventListener("pointercancel", (event) => {
         if (event.pointerId === pointerId) clear();
-      });
+      }, { signal: this.renderer.shutdownSignal });
 
       element.addEventListener("touchstart", (event) => {
         if (pointerId !== null || touchId !== null) return;
@@ -281,7 +281,7 @@ export class CameraFlying extends BaseCamera {
         touchId = touch.identifier;
         element.classList.add("active");
         update(touch.clientX, touch.clientY);
-      }, { passive: false });
+      }, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
       element.addEventListener("touchmove", (event) => {
         const touch = Array.from(event.changedTouches).find(
           (changedTouch) => changedTouch.identifier === touchId,
@@ -289,7 +289,7 @@ export class CameraFlying extends BaseCamera {
         if (!touch) return;
         event.preventDefault();
         update(touch.clientX, touch.clientY);
-      }, { passive: false });
+      }, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
       const endTouch = (event: TouchEvent) => {
         if (touchId === null) return;
         const ended = Array.from(event.changedTouches).some(
@@ -297,8 +297,8 @@ export class CameraFlying extends BaseCamera {
         );
         if (ended) clear();
       };
-      element.addEventListener("touchend", endTouch, { passive: false });
-      element.addEventListener("touchcancel", endTouch, { passive: false });
+      element.addEventListener("touchend", endTouch, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
+      element.addEventListener("touchcancel", endTouch, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
     };
 
     setupJoystick("movement-joystick", this._mobileMovement, () => {

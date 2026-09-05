@@ -86,10 +86,19 @@ async function start(): Promise<void> {
     animationFrameId = window.requestAnimationFrame(draw);
   }
 
-  window.addEventListener("beforeunload", () => {
-    renderer.shutdown();
-    if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
+  renderer.shutdownSignal.addEventListener("abort", () => {
+    selector.disabled = true;
+    if (animationFrameId !== null) {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
   }, { once: true });
+  window.addEventListener("pagehide", () => renderer.shutdown(), { once: true });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && renderer.isShutdown) {
+      window.location.reload();
+    }
+  });
   animationFrameId = window.requestAnimationFrame(draw);
 }
 

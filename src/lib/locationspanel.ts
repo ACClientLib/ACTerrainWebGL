@@ -17,19 +17,26 @@ export function setupLocationsPanel(endpoint: string, renderer: TerrainRenderer)
   section.append(input, results);
   let timer: number | undefined;
   let controller: AbortController | undefined;
+  renderer.shutdownSignal.addEventListener("abort", () => {
+    window.clearTimeout(timer);
+    controller?.abort();
+    results.replaceChildren();
+  }, { once: true });
   input.addEventListener("input", () => {
     window.clearTimeout(timer);
     controller?.abort();
     const query = input.value.trim();
     if (query.length < 2) { results.replaceChildren(); return; }
     timer = window.setTimeout(() => void search(query), 180);
-  });
+  }, { signal: renderer.shutdownSignal });
   async function search(query: string): Promise<void> {
-    controller = new AbortController();
+    const requestController = new AbortController();
+    controller = requestController;
     try {
-      const response = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+      const response = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, { signal: requestController.signal });
       if (!response.ok) throw new Error(`Location search returned HTTP ${response.status}`);
       const body = await response.json() as { locations?: LocationResult[] };
+      if (renderer.isShutdown || requestController.signal.aborted) return;
       results.replaceChildren(...(body.locations ?? []).map(createResult));
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -42,7 +49,7 @@ export function setupLocationsPanel(endpoint: string, renderer: TerrainRenderer)
     button.type = "button";
     button.innerHTML = `<span class="location-icon location-icon-${location.type}" aria-hidden="true">${iconFor(location.type)}</span><span></span>`;
     button.querySelector("span:last-child")!.textContent = location.text;
-    button.addEventListener("click", () => { renderer.focusLocation(location.x, location.y, location.type); input.value = location.text; results.replaceChildren(); });
+    button.addEventListener("click", () => { renderer.focusLocation(location.x, location.y, location.type); input.value = location.text; results.replaceChildren(); }, { signal: renderer.shutdownSignal });
     return button;
   }
 }

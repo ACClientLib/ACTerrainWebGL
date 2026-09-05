@@ -893,6 +893,10 @@ export class AcDatClient {
   }
 
   async clearCache(): Promise<void> {
+    if (this.stopped) {
+      await this.cache.clear();
+      return;
+    }
     this.lifecycleController.abort();
     this.visibleController?.abort();
     this.preloadController?.abort();
@@ -914,14 +918,39 @@ export class AcDatClient {
     this.textures.clear();
   }
 
+  private stopped = false;
+
   shutdown(): void {
+    if (this.stopped) return;
+    this.stopped = true;
     this.lifecycleController.abort();
     this.visibleController?.abort();
     this.preloadController?.abort();
     this.processor.shutdown();
+    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
+    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    for (const material of this.materials.values()) {
+      material.lease?.release();
+    }
+    for (const texture of this.textures.values()) {
+      texture.lease?.release();
+    }
+    this.registry.replaceDataset();
+    this.materialRegistry.replaceDataset();
+    this.textureRegistry.replaceDataset();
+    this.meshRegistry.replaceDataset();
+    this.indexedTextures.shutdown();
+    this.resources.clear();
+    this.resourceBytes = 0;
+    this.pendingResources.clear();
+    this.decodedPlacements.clear();
+    this.meshes.clear();
+    this.materials.clear();
+    this.textures.clear();
   }
 
   private async ensureReady(): Promise<void> {
+    this.lifecycleController.signal.throwIfAborted();
     if (!this.ready) {
       this.ready = this.loadIndex().catch((error) => {
         this.ready = null;
@@ -936,6 +965,7 @@ export class AcDatClient {
       cache: "no-cache",
     });
     const descriptor = await descriptorResponse.json();
+    this.lifecycleController.signal.throwIfAborted();
     if (descriptor.formatVersion !== SUPPORTED_FORMAT_VERSION)
       throw new Error(
         `Unsupported ACTerrain format version ${descriptor.formatVersion}`,
@@ -974,6 +1004,7 @@ export class AcDatClient {
         response.arrayBuffer(),
       ),
     ]);
+    this.lifecycleController.signal.throwIfAborted();
     this.parseV3SceneDirectory(sceneIndex);
     this.parseResourceCatalog(resourceIndex);
     if (descriptor.contentKind !== "server") await this.cache.removeLegacyCaches();
@@ -1058,6 +1089,7 @@ export class AcDatClient {
   }
 
   private async parseIndex(source: ArrayBuffer): Promise<void> {
+    this.lifecycleController.signal.throwIfAborted();
     const buffer = source;
     if (
       buffer.byteLength < 6 ||
@@ -1263,6 +1295,8 @@ export class AcDatClient {
     priority: number,
     signal: AbortSignal,
   ): Promise<void> {
+    this.lifecycleController.signal.throwIfAborted();
+    signal.throwIfAborted();
     const unique = [...new Set(ids)].filter((id) => !this.resources.has(id));
     const existing = unique.flatMap((id) => {
       const pending = this.pendingResources.get(id);
@@ -1381,6 +1415,7 @@ export class AcDatClient {
     source: ArrayBuffer,
     knownResourceIds: Set<number>,
   ): Promise<Set<number>> {
+    this.lifecycleController.signal.throwIfAborted();
     const buffer = source;
     const reader = new DataView(buffer);
     let offset = 0;
@@ -1483,6 +1518,7 @@ export class AcDatClient {
           (batch.indices?.byteLength ?? 0),
         0,
       );
+      this.lifecycleController.signal.throwIfAborted();
       this.meshRegistry.publish(id, mesh, { encodedBytes: 0, decodedBytes });
       return mesh;
     })();
@@ -1512,7 +1548,8 @@ export class AcDatClient {
     const cacheStarted = performance.now();
     const cacheAbort = new AbortController();
     let cacheTimedOut = false;
-    signal.addEventListener("abort", () => cacheAbort.abort(), { once: true });
+    const cancelCacheRead = () => cacheAbort.abort();
+    signal.addEventListener("abort", cancelCacheRead, { once: true });
     const cacheRead = this.cache
       .getMany(
         uncached.map((id) =>
@@ -1532,14 +1569,18 @@ export class AcDatClient {
       .finally(() => {
         this.activeCacheReads--;
       });
-    const timeout = new Promise<null>((resolve) =>
-      setTimeout(() => {
+    let cacheTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      cacheTimer = setTimeout(() => {
         cacheTimedOut = true;
         cacheAbort.abort();
         resolve(null);
-      }, CACHE_OPERATION_TIMEOUT_MS),
-    );
-    const entries = await Promise.race([cacheRead, timeout]);
+      }, CACHE_OPERATION_TIMEOUT_MS);
+    });
+    const entries = await Promise.race([cacheRead, timeout]).finally(() => {
+      clearTimeout(cacheTimer);
+      signal.removeEventListener("abort", cancelCacheRead);
+    });
     const elapsed = performance.now() - cacheStarted;
     if (entries === null && elapsed >= CACHE_OPERATION_TIMEOUT_MS)
       console.warn(
@@ -1688,6 +1729,7 @@ export class AcDatClient {
 
   private async decodeMaterial(id: number): Promise<ObjectMaterial> {
     const buffer = await this.decodeResource(id, 2);
+    this.lifecycleController.signal.throwIfAborted();
     const material = parseV3Material(buffer);
     let textureResourceId: number | undefined;
     let solidTextureResourceId: number | undefined;
@@ -1738,6 +1780,7 @@ export class AcDatClient {
       samplerMode: material.samplerMode,
       alphaCutoff: material.alphaCutoff,
     };
+    this.lifecycleController.signal.throwIfAborted();
     this.materialRegistry.publish(id, result, {
       encodedBytes: 0,
       decodedBytes: 64,
@@ -1798,7 +1841,9 @@ export class AcDatClient {
         entry,
         this.textureCapabilities.profile,
         this.textureCapabilities.extensions,
+        this.lifecycleController.signal,
       );
+      this.lifecycleController.signal.throwIfAborted();
       const cpu = {
         resource: entry,
         decodedBytes: uploaded.decodedBytes,
@@ -1833,6 +1878,7 @@ export class AcDatClient {
             generation.cpu.resource,
             this.textureCapabilities.profile,
             this.textureCapabilities.extensions,
+            this.lifecycleController.signal,
           )
         : this.uploadSolidTexture(generation.cpu.color!);
       if (
@@ -1860,6 +1906,7 @@ export class AcDatClient {
   }
 
   private async resource(id: number, kind?: number): Promise<ResourceEntry> {
+    this.lifecycleController.signal.throwIfAborted();
     let entry = this.resources.get(id);
     if (!entry) {
       await this.loadResourceIds([id], 0, this.lifecycleController.signal);
@@ -1869,6 +1916,7 @@ export class AcDatClient {
       // before the caller resumed.
       if (!entry) {
         const cached = await this.cache.get(this.cacheKey(id, kind ?? 0));
+        this.lifecycleController.signal.throwIfAborted();
         if (!cached) throw new Error(`Missing ACTerrain resource ${id}`);
         entry = {
           id,
@@ -1986,6 +2034,7 @@ export class AcDatClient {
     ).toString();
   }
   private async request(path: string, init?: RequestInit): Promise<Response> {
+    this.lifecycleController.signal.throwIfAborted();
     const requestInit: RequestInit = {
       ...init,
       signal: init?.signal ?? this.lifecycleController.signal,

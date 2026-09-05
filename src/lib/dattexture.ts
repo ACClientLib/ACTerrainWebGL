@@ -104,6 +104,7 @@ class PaletteTextureMaterializer {
     reject: (error: unknown) => void;
   }[] = [];
   private scheduled = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private gl: WebGL2RenderingContext) {}
 
@@ -117,9 +118,19 @@ class PaletteTextureMaterializer {
   }
 
   clear(): void {
+    clearTimeout(this.timer);
+    this.scheduled = false;
     const error = new DOMException("Indexed texture materialization was cleared", "AbortError");
     for (const request of this.pending) request.reject(error);
     this.pending = [];
+  }
+
+  shutdown(): void {
+    this.clear();
+    this.gl.deleteFramebuffer(this.framebuffer);
+    this.gl.deleteVertexArray(this.vao);
+    this.gl.deleteProgram(this.program);
+    this.contextLost();
   }
 
   materializeAsync(image: IndexedImage, plane: WebGLTexture, palette: WebGLTexture): Promise<WebGLTexture> {
@@ -132,7 +143,7 @@ class PaletteTextureMaterializer {
   private schedule(): void {
     if (this.scheduled) return;
     this.scheduled = true;
-    setTimeout(() => {
+    this.timer = setTimeout(() => {
       this.scheduled = false;
       const started = performance.now();
       while (this.pending.length > 0) {
@@ -206,6 +217,7 @@ class PaletteTextureMaterializer {
 }
 
 export class IndexedTextureLoader {
+  private readonly lifecycleController = new AbortController();
   private finals = new Map<number, IndexedFinalTexture>();
   private planes = new Map<number, IndexedPlane>();
   private palettes = new Map<number, Promise<Palette>>();
@@ -243,6 +255,14 @@ export class IndexedTextureLoader {
     this.gpuRegistry.replaceDataset();
   }
 
+  shutdown(): void {
+    this.lifecycleController.abort();
+    this.materializer.shutdown();
+    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
+    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.clear();
+  }
+
   current(materialId: number): WebGLTexture | undefined {
     return this.gpuRegistry.current(this.finalKey(materialId))?.gpu;
   }
@@ -265,10 +285,12 @@ export class IndexedTextureLoader {
 
   private async create(materialId: number, definition: IndexedMaterialDefinition, load: ResourceLoader): Promise<WebGLTexture> {
     const imageResource = await load(definition.imageResourceId, 3), image = readIndexed(await decodeTextureBytes(imageResource));
+    this.lifecycleController.signal.throwIfAborted();
     const plane = await this.acquirePlane(definition.imageResourceId, image, load);
     try {
       const base = await this.palette(definition.basePaletteResourceId, load);
       const replacements = await Promise.all(definition.patches.map(p => this.palette(p.replacementPaletteResourceId, load)));
+      this.lifecycleController.signal.throwIfAborted();
       const count = image.componentType === 1 ? image.mapping.length : base.colors.length / 4;
       const colors = new Uint8Array(count * 4);
       for (let local = 0; local < count; local++) {
@@ -283,6 +305,7 @@ export class IndexedTextureLoader {
       const palette = this.uploadPalette(paletteKey, colors);
       try {
         const texture = await this.materializer.materializeAsync(image, plane, palette);
+        this.lifecycleController.signal.throwIfAborted();
         this.gpuRegistry.publish(this.finalKey(materialId), { image, palette: colors.slice(), planeId: definition.imageResourceId }, { encodedBytes: 0, decodedBytes: image.width * image.height * 4 }, texture, this.materializedBytes(image));
         return texture;
       } finally {
@@ -301,7 +324,25 @@ export class IndexedTextureLoader {
   }
 
   private async acquirePlane(id: number, image: IndexedImage, load: ResourceLoader): Promise<WebGLTexture> {
-    let cached = this.planes.get(id); if (!cached) { let created!: IndexedPlane; const promise = Promise.resolve().then(() => { const texture = this.uploadPlane(image); this.gpuRegistry.publish(this.planeKey(id), { image, planeId: id }, { encodedBytes: 0, decodedBytes: image.pixels.byteLength }, texture, image.pixels.byteLength); return texture; }); created = { promise, references: 0 }; cached = created; this.planes.set(id, cached); } cached.references++; return cached.promise;
+    let cached = this.planes.get(id);
+    if (!cached) {
+      const promise = Promise.resolve().then(() => {
+        this.lifecycleController.signal.throwIfAborted();
+        const texture = this.uploadPlane(image);
+        this.gpuRegistry.publish(
+          this.planeKey(id),
+          { image, planeId: id },
+          { encodedBytes: 0, decodedBytes: image.pixels.byteLength },
+          texture,
+          image.pixels.byteLength,
+        );
+        return texture;
+      });
+      cached = { promise, references: 0 };
+      this.planes.set(id, cached);
+    }
+    cached.references++;
+    return cached.promise;
   }
 
   private releasePlane(id: number): void { const cached = this.planes.get(id); if (!cached || --cached.references > 0) return; void cached.promise.then(() => { if (cached.references || this.planes.get(id) !== cached) return; this.planes.delete(id); this.gpuRegistry.remove(this.planeKey(id)); }).catch(() => undefined); }
@@ -389,8 +430,10 @@ export async function uploadResourceTexture(
   resource: TextureResource,
   profile: TextureProfile,
   extensions: TextureExtensions,
+  signal?: AbortSignal,
 ): Promise<{ texture: WebGLTexture; decodedBytes: number; gpuBytes: number }> {
   const bytes = await decodeResource(resource);
+  signal?.throwIfAborted();
   const view = new DataView(bytes);
   if (bytes.byteLength < 16 || view.getUint32(0, true) !== ATX8_MAGIC)
     throw new Error(`Invalid ATX8 texture resource ${resource.id}`);

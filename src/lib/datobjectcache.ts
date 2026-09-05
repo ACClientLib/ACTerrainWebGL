@@ -65,6 +65,9 @@ class OpfsCacheWorkerClient {
   private ready: Promise<boolean>;
   private resolveReady!: (enabled: boolean) => void;
   private initialized = false;
+  private readonly lifecycleController = new AbortController();
+  private initializationTimer: ReturnType<typeof setTimeout> | undefined;
+  private readBatchTimer: ReturnType<typeof setTimeout> | undefined;
   diagnostics: CacheDiagnostics = { ...EMPTY_DIAGNOSTICS };
 
   constructor() {
@@ -80,9 +83,9 @@ class OpfsCacheWorkerClient {
       addEventListener("visibilitychange", () => {
         if (document.visibilityState === "hidden")
           void this.flush().catch(() => undefined);
-      });
-      addEventListener("pagehide", () => this.shutdown(), { once: true });
-      setTimeout(() => {
+      }, { signal: this.lifecycleController.signal });
+      addEventListener("pagehide", () => this.shutdown(), { once: true, signal: this.lifecycleController.signal });
+      this.initializationTimer = setTimeout(() => {
         if (!this.initialized) this.disable("initialization timed out");
       }, 5000);
     } catch (error) {
@@ -121,7 +124,7 @@ class OpfsCacheWorkerClient {
       this.queuedReads.push(queued);
       if (this.readBatchScheduled) return;
       this.readBatchScheduled = true;
-      setTimeout(() => this.flushReadBatch(), 0);
+      this.readBatchTimer = setTimeout(() => this.flushReadBatch(), 0);
     });
   }
 
@@ -200,7 +203,7 @@ class OpfsCacheWorkerClient {
   ): Promise<(CachedResource | null)[] | undefined> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      if (signal?.aborted) {
+      if (!this.worker || signal?.aborted) {
         resolve(undefined);
         return;
       }
@@ -264,6 +267,7 @@ class OpfsCacheWorkerClient {
 
   private handleMessage(message: CacheWorkerMessage): void {
     if (message.type === "ready") {
+      clearTimeout(this.initializationTimer);
       this.diagnostics = message.diagnostics;
       if (!this.initialized) {
         this.initialized = true;
@@ -289,6 +293,10 @@ class OpfsCacheWorkerClient {
   }
 
   private disable(reason: string): void {
+    this.lifecycleController.abort();
+    clearTimeout(this.initializationTimer);
+    clearTimeout(this.readBatchTimer);
+    this.readBatchScheduled = false;
     this.diagnostics = { ...this.diagnostics, enabled: false };
     this.worker?.terminate();
     this.worker = null;
@@ -305,14 +313,10 @@ class OpfsCacheWorkerClient {
     this.queuedReads = [];
   }
 
-  private shutdown(): void {
-    if (!this.worker) return;
-    // Message ordering is significant: the worker drains the flush request
-    // before it handles shutdown and closes the OPFS handles.
-    if (this.initialized) void this.flush().catch(() => undefined);
-    const request: CacheWorkerRequest = { operation: "shutdown" };
-    this.worker.postMessage(request);
-    this.worker = null;
+  shutdown(): void {
+    // The persistent cache is disposable. Do not drain queued writes while
+    // navigation is tearing down the document and starting another worker.
+    this.disable("shutdown");
   }
 
   private deleteIndexedDbCaches(): void {
@@ -332,6 +336,10 @@ class OpfsCacheWorkerClient {
 const sharedWorker = new OpfsCacheWorkerClient();
 
 export class DatObjectCache {
+  static shutdown(): void {
+    sharedWorker.shutdown();
+  }
+
   constructor(private readonly namespace: CacheNamespace) {}
 
   get diagnostics(): CacheDiagnostics {

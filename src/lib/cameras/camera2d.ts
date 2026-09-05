@@ -83,7 +83,7 @@ export class Camera2D extends BaseCamera {
         this.lastDistance = 0;
         this.distance = 0;
       },
-      touchOptions,
+      { ...touchOptions, signal: this.renderer.shutdownSignal },
     );
 
     this.canvas.addEventListener(
@@ -93,7 +93,7 @@ export class Camera2D extends BaseCamera {
         event.preventDefault();
         this._mouseDown = false;
       },
-      touchOptions,
+      { ...touchOptions, signal: this.renderer.shutdownSignal },
     );
 
     this.canvas.addEventListener(
@@ -107,7 +107,7 @@ export class Camera2D extends BaseCamera {
           this.handlePinch(event);
         }
       },
-      touchOptions,
+      { ...touchOptions, signal: this.renderer.shutdownSignal },
     );
   }
 
@@ -118,7 +118,7 @@ export class Camera2D extends BaseCamera {
         this._mouseDown = true;
         event.preventDefault();
       }
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("mouseup", (event) => {
       if (this.renderer.currentCamera != this) return;
@@ -126,20 +126,20 @@ export class Camera2D extends BaseCamera {
         this._mouseDown = false;
         event.preventDefault();
       }
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("mousemove", (event) => {
       if (this.renderer.currentCamera != this) return;
       event.preventDefault();
       this.handleMove(event.clientX, event.clientY);
-    });
+    }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("wheel", (event) => {
       if (this.renderer.currentCamera != this) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       this.handleWheel(event);
-    });
+    }, { signal: this.renderer.shutdownSignal });
   }
 
   private handlePinch(event: TouchEvent) {

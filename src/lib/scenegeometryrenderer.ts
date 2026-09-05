@@ -181,6 +181,7 @@ export class SceneGeometryRenderer {
   private lastResourceRequest = "";
   private decodeController = new AbortController();
   private cacheGeneration = 0;
+  private stopped = false;
   private resourceLoadState: "idle" | "loading" | "ready" | "error" = "idle";
   private resourceLoadError = "";
   private nextResourceRetry = 0;
@@ -383,6 +384,7 @@ export class SceneGeometryRenderer {
   }
 
   clearCache(): Promise<void> {
+    if (this.stopped) return this.dats.clearCache();
     this.cacheGeneration++;
     this.decodeController.abort();
     this.decodeController = new AbortController();
@@ -411,7 +413,38 @@ export class SceneGeometryRenderer {
   }
 
   shutdown(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.cacheGeneration++;
     this.decodeController.abort();
+    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
+    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    for (const mesh of this.meshes.values()) {
+      this.deleteMesh(mesh);
+    }
+    for (const mesh of this.bakedMeshes.values()) {
+      this.deleteMesh(mesh);
+    }
+    this.meshOwner.dispose();
+    this.meshes.clear();
+    this.bakedMeshes.clear();
+    this.pendingMeshes.clear();
+    this.pendingBakedMeshes.clear();
+    this.chunks.clear();
+    this.particleSimulations.clear();
+    this.particleFrozenData.clear();
+    this.particleGroups.clear();
+    this.commonGroups.clear();
+    this.twoDAggregatedGroups.clear();
+    this.twoDPreparedSubmissions = [];
+    this.particleUploadData = new Float32Array(0);
+    this.instanceUploadData = new Float32Array(0);
+    this.gl.deleteBuffer(this.instanceBuffer);
+    this.gl.deleteBuffer(this.particleBuffer);
+    this.gl.deleteBuffer(this.particleQuadBuffer);
+    this.gl.deleteVertexArray(this.particleVao);
+    this.gl.deleteProgram(this.program);
+    this.gl.deleteProgram(this.particleProgram);
     this.dats.shutdown();
   }
 

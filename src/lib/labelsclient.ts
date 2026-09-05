@@ -27,6 +27,7 @@ export class LabelsClient {
   private readonly pending = new Map<string, Promise<void>>();
   private readonly elements = new Map<string, HTMLDivElement>();
   private enabled = true;
+  private readonly lifecycleController = new AbortController();
   private lastCamera: BaseCamera | null = null;
   private maximum3DDistance = Number.POSITIVE_INFINITY;
   private readonly cachePromise = typeof caches === "undefined" ? null : caches.open(CACHE_NAME);
@@ -39,7 +40,20 @@ export class LabelsClient {
   }
 
   loadPois(): void {
-    this.loadAllPois().catch((error) => console.warn("Unable to load ACTerrain POIs", error));
+    const promise = this.loadAllPois().catch((error) => {
+      if (!this.lifecycleController.signal.aborted) {
+        console.warn("Unable to load ACTerrain POIs", error);
+      }
+    }).finally(() => this.pending.delete("all-poi"));
+    this.pending.set("all-poi", promise);
+  }
+
+  shutdown(): void {
+    this.lifecycleController.abort();
+    this.enabled = false;
+    this.lastCamera = null;
+    this.loaded.clear();
+    this.removeElements();
   }
 
   async clearCache(): Promise<void> {
@@ -94,12 +108,15 @@ export class LabelsClient {
     const url = this.endpoint.replace(/\/labels$/, "/labels/pois");
     const cache = await this.cachePromise;
     let response = cache ? await cache.match(url) : undefined;
+    this.lifecycleController.signal.throwIfAborted();
     if (!response) {
-      response = await fetch(url, { cache: "no-store" });
+      response = await fetch(url, { cache: "no-store", signal: this.lifecycleController.signal });
       if (!response.ok) throw new Error(`POI labels returned HTTP ${response.status}`);
+      this.lifecycleController.signal.throwIfAborted();
       await cache?.put(url, response.clone());
     }
     const body = (await response.json()) as LabelTile & { Labels?: TerrainLabel[] };
+    this.lifecycleController.signal.throwIfAborted();
     this.loaded.set("all-poi", (body.labels ?? body.Labels ?? []).map((value) => normalizeLabel(value as unknown as Record<string, unknown>)));
     if (this.lastCamera) this.draw(this.lastCamera);
   }
@@ -107,7 +124,11 @@ export class LabelsClient {
   private load(tileX: number, tileY: number, types: string): void {
     const key = `${tileX}/${tileY}/${types}`;
     if (this.loaded.has(key) || this.pending.has(key)) return;
-    const promise = this.read(key, tileX, tileY, types).catch((error) => console.warn("Unable to load ACTerrain label tile", error)).finally(() => this.pending.delete(key));
+    const promise = this.read(key, tileX, tileY, types).catch((error) => {
+      if (!this.lifecycleController.signal.aborted) {
+        console.warn("Unable to load ACTerrain label tile", error);
+      }
+    }).finally(() => this.pending.delete(key));
     this.pending.set(key, promise);
   }
 
@@ -115,12 +136,15 @@ export class LabelsClient {
     const url = `${this.endpoint}?tileX=${tileX}&tileY=${tileY}&types=${encodeURIComponent(types)}`;
     const cache = await this.cachePromise;
     let response = cache ? await cache.match(url) : undefined;
+    this.lifecycleController.signal.throwIfAborted();
     if (!response) {
-      response = await fetch(url, { cache: "no-store" });
+      response = await fetch(url, { cache: "no-store", signal: this.lifecycleController.signal });
       if (!response.ok) throw new Error(`Label tile returned HTTP ${response.status}`);
+      this.lifecycleController.signal.throwIfAborted();
       await cache?.put(url, response.clone());
     }
     const body = (await response.json()) as LabelTile & { Labels?: TerrainLabel[] };
+    this.lifecycleController.signal.throwIfAborted();
     this.loaded.set(key, (body.labels ?? body.Labels ?? []).map((value) => normalizeLabel(value as unknown as Record<string, unknown>)));
     if (this.lastCamera) this.draw(this.lastCamera);
   }

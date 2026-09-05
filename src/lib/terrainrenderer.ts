@@ -1,3 +1,4 @@
+import { DatObjectCache } from "./datobjectcache";
 import * as glhelpers from "./glhelpers";
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
 
@@ -108,6 +109,11 @@ export class TerrainRenderer {
   #restoredFlyingCameraRoute = false;
   #updateMoveSpeedControl: (() => void) | null = null;
   #isShutdown = false;
+  private readonly lifecycleController = new AbortController();
+
+  get shutdownSignal(): AbortSignal {
+    return this.lifecycleController.signal;
+  }
 
   mousePos = new Vector2();
   #invalidateCallback: (() => void) | null = null;
@@ -146,7 +152,7 @@ export class TerrainRenderer {
     this.sceneRenderer = new SceneRenderer(this.gl);
     this.gl.canvas.addEventListener("webglcontextrestored", () => {
       this.invalidate("context restoration");
-    });
+    }, { signal: this.shutdownSignal });
 
     this.#sceneGeometry = new SceneGeometryRenderer(
       this.gl,
@@ -191,11 +197,36 @@ export class TerrainRenderer {
     return this.#isShutdown;
   }
 
-  shutdown(): void {
+  shutdown(keepCacheWorker = false): void {
+    if (!keepCacheWorker) {
+      DatObjectCache.shutdown();
+    }
     if (this.#isShutdown) return;
     this.#isShutdown = true;
+    this.lifecycleController.abort();
+    if (document.pointerLockElement === this.canvas) {
+      document.exitPointerLock();
+    }
+    this.#invalidateCallback = null;
+    this.#labels?.shutdown();
     this.#sceneGeometry.shutdown();
     this.#serverGeometry?.shutdown();
+    this.#dataTexture.shutdown();
+    this.#terrainHeightData = null;
+    this.#submissions = [];
+    this.sceneRenderer.destroy();
+    this.gl.deleteTexture(this.#terrainTextureArray?.texture ?? null);
+    this.gl.deleteTexture(this.#alphaTextureArray?.texture ?? null);
+    this.gl.deleteTexture(this.#overviewTexture);
+    this.gl.deleteVertexArray(this.#terrainVao);
+    this.gl.deleteBuffer(this.#terrainInstanceBuffer);
+    this.gl.deleteProgram(this.program);
+    this.gl.deleteProgram(this.#overviewProgram);
+    this.gl.deleteShader(this.vertexShader);
+    this.gl.deleteShader(this.fragmentShader);
+    // This renderer is terminal: release the entire context, including driver
+    // allocations, before the next document creates its WebGL context.
+    this.gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 
   #initialize2DCamera() {
@@ -247,7 +278,7 @@ export class TerrainRenderer {
       const output = row.querySelector<HTMLOutputElement>("output")!;
       const update = () => { input.value = String(value()); output.value = input.value; };
       updateControls.add(update);
-      input.addEventListener("input", () => { set(Number(input.value)); update(); });
+      input.addEventListener("input", () => { set(Number(input.value)); update(); }, { signal: this.shutdownSignal });
       update(); section.append(row); return row;
     };
     const addCheckbox = (label: string, value: () => boolean, set: (value: boolean) => void) => {
@@ -255,16 +286,16 @@ export class TerrainRenderer {
       row.innerHTML = `<span>${label}</span><input type="checkbox">`;
       const input = row.querySelector<HTMLInputElement>("input")!; input.checked = value();
       updateControls.add(() => { input.checked = value(); });
-      input.addEventListener("change", () => set(input.checked)); section.append(row); return row;
+      input.addEventListener("change", () => set(input.checked), { signal: this.shutdownSignal }); section.append(row); return row;
     };
     const addActionButton = (label: string, action: () => void | Promise<void>) => {
       const button = document.createElement("button"); button.className = "action-button"; button.textContent = label;
-      button.addEventListener("click", () => void action()); actionsSection.append(button);
+      button.addEventListener("click", () => void action(), { signal: this.shutdownSignal }); actionsSection.append(button);
     };
     const texture = document.createElement("label"); texture.className = "control-row";
     texture.innerHTML = `<span>Texture Type</span><select><option value="auto">Auto</option><option value="bc">BC / S3TC</option><option value="etc2">ETC2</option><option value="rgba8">RGBA8</option></select>`;
     const textureSelect = texture.querySelector<HTMLSelectElement>("select")!; textureSelect.value = settings.data.textureProfile;
-    textureSelect.addEventListener("change", () => { settings.data.textureProfile = settings.parseTextureProfilePreference(textureSelect.value); this.shutdown(); window.location.reload(); }); section.append(texture);
+    textureSelect.addEventListener("change", () => { settings.data.textureProfile = settings.parseTextureProfilePreference(textureSelect.value); this.shutdown(); window.location.reload(); }, { signal: this.shutdownSignal }); section.append(texture);
     const activeTexture = document.createElement("div");
     activeTexture.className = "control-row active-value";
     activeTexture.innerHTML = `<span>Active Texture Type</span><span>${this.#sceneGeometry.textureProfile}</span>`;
@@ -289,7 +320,22 @@ export class TerrainRenderer {
     mobileLookInvertY.classList.add("mobile-only-control");
     if (isTouchDevice()) document.documentElement.classList.add("touch-device");
     addRange("Field of View", () => settings.data.fov, (v) => { settings.data.fov = v; }, 30, 120, 1);
-    addActionButton("Clear Data Caches & Reload", async () => { try { await Promise.all([...this.#geometries().map((geometry) => geometry.clearCache()), this.#labels?.clearCache()]); this.shutdown(); window.location.reload(); } catch (error) { console.error("Unable to clear ACTerrain data caches", error); } });
+    addActionButton("Clear Data Caches & Reload", async () => {
+      this.shutdown(true);
+      try {
+        await Promise.all([
+          ...this.#geometries().map((geometry) => geometry.clearCache()),
+          this.#labels?.clearCache(),
+        ]);
+        this.shutdown();
+        window.location.reload();
+      } catch (error) {
+        this.shutdown();
+        this.loader.textContent = "Unable to clear data caches. Reload the page to try again.";
+        document.body.classList.remove("loaded");
+        console.error("Unable to clear ACTerrain data caches", error);
+      }
+    });
     addActionButton("Print Diagnostics", () => this.#printDiagnostics());
     addActionButton("Reset Settings to Defaults", () => {
       settings.resetSettings();
@@ -298,8 +344,8 @@ export class TerrainRenderer {
       url.searchParams.delete("dataset");
       window.location.assign(url.toString());
     });
-    document.querySelector<HTMLButtonElement>("#switch-camera")!.addEventListener("click", () => this.switchCamera(this.currentCameraMode === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D));
-    document.querySelector<HTMLButtonElement>("#reset-camera")!.addEventListener("click", () => this.#resetCamera());
+    document.querySelector<HTMLButtonElement>("#switch-camera")!.addEventListener("click", () => this.switchCamera(this.currentCameraMode === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D), { signal: this.shutdownSignal });
+    document.querySelector<HTMLButtonElement>("#reset-camera")!.addEventListener("click", () => this.#resetCamera(), { signal: this.shutdownSignal });
     settings.subscribe(() => {
       this.#applySettings();
       textureSelect.value = settings.data.textureProfile;
@@ -326,19 +372,19 @@ export class TerrainRenderer {
         content?.classList.toggle("collapsed", expanded);
         const indicator = button.querySelector("span:last-child");
         if (indicator) indicator.textContent = expanded ? "⌄" : "⌃";
-      });
+      }, { signal: this.shutdownSignal });
     });
     const setOpen = (open: boolean) => { sidebar.classList.toggle("open", open); toggle.setAttribute("aria-expanded", String(open)); };
     const releaseCameraInput = () => {
       if (document.pointerLockElement) document.exitPointerLock();
     };
-    toggle.addEventListener("pointerdown", releaseCameraInput);
-    sidebar.addEventListener("pointerdown", releaseCameraInput);
-    toggle.addEventListener("click", () => setOpen(!sidebar.classList.contains("open")));
-    close.addEventListener("click", () => setOpen(false));
+    toggle.addEventListener("pointerdown", releaseCameraInput, { signal: this.shutdownSignal });
+    sidebar.addEventListener("pointerdown", releaseCameraInput, { signal: this.shutdownSignal });
+    toggle.addEventListener("click", () => setOpen(!sidebar.classList.contains("open")), { signal: this.shutdownSignal });
+    close.addEventListener("click", () => setOpen(false), { signal: this.shutdownSignal });
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape") setOpen(false);
-    });
+    }, { signal: this.shutdownSignal });
   }
 
   #printDiagnostics(): void {
@@ -665,17 +711,17 @@ export class TerrainRenderer {
 
     this.canvas.addEventListener("pointerdown", () => {
       this.canvas.focus({ preventScroll: true });
-    });
+    }, { signal: this.shutdownSignal });
 
     window.addEventListener("resize", () => {
       this.#handleResize();
       this.invalidate("resize");
-    });
+    }, { signal: this.shutdownSignal });
 
     window.addEventListener("mousemove", (event) => {
       this.mousePos.x = event.clientX;
       this.mousePos.y = event.clientY;
-    });
+    }, { signal: this.shutdownSignal });
     for (const eventName of [
       "pointerdown",
       "pointermove",
@@ -687,7 +733,7 @@ export class TerrainRenderer {
       "touchmove",
       "touchend",
     ]) {
-      window.addEventListener(eventName, () => this.invalidate("input"));
+      window.addEventListener(eventName, () => this.invalidate("input"), { signal: this.shutdownSignal });
     }
 
     // Add keyboard shortcut for quick camera switching
@@ -699,10 +745,10 @@ export class TerrainRenderer {
             : CameraMode.Camera2D;
         this.switchCamera(newMode);
       }
-    });
+    }, { signal: this.shutdownSignal });
 
     document.addEventListener("visibilitychange", () =>
-      this.invalidate("visibility"),
+      this.invalidate("visibility"), { signal: this.shutdownSignal },
     );
   }
 
@@ -866,8 +912,9 @@ export class TerrainRenderer {
   #makeTextures() {
     this.#dataTexture = new TerrainDataClient(this.gl, 0);
     void this.#dataTexture
-      .load(this.#sceneGeometry.terrainData())
+      .load(this.#sceneGeometry.terrainData(), this.shutdownSignal)
       .then(() => {
+        if (this.#isShutdown) return;
         const catalog = this.#dataTexture.catalog!;
         this.terrainHeightTable = new Float32Array(catalog.heightTable);
         this.maxTerrainHeight =
@@ -909,12 +956,15 @@ export class TerrainRenderer {
         return this.#loadTerrainTextures(maskIds);
       })
       .then(() => {
+        if (this.#isShutdown) return;
         this.#onready();
         this.invalidate("resource publication");
       })
-      .catch((error) =>
-        this.throwError(`Unable to load terrain data: ${error}`),
-      );
+      .catch((error) => {
+        if (!this.#isShutdown) {
+          this.throwError(`Unable to load terrain data: ${error}`);
+        }
+      });
   }
 
   #createTerrainOverviewTexture(): void {
@@ -1009,6 +1059,7 @@ export class TerrainRenderer {
       ]),
     ];
     await this.#sceneGeometry.datClient.loadResources(resourceIds);
+    if (this.#isShutdown) return;
     const [terrain, masks] = await Promise.all([
       Promise.all(
         catalog.surfaces.map((surface) =>
@@ -1019,6 +1070,7 @@ export class TerrainRenderer {
         maskIds.map((id) => this.#sceneGeometry.datClient.texture(id)),
       ),
     ]);
+    if (this.#isShutdown) return;
     this.#alphaTextureArray.load(masks, () => undefined);
     this.#terrainTextureArray.load(terrain, (index) => {
       if (index >= 0 && index < this.hasTerrainTexture.length) {
@@ -1072,6 +1124,7 @@ export class TerrainRenderer {
   }
 
   update(dt: number) {
+    if (this.#isShutdown) return;
     this.#invalidated = false;
 
     // Update current camera's viewport size
@@ -1384,6 +1437,7 @@ export class TerrainRenderer {
   }
 
   draw(dt: number) {
+    if (this.#isShutdown) return;
     if (!this.#terrainReady) {
       this.#updateOverlay();
       return;
