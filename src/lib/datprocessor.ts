@@ -4,9 +4,7 @@ import type {
   DatProcessorResponse,
   DatProcessorResult,
   EncodedDatResource,
-  ProcessedResourceTexture,
 } from "./datprocessorprotocol";
-import { LoadingProfiler, type LoadingTimingSnapshot } from "./loadingprofiler";
 
 interface PendingRequest {
   resolve: (result: DatProcessorResult) => void;
@@ -18,9 +16,13 @@ interface PendingRequest {
   cancel?: () => void;
   queuedAt: number;
   startedAt: number;
+  workerIndex?: number;
 }
 
-const MAX_REQUESTS_IN_FLIGHT = 2;
+const MAX_DECODER_WORKERS = Math.min(
+  4,
+  Math.max(2, (globalThis.navigator?.hardwareConcurrency ?? 4) - 1),
+);
 
 function abortError(): DOMException {
   return new DOMException(
@@ -30,51 +32,55 @@ function abortError(): DOMException {
 }
 
 export class DatProcessor {
-  private worker = new Worker(
-    new URL("../workers/datprocessor.worker.ts", import.meta.url),
-    { type: "module" },
-  );
+  private workers: Worker[] = [];
+  private busyWorkers = new Set<number>();
   private nextRequestId = 1;
   private pending = new Map<number, PendingRequest>();
   private queue: number[] = [];
   private activeRequests = 0;
-  private profiler = new LoadingProfiler();
+  private stopped = false;
 
   constructor() {
-    this.worker.addEventListener("message", (event) =>
-      this.handleMessage(event.data as DatProcessorResponse),
-    );
-    this.worker.addEventListener("error", (event) =>
-      this.failAll(new Error(event.message || "ACTerrain data worker failed")),
-    );
-    this.worker.addEventListener("messageerror", () =>
-      this.failAll(new Error("Unable to read ACTerrain data worker response")),
-    );
+    for (let index = 0; index < MAX_DECODER_WORKERS; index++) {
+      const worker = new Worker(
+        new URL("../workers/datprocessor.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+      worker.addEventListener("message", (event) =>
+        this.handleMessage(index, event.data as DatProcessorResponse),
+      );
+      worker.addEventListener("error", (event) =>
+        this.failAll(new Error(event.message || "ACTerrain data worker failed")),
+      );
+      worker.addEventListener("messageerror", () =>
+        this.failAll(new Error("Unable to read ACTerrain data worker response")),
+      );
+      this.workers.push(worker);
+    }
   }
 
   get pendingRequestCount(): number {
     return this.pending.size;
-  }
-  get loadTimings(): LoadingTimingSnapshot {
-    return this.profiler.snapshot();
   }
 
   decodeMesh(
     resource: EncodedDatResource,
     signal?: AbortSignal,
   ): Promise<Mesh> {
+    if (this.stopped) return Promise.reject(abortError());
     return this.request<Mesh>("mesh", resource, signal);
   }
 
-  decodeTexture(
-    resource: EncodedDatResource,
-    signal?: AbortSignal,
-  ): Promise<ProcessedResourceTexture> {
-    return this.request<ProcessedResourceTexture>("texture", resource, signal);
+  shutdown(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.failAll(abortError());
+    for (const worker of this.workers) worker.terminate();
+    this.workers = [];
   }
 
   private request<T extends DatProcessorResult>(
-    operation: "mesh" | "texture",
+    operation: "mesh",
     resource: EncodedDatResource,
     signal?: AbortSignal,
   ): Promise<T> {
@@ -92,16 +98,11 @@ export class DatProcessor {
         if (!request || !this.pending.delete(id)) return;
         if (request.started) {
           this.activeRequests--;
-          this.profiler.record(
-            "canceled work",
-            performance.now() - request.startedAt,
-          );
-          this.worker.postMessage({ id, operation: "cancel" });
+          if (request.workerIndex !== undefined) {
+            this.busyWorkers.delete(request.workerIndex);
+            this.workers[request.workerIndex].postMessage({ id, operation: "cancel" });
+          }
         } else {
-          this.profiler.record(
-            "canceled queue",
-            performance.now() - request.queuedAt,
-          );
         }
         reject(abortError());
         this.pump();
@@ -123,14 +124,14 @@ export class DatProcessor {
     });
   }
 
-  private handleMessage(response: DatProcessorResponse): void {
+  private handleMessage(workerIndex: number, response: DatProcessorResponse): void {
     const pending = this.pending.get(response.id);
     if (!pending) return;
     this.pending.delete(response.id);
     pending.signal?.removeEventListener("abort", pending.cancel!);
     if (pending.started) {
       this.activeRequests--;
-      this.profiler.record("work", performance.now() - pending.startedAt);
+      this.busyWorkers.delete(workerIndex);
     }
     if (response.error) pending.reject(new Error(response.error));
     else if (response.result) pending.resolve(response.result);
@@ -146,21 +147,25 @@ export class DatProcessor {
     this.pending.clear();
     this.queue = [];
     this.activeRequests = 0;
+    this.busyWorkers.clear();
   }
 
   private pump(): void {
-    while (
-      this.activeRequests < MAX_REQUESTS_IN_FLIGHT &&
-      this.queue.length > 0
-    ) {
+    if (this.stopped) return;
+    while (this.queue.length > 0) {
+      const workerIndex = this.workers.findIndex(
+        (_, index) => !this.busyWorkers.has(index),
+      );
+      if (workerIndex < 0) return;
       const id = this.queue.shift()!;
       const pending = this.pending.get(id);
       if (!pending || pending.started) continue;
       pending.started = true;
       pending.startedAt = performance.now();
-      this.profiler.record("queue", pending.startedAt - pending.queuedAt);
+      pending.workerIndex = workerIndex;
       this.activeRequests++;
-      this.worker.postMessage(pending.message, pending.transfer);
+      this.busyWorkers.add(workerIndex);
+      this.workers[workerIndex].postMessage(pending.message, pending.transfer);
       pending.transfer = [];
     }
   }

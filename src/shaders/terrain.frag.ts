@@ -1,6 +1,5 @@
 import {
   LAND_BLOCK_SIZE,
-  TERRAIN_CELL_SIZE,
   TERRAIN_DATA_SIDE,
 } from "../lib/worldgeometry";
 
@@ -22,13 +21,7 @@ uniform vec3 terrainColors[32];
 
 // Minimum zoom level for texture rendering
 uniform float minZoomForTextures;
-
-// Flags to show landcell/landblock lines (1 = show, 0 = hide)
-uniform float showLandcellLines;
-uniform float showLandblockLines;
-
-// Pixel size for line highlighting
-uniform float pixelSize;
+uniform int terrainGridEnabled;
 
 // Terrain data texture (stores height, terrain, road, scenery)
 // RGBA: height (r), terrain type (g, 0-31), road code (b, 0-3), scenery (a)
@@ -39,18 +32,41 @@ uniform sampler2DArray terrainAtlas;
 
 // Texture atlas for alpha overlays (indices 0-3 corner, 4 side, 5-7 road)
 uniform sampler2DArray alphaAtlas;
+uniform float terrainTiling[33];
+uniform int cornerMaskCount;
+uniform int sideMaskCount;
+uniform int roadMaskCount;
+uniform int cornerMaskCodes[32];
+uniform int sideMaskCodes[32];
+uniform int roadMaskCodes[32];
+uniform int cornerMaskLayers[32];
+uniform int sideMaskLayers[32];
+uniform int roadMaskLayers[32];
 
 // Current drawing scale
 uniform float scale;
 uniform int cameraMode; // 0 for Camera2D, 1 for CameraFlying
+uniform vec3 cameraPosition;
+uniform vec3 fogColor;
+uniform float fogStart;
+uniform float fogEnd;
+uniform int fogEnabled;
 
 in vec3 pos;  // Map coordinates (0.0-1.0, x right, y up)
 in vec3 wpos; // World-space position
 in vec2 cellUV; // local cell UV
-flat in float triangleShade;
-  flat in ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
+flat in vec3 triangleShade;
+flat in ivec2 terrainCell; // Lower-left terrain-data vertex for this cell
+flat in ivec2 terrainCellIndex; // Global terrain cell index
   flat in uint paletteCode;
   flat in int baseTerrainCode;
+  flat in ivec4 terrainLayers;
+  flat in ivec3 terrainAlphaLayers;
+flat in ivec3 terrainAlphaRotations;
+flat in ivec4 roadAlpha;
+flat in int allRoadCell;
+flat in int terrainBlendMissing;
+flat in int terrainMissingTCode;
 
 out vec4 FragColor;
 
@@ -161,15 +177,18 @@ ivec3 getTCodes(uint pcode) {
     return tcodes;
 }
 
+uint highMultiplySmall(uint value, uint count) {
+    return (((value >> 16) * count + (((value & 0xffffu) * count) >> 16)) >> 16);
+}
+
 ivec2 getTerrainAlpha(uint pcode, int tcode) {
-    int baseIdx = (tcode != 1 && tcode != 2 && tcode != 4 && tcode != 8) ? 4 : 0;
-    int numAlphas = baseIdx == 4 ? 1 : 4;
-    int alphaCode = baseIdx == 4 ? 9 : 8;
-
-    int prng = int(floor(float(1379576222u * pcode - 1372186442u) * 2.3283064e-10 * float(numAlphas)));
-    if (prng >= numAlphas) prng = 0;
-
-    int alphaIdx = baseIdx + prng;
+    bool side = tcode != 1 && tcode != 2 && tcode != 4 && tcode != 8;
+    int count = side ? sideMaskCount : cornerMaskCount;
+    if (count <= 0) return ivec2(0, -1);
+    uint random = 1379576222u * pcode - 1372186442u;
+    int selected = int(highMultiplySmall(random, uint(count)));
+    int alphaCode = side ? sideMaskCodes[selected] : cornerMaskCodes[selected];
+    int alphaIdx = side ? sideMaskLayers[selected] : cornerMaskLayers[selected];
     int rot = 0;
 
     while (alphaCode != tcode) {
@@ -183,17 +202,18 @@ ivec2 getTerrainAlpha(uint pcode, int tcode) {
 }
 
 ivec2 getRoadAlpha(uint pcode, int rcode) {
-    const int numRoadMaps = 3;
-    const int roadMapCodes[3] = int[3](9, 10, 8);
-    int prng = int(floor(float(1379576222u * pcode - 1372186442u) * 2.3283064e-10 * float(numRoadMaps)));
+    if (roadMaskCount <= 0) return ivec2(0, -1);
+    uint random = 1379576222u * pcode - 1372186442u;
+    int prng = int(highMultiplySmall(random, uint(roadMaskCount)));
     int rot = 0;
     int alphaIdx = -1;
 
-    for (int i = 0; i < numRoadMaps; i++) {
-        int idx = (i + prng) % numRoadMaps;
+    for (int i = 0; i < 32; i++) {
+        if (i >= roadMaskCount) break;
+        int idx = (i + prng) % roadMaskCount;
         rot = 0;
-        int alphaCode = roadMapCodes[idx];
-        alphaIdx = 5 + idx;
+        int alphaCode = roadMaskCodes[idx];
+        alphaIdx = roadMaskLayers[idx];
 
         for (int j = 0; j < 4; j++) {
             if (alphaCode == rcode) {
@@ -237,15 +257,15 @@ vec4 combineOverlays(BaseData base, TerrainData terrains) {
     vec4 overlay2 = vec4(0, 0, 0, 0);
 
     if (h0 > 0.) {
-        overlay0 = texture(terrainAtlas, vec3(base.TexUV.xy, terrains.Overlay0.z));
+        overlay0 = texture(terrainAtlas, vec3(base.TexUV.xy * terrainTiling[int(terrains.Overlay0.z)], terrains.Overlay0.z));
         overlay0.a = texture(alphaAtlas, vec3(terrains.Overlay0.xy, terrains.Overlay0.w)).a;
     }
     if (h1 > 0.) {
-        overlay1 = texture(terrainAtlas, vec3(base.TexUV.xy, terrains.Overlay1.z));
+        overlay1 = texture(terrainAtlas, vec3(base.TexUV.xy * terrainTiling[int(terrains.Overlay1.z)], terrains.Overlay1.z));
         overlay1.a = texture(alphaAtlas, vec3(terrains.Overlay1.xy, terrains.Overlay1.w)).a;
     }
     if (h2 > 0.) {
-        overlay2 = texture(terrainAtlas, vec3(base.TexUV.xy, terrains.Overlay2.z));
+        overlay2 = texture(terrainAtlas, vec3(base.TexUV.xy * terrainTiling[int(terrains.Overlay2.z)], terrains.Overlay2.z));
         overlay2.a = texture(alphaAtlas, vec3(terrains.Overlay2.xy, terrains.Overlay2.w)).a;
     }
 
@@ -259,7 +279,7 @@ vec4 combineRoad(BaseData base, RoadData roads) {
     vec4 result = vec4(0, 0, 0, 0);
 
     if (h0 > 0.) {
-        result = texture(terrainAtlas, vec3(base.TexUV.xy, roads.Road0.z));
+        result = texture(terrainAtlas, vec3(base.TexUV.xy * terrainTiling[roadTextureIdx], roads.Road0.z));
         vec4 roadAlpha0 = texture(alphaAtlas, vec3(roads.Road0.xy, roads.Road0.w));
         result.a = 1. - roadAlpha0.a;
 
@@ -278,11 +298,6 @@ ivec4 rot2(int rot, ivec4 t) {
     if (rot == 3) return ivec4(t[3], t[0], t[1], t[2]); // 270° clockwise: [NorthWest, SouthWest, SouthEast, NorthEast]
     return t;
 }
-// Replace your existing terrain overlay logic with this corrected version:
-
-// Replace your existing terrain overlay logic with this corrected version:
-
-// Replace your existing terrain overlay logic with this corrected version:
 
 vec4 getSplattedTerrainColor(vec3 pos) {
     uint pcode = paletteCode;
@@ -299,7 +314,7 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     
     // Check for all-road case first
     if (roadCode.z > 0) {
-        vec4 roadColor = texture(terrainAtlas, vec3(cellUV, roadTextureIdx));
+        vec4 roadColor = texture(terrainAtlas, vec3(cellUV * terrainTiling[roadTextureIdx], roadTextureIdx));
         return vec4(roadColor.rgb, 1.0);
     }
 
@@ -339,7 +354,7 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     vec2 uv = cellUV;
 
     // Base terrain texture
-    vec4 c1 = texture(terrainAtlas, vec3(uv, terrainTexIndices[0]));
+    vec4 c1 = texture(terrainAtlas, vec3(uv * terrainTiling[terrainTexIndices[0]], terrainTexIndices[0]));
 
     // Check if we need overlays
     bool singleTypeCell = t1 == t2 && t1 == t3 && t1 == t4;
@@ -381,32 +396,118 @@ vec4 getSplattedTerrainColor(vec3 pos) {
     return vec4(baseMasked + overlaysMasked + roadMasked, 1.0);
 }
 
+vec4 getResolvedTerrainColor() {
+    vec2 uv = cellUV;
+    // Temporary diagnostic: expose cells whose expected blend mask could not
+    // be resolved instead of silently rendering only their base texture.
+    if (terrainBlendMissing == 1) {
+        if (terrainMissingTCode == 1) return vec4(1.0, 0.0, 0.0, 1.0);
+        if (terrainMissingTCode == 2) return vec4(1.0, 0.5, 0.0, 1.0);
+        if (terrainMissingTCode == 4) return vec4(1.0, 1.0, 0.0, 1.0);
+        if (terrainMissingTCode == 6) return vec4(0.0, 1.0, 0.0, 1.0);
+        if (terrainMissingTCode == 8) return vec4(0.0, 1.0, 1.0, 1.0);
+        if (terrainMissingTCode == 12) return vec4(0.0, 0.0, 1.0, 1.0);
+        return vec4(1.0, 1.0, 1.0, 1.0);
+    }
+    if (terrainBlendMissing == 2) return vec4(0.0, 0.0, 1.0, 1.0);
+    if (terrainBlendMissing == 3) return vec4(1.0, 0.0, 1.0, 1.0);
+    if (allRoadCell > 0) {
+        vec4 roadColor = texture(
+            terrainAtlas,
+            vec3(uv * terrainTiling[roadTextureIdx], roadTextureIdx));
+        return vec4(roadColor.rgb, 1.0);
+    }
+
+    vec4 baseColor = texture(
+        terrainAtlas,
+        vec3(uv * terrainTiling[terrainLayers[0]], terrainLayers[0]));
+    bool hasOverlays = any(greaterThanEqual(terrainAlphaLayers, ivec3(0)));
+    bool hasRoads = roadAlpha.y >= 0 || roadAlpha.w >= 0;
+    if (!hasOverlays && !hasRoads) {
+        return vec4(baseColor.rgb, 1.0);
+    }
+
+    TerrainData terrains = TerrainData(
+        vec4(
+            getRot(terrainAlphaRotations.x, uv),
+            terrainAlphaLayers.x >= 0 ? float(terrainLayers[1]) : -1.0,
+            float(terrainAlphaLayers.x)),
+        vec4(
+            getRot(terrainAlphaRotations.y, uv),
+            terrainAlphaLayers.y >= 0 ? float(terrainLayers[2]) : -1.0,
+            float(terrainAlphaLayers.y)),
+        vec4(
+            getRot(terrainAlphaRotations.z, uv),
+            terrainAlphaLayers.z >= 0 ? float(terrainLayers[3]) : -1.0,
+            float(terrainAlphaLayers.z)));
+    RoadData roads = RoadData(
+        vec4(
+            getRot(roadAlpha.x, uv),
+            roadAlpha.y >= 0 ? float(roadTextureIdx) : -1.0,
+            float(roadAlpha.y)),
+        vec4(
+            getRot(roadAlpha.z, uv),
+            roadAlpha.w >= 0 ? float(roadTextureIdx) : -1.0,
+            float(roadAlpha.w)));
+    vec4 combinedOverlays = combineOverlays(
+        BaseData(vec3(uv, terrainLayers[0])),
+        terrains);
+    vec4 combinedRoad = combineRoad(
+        BaseData(vec3(uv, terrainLayers[0])),
+        roads);
+    vec3 baseMasked = saturate(
+        baseColor.rgb * (1.0 - combinedOverlays.a) * (1.0 - combinedRoad.a));
+    vec3 overlaysMasked = saturate(
+        combinedOverlays.rgb * combinedOverlays.a * (1.0 - combinedRoad.a));
+    vec3 roadMasked = combinedRoad.rgb * combinedRoad.a;
+    return vec4(baseMasked + overlaysMasked + roadMasked, 1.0);
+}
+
+vec2 terrainGridEdges() {
+    vec2 edgeDistance = min(cellUV, 1.0 - cellUV);
+    float cellWidth = max(fwidth(cellUV.x), fwidth(cellUV.y)) * 1.5;
+    float cellEdge = 1.0 - smoothstep(0.0, cellWidth, min(edgeDistance.x, edgeDistance.y));
+
+    bool leftLandblockEdge = terrainCellIndex.x % 8 == 0;
+    bool rightLandblockEdge = terrainCellIndex.x % 8 == 7;
+    bool bottomLandblockEdge = terrainCellIndex.y % 8 == 0;
+    bool topLandblockEdge = terrainCellIndex.y % 8 == 7;
+    float landblockDistance = 1.0;
+    if (leftLandblockEdge) landblockDistance = min(landblockDistance, cellUV.x);
+    if (rightLandblockEdge) landblockDistance = min(landblockDistance, 1.0 - cellUV.x);
+    if (bottomLandblockEdge) landblockDistance = min(landblockDistance, cellUV.y);
+    if (topLandblockEdge) landblockDistance = min(landblockDistance, 1.0 - cellUV.y);
+    float landblockWidth = cellWidth * 1.75;
+    float landblockEdge = landblockDistance < 1.0
+        ? 1.0 - smoothstep(0.0, landblockWidth, landblockDistance)
+        : 0.0;
+    return vec2(cellEdge * 0.55, landblockEdge);
+}
+
 void main() {
     vec3 tColor = terrainColors[baseTerrainCode];
 
     vec4 finalColor;
 
     if (scale > minZoomForTextures && hasTerrainTexture[baseTerrainCode] >= 0.5) {
-        finalColor = getSplattedTerrainColor(pos);
+        finalColor = getResolvedTerrainColor();
     } else {
         finalColor = vec4(tColor, 1.0);
     }
 
-    // Add directional terrain shading in the 2D view.
-    if (cameraMode == 0) {
-        finalColor.rgb *= triangleShade;
+    finalColor.rgb *= triangleShade;
+
+    if (terrainGridEnabled != 0) {
+        vec2 gridEdges = terrainGridEdges();
+        finalColor.rgb = mix(finalColor.rgb, vec3(0.5, 0.5, 0.5), gridEdges.x);
+        finalColor.rgb = mix(finalColor.rgb, vec3(1.0, 0.0, 1.0), gridEdges.y);
     }
 
-    // Highlight landcell/landblock lines
-    float ep = pixelSize;
-    if (showLandblockLines > 0.5 && (fract(wpos.x / ${LAND_BLOCK_SIZE.toFixed(1)}) < ep / 3. ||
-      fract(wpos.y / ${LAND_BLOCK_SIZE.toFixed(1)}) < ep / 3.)) {
-        finalColor = vec4(1.0, 0.0, 0.0, 1.0);
-    } else if (showLandcellLines > 0.5 && (fract(wpos.x / ${TERRAIN_CELL_SIZE.toFixed(1)}) < ep * 2.0 ||
-      fract(wpos.y / ${TERRAIN_CELL_SIZE.toFixed(1)}) < ep * 2.0)) {
-        finalColor = vec4(1.0, 0.0, 1.0, 1.0);
+    if (fogEnabled != 0) {
+        float fogFactor = clamp((length(wpos - cameraPosition) - fogStart) /
+            max(fogEnd - fogStart, 0.0001), 0.0, 1.0);
+        finalColor.rgb = mix(finalColor.rgb, fogColor, fogFactor);
     }
-
     FragColor = finalColor;
 }
 `;

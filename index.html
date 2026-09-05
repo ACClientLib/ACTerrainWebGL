@@ -10,7 +10,17 @@
   </head>
   <body>
     <canvas id="canvas" tabindex="0"></canvas>
-    <div id="overlay" style="margin-right: 300px"></div>
+    <div id="labels-overlay" aria-hidden="true"></div>
+    <div id="mobile-controls" aria-label="Touch camera controls">
+      <div class="mobile-joystick" id="movement-joystick" role="application" aria-label="Move">
+        <div class="mobile-joystick-ring" aria-hidden="true"></div>
+        <div class="mobile-joystick-knob" aria-hidden="true"></div>
+      </div>
+      <div class="mobile-joystick" id="look-joystick" role="application" aria-label="Look around">
+        <div class="mobile-joystick-ring" aria-hidden="true"></div>
+        <div class="mobile-joystick-knob" aria-hidden="true"></div>
+      </div>
+    </div>
     <div id="loader">
       <div class="lds-grid">
         <div></div>
@@ -24,6 +34,67 @@
         <div></div>
       </div>
     </div>
+    <div id="dos-overlay" aria-live="polite">
+      <div><span id="monitor-coordinates">--</span></div>
+      <div>FPS <span id="monitor-fps">--</span></div>
+      <div id="loading-spinner" role="status" aria-label="Loading details" aria-describedby="loading-details" tabindex="0">
+        <span class="loading-spinner-icon" aria-hidden="true"></span>
+        <span class="loading-spinner-label">Loading</span>
+        <div id="loading-details" role="tooltip"></div>
+      </div>
+    </div>
+    <div id="camera-hint" aria-hidden="true">Press 'C' to switch cameras</div>
+    <aside id="sidebar" aria-label="Viewer settings">
+      <div class="sidebar-header">
+        <span>Viewer</span>
+        <button id="sidebar-close" type="button" aria-label="Close settings">×</button>
+      </div>
+      <div class="sidebar-camera-controls" aria-label="Camera controls">
+        <button id="switch-camera" class="action-button" type="button">Switch Camera</button>
+        <button id="reset-camera" class="action-button" type="button">Reset Camera</button>
+      </div>
+      <div class="sidebar-content">
+        <section class="sidebar-section sidebar-section-persistent">
+          <h2>Server / DAT</h2>
+          <label class="control-row">
+            <span>World</span>
+            <select id="dataset-selector" aria-label="World dataset"></select>
+          </label>
+        </section>
+        <section class="sidebar-section sidebar-collapsible" id="locations-section">
+          <button class="sidebar-section-toggle" type="button" aria-expanded="true" aria-controls="locations-content"><span>Locations</span><span aria-hidden="true">⌃</span></button>
+          <div id="locations-content" class="sidebar-section-content"></div>
+        </section>
+        <section class="sidebar-section" id="config-section">
+          <button class="sidebar-section-toggle" type="button" aria-expanded="false" aria-controls="config-content"><span>Settings</span><span aria-hidden="true">⌄</span></button>
+          <div id="config-content" class="sidebar-section-content collapsed"></div>
+        </section>
+        <section class="sidebar-section" id="sidebar-actions-section">
+          <div id="sidebar-actions-content"></div>
+        </section>
+      </div>
+    </aside>
+    <button id="settings-toggle" type="button" aria-label="Open settings" aria-expanded="false"><span aria-hidden="true">⚙</span></button>
+    <!-- Temporary iOS debugging. Remove after touch controls are working. -->
+    <script>
+      (() => {
+        const showError = (message) => {
+          //window.alert(`ACTerrainWebGL error:\n\n${message}`);
+        };
+        window.addEventListener("error", (event) => {
+          showError(event.error?.stack || event.message || "Unknown error");
+        });
+        window.addEventListener("unhandledrejection", (event) => {
+          const reason = event.reason;
+          showError(reason?.stack || reason?.message || String(reason));
+        });
+        const originalConsoleError = console.error;
+        console.error = (...args) => {
+          originalConsoleError.apply(console, args);
+          showError(args.map((arg) => String(arg)).join(" "));
+        };
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

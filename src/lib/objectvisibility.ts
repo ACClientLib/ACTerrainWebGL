@@ -5,6 +5,38 @@ export interface Bounds3 {
   maximum: [number, number, number];
 }
 
+export type FrustumPlanes = Float32Array;
+
+export function extractFrustumPlanes(transform: Matrix4): FrustumPlanes {
+  const matrix = transform as unknown as ArrayLike<number>;
+  return new Float32Array([
+    matrix[3] + matrix[0],
+    matrix[7] + matrix[4],
+    matrix[11] + matrix[8],
+    matrix[15] + matrix[12],
+    matrix[3] - matrix[0],
+    matrix[7] - matrix[4],
+    matrix[11] - matrix[8],
+    matrix[15] - matrix[12],
+    matrix[3] + matrix[1],
+    matrix[7] + matrix[5],
+    matrix[11] + matrix[9],
+    matrix[15] + matrix[13],
+    matrix[3] - matrix[1],
+    matrix[7] - matrix[5],
+    matrix[11] - matrix[9],
+    matrix[15] - matrix[13],
+    matrix[3] + matrix[2],
+    matrix[7] + matrix[6],
+    matrix[11] + matrix[10],
+    matrix[15] + matrix[14],
+    matrix[3] - matrix[2],
+    matrix[7] - matrix[6],
+    matrix[11] - matrix[10],
+    matrix[15] - matrix[14],
+  ]);
+}
+
 export function transformBounds(
   bounds: Bounds3,
   transform: (point: Vector3) => Vector3,
@@ -41,46 +73,18 @@ export function transformBounds(
 }
 
 export function intersectsCamera(bounds: Bounds3, transform: Matrix4): boolean {
-  const matrix = transform as unknown as ArrayLike<number>;
-  const planes = [
-    [
-      matrix[3] + matrix[0],
-      matrix[7] + matrix[4],
-      matrix[11] + matrix[8],
-      matrix[15] + matrix[12],
-    ],
-    [
-      matrix[3] - matrix[0],
-      matrix[7] - matrix[4],
-      matrix[11] - matrix[8],
-      matrix[15] - matrix[12],
-    ],
-    [
-      matrix[3] + matrix[1],
-      matrix[7] + matrix[5],
-      matrix[11] + matrix[9],
-      matrix[15] + matrix[13],
-    ],
-    [
-      matrix[3] - matrix[1],
-      matrix[7] - matrix[5],
-      matrix[11] - matrix[9],
-      matrix[15] - matrix[13],
-    ],
-    [
-      matrix[3] + matrix[2],
-      matrix[7] + matrix[6],
-      matrix[11] + matrix[10],
-      matrix[15] + matrix[14],
-    ],
-    [
-      matrix[3] - matrix[2],
-      matrix[7] - matrix[6],
-      matrix[11] - matrix[10],
-      matrix[15] - matrix[14],
-    ],
-  ];
-  for (const [x, y, z, distance] of planes) {
+  return intersectsFrustum(bounds, extractFrustumPlanes(transform));
+}
+
+export function intersectsFrustum(
+  bounds: Bounds3,
+  planes: FrustumPlanes,
+): boolean {
+  for (let offset = 0; offset < planes.length; offset += 4) {
+    const x = planes[offset];
+    const y = planes[offset + 1];
+    const z = planes[offset + 2];
+    const distance = planes[offset + 3];
     const px = x >= 0 ? bounds.maximum[0] : bounds.minimum[0];
     const py = y >= 0 ? bounds.maximum[1] : bounds.minimum[1];
     const pz = z >= 0 ? bounds.maximum[2] : bounds.minimum[2];

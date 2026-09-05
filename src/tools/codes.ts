@@ -4,7 +4,7 @@ let lastKeystrokeTime = Date.now();
 const codes: Record<string, [() => undefined]> = {};
 
 export function setupCodes() {
-  addEventListener("keyup", (e) => {
+  window.addEventListener("keyup", (e) => {
     const key = e.key.toLowerCase();
     const latestKeystrokeTime = Date.now();
 

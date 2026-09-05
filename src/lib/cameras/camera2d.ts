@@ -2,12 +2,7 @@ import * as settings from "../../settings";
 import Coordinates from "../coordinates";
 import { BaseCamera } from "./basecamera";
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
-import {
-  LAND_BLOCK_SIZE,
-  MAP_SIZE,
-  MAX_TERRAIN_HEIGHT,
-  landBlockId,
-} from "../worldgeometry";
+import { LAND_BLOCK_SIZE, MAP_SIZE, landBlockId } from "../worldgeometry";
 
 function isTouchDevice() {
   return typeof window.ontouchstart !== "undefined";
@@ -19,7 +14,7 @@ export class Camera2D extends BaseCamera {
   private lastDistance: number = 0;
   private distance: number = 0;
 
-  public MapSize: Vector3 = new Vector3(MAP_SIZE, MAP_SIZE, MAX_TERRAIN_HEIGHT);
+  public MapSize: Vector3 = new Vector3(MAP_SIZE, MAP_SIZE, 0);
 
   get Zoom() {
     return this._zoom;
@@ -37,7 +32,6 @@ export class Camera2D extends BaseCamera {
   }
 
   get TranslationMatrix() {
-    this.Position.z = 1;
     const zoomVec = new Vector3(this.Scale, this.Scale, 1);
     const offset = this.ViewportSize.clone()
       .divide(zoomVec)

@@ -14,20 +14,18 @@ const INDEX_MAGIC = 0x58494f41;
 const PACK_HEADER_BYTES = 16;
 const RECORD_HEADER_BYTES = 16;
 const INDEX_HEADER_BYTES = 32;
-const WRITE_INTERVAL_MS = 250;
 const WRITE_BATCH_BYTES = 8 * 1024 * 1024;
 const WRITE_CHUNK_BYTES = 1024 * 1024;
-const configuredMaxBytes = Number(
-  import.meta.env.VITE_ACTERRAIN_CACHE_MAX_BYTES,
-);
-const MAX_CACHE_BYTES =
-  Number.isFinite(configuredMaxBytes) && configuredMaxBytes > 0
-    ? configuredMaxBytes
-    : 384 * 1024 * 1024;
-const EVICTION_TARGET_BYTES = Math.floor(MAX_CACHE_BYTES * 0.85);
+const LEGACY_CACHE_FILES = [
+  "terrain-0.pack",
+  "terrain-0.index",
+  "terrain-1.pack",
+  "terrain-1.index",
+];
 const COMPACTION_PHYSICAL_FACTOR = 1.75;
 const COMPACTION_SLICE_MS = 3;
-const QUOTA_RESERVE_BYTES = 32 * 1024 * 1024;
+const QUOTA_RESERVE_BYTES = 64 * 1024 * 1024;
+const QUEUE_RESUME_BYTES = 24 * 1024 * 1024;
 const ESTIMATE_INTERVAL_MS = 30_000;
 
 interface SyncAccessHandle {
@@ -58,7 +56,11 @@ interface IndexEntry {
   kind: number;
   encoding: number;
   lastAccess: number;
-  checksum: number;
+}
+
+interface EncodedIndexStrings {
+  key: Uint8Array;
+  dataset: Uint8Array;
 }
 
 interface NamespaceState {
@@ -79,35 +81,59 @@ interface ReadTask {
   queuedAt: number;
 }
 
-interface ControlTask {
+interface AcceptedWrite {
   id: number;
   namespace: CacheNamespace;
-  operation: "removeOtherVersions" | "clear";
-  formatVersion?: number;
-  datasetVersion?: string;
   queuedAt: number;
 }
+
+type ControlTask = Extract<
+  CacheWorkerRequest,
+  { operation: "removeOtherVersions" | "clear" | "flush" }
+>;
 
 const scope = self as unknown as WorkerScope;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
+const encodedIndexStrings = new WeakMap<IndexEntry, EncodedIndexStrings>();
+const CACHE_NAMESPACES: CacheNamespace[] = ["dat", "server"];
 const states = new Map<CacheNamespace, NamespaceState>();
 const readQueue: ReadTask[] = [];
 const cancelledReads = new Set<number>();
 const controlQueue: ControlTask[] = [];
-const pendingWrites = new Map<CacheNamespace, Map<string, CachedResource>>([
-  ["terrain", new Map()],
-  ["scenery", new Map()],
-]);
+const pendingWrites = new Map<CacheNamespace, Map<string, CachedResource>>(
+  CACHE_NAMESPACES.map((namespace) => [namespace, new Map()]),
+);
+const acceptedWrites: AcceptedWrite[] = [];
+const lifecycleFlushes: number[] = [];
 let root: FileSystemDirectoryHandle | null = null;
 let enabled = false;
 let processing = false;
 let flushDue = false;
 let compactionDue = false;
-let flushTimer: number | undefined;
+let shutdownRequested = false;
 let estimatedUsage = 0;
 let estimatedQuota = 0;
 let lastEstimate = 0;
+let desiredBytes = 0;
+const desiredBytesByNamespace = new Map<CacheNamespace, number>();
+let cacheLimitBytes = Number.POSITIVE_INFINITY;
+let evictionCount = 0;
+let queuedBytes = 0;
+let inFlightBytes = 0;
+let cacheHits = 0;
+let pendingHits = 0;
+let cacheMisses = 0;
+let reinitializations = 0;
+let lifecycleFlushesRequested = 0;
+let lifecycleFlushesCompleted = 0;
+let lifecycleFlushesFailed = 0;
+let lifecycleFlushesInterrupted = 0;
+let lifecycleFlushBytesDrained = 0;
+let lifecycleFlushWritesDrained = 0;
+let lifecycleFlushDurationMs = 0;
+let lifecycleWritesRemainingAtShutdown = 0;
+let lifecycleFlushStartedAt = 0;
 
 function post(message: CacheWorkerMessage, transfer?: Transferable[]): void {
   scope.postMessage(message, transfer);
@@ -118,7 +144,7 @@ function timing(name: CacheTiming["name"], duration: number): void {
 }
 
 function namespaceCode(namespace: CacheNamespace): number {
-  return namespace === "terrain" ? 1 : 2;
+  return namespace === "dat" ? 1 : 2;
 }
 
 function cacheBytes(): number {
@@ -133,17 +159,35 @@ function diagnostics(): CacheDiagnostics {
     usageBytes: estimatedUsage,
     quotaBytes: estimatedQuota,
     cacheBytes: cacheBytes(),
+    queuedBytes,
+    cacheLimitBytes: Number.isFinite(cacheLimitBytes) ? cacheLimitBytes : 0,
+    evictionCount,
+    hits: cacheHits,
+    pendingHits,
+    misses: cacheMisses,
+    reinitializations,
+    lifecycleFlushesRequested,
+    lifecycleFlushesCompleted,
+    lifecycleFlushesFailed,
+    lifecycleFlushesInterrupted,
+    lifecycleFlushBytesDrained,
+    lifecycleFlushWritesDrained,
+    lifecycleFlushDurationMs,
+    lifecycleWritesRemainingAtShutdown,
   };
 }
 
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++)
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (crc ^ 0xffffffff) >>> 0;
+function encodeIndexStrings(entry: IndexEntry): EncodedIndexStrings {
+  const cached = encodedIndexStrings.get(entry);
+  if (cached) return cached;
+  const strings = {
+    key: encoder.encode(entry.key),
+    dataset: encoder.encode(entry.datasetVersion),
+  };
+  if (strings.key.byteLength > 0xffff || strings.dataset.byteLength > 0xffff)
+    throw new Error("OPFS cache index string is too long");
+  encodedIndexStrings.set(entry, strings);
+  return strings;
 }
 
 function readExact(
@@ -173,7 +217,6 @@ function packHeader(namespace: CacheNamespace): Uint8Array {
   view.setUint16(4, FORMAT_VERSION, true);
   view.setUint8(6, namespaceCode(namespace));
   view.setUint16(8, PACK_HEADER_BYTES, true);
-  view.setUint32(12, crc32(bytes.subarray(0, 12)), true);
   return bytes;
 }
 
@@ -189,8 +232,7 @@ function validatePack(
     view.getUint32(0, true) !== PACK_MAGIC ||
     view.getUint16(4, true) !== FORMAT_VERSION ||
     view.getUint8(6) !== namespaceCode(namespace) ||
-    view.getUint16(8, true) !== PACK_HEADER_BYTES ||
-    view.getUint32(12, true) !== crc32(bytes.subarray(0, 12))
+    view.getUint16(8, true) !== PACK_HEADER_BYTES
   ) {
     throw new Error("Invalid OPFS pack header");
   }
@@ -200,10 +242,7 @@ function validatePack(
 function serializeIndex(state: NamespaceState): Uint8Array {
   let payloadLength = 0;
   const strings = [...state.entries.values()].map((entry) => {
-    const key = encoder.encode(entry.key);
-    const dataset = encoder.encode(entry.datasetVersion);
-    if (key.byteLength > 0xffff || dataset.byteLength > 0xffff)
-      throw new Error("OPFS cache index string is too long");
+    const { key, dataset } = encodeIndexStrings(entry);
     payloadLength += 44 + key.byteLength + dataset.byteLength;
     return { entry, key, dataset };
   });
@@ -227,7 +266,7 @@ function serializeIndex(state: NamespaceState): Uint8Array {
     view.setUint8(offset + 24, entry.kind);
     view.setUint8(offset + 25, entry.encoding);
     view.setFloat64(offset + 28, entry.lastAccess, true);
-    view.setUint32(offset + 36, entry.checksum, true);
+    view.setUint32(offset + 36, 0, true);
     view.setUint32(offset + 40, 0, true);
     offset += 44;
     bytes.set(key, offset);
@@ -235,7 +274,6 @@ function serializeIndex(state: NamespaceState): Uint8Array {
     bytes.set(dataset, offset);
     offset += dataset.byteLength;
   }
-  view.setUint32(28, crc32(bytes.subarray(INDEX_HEADER_BYTES)), true);
   return bytes;
 }
 
@@ -261,8 +299,6 @@ function parseIndex(
   if (headerView.getFloat64(16, true) !== packSize)
     throw new Error("OPFS index and pack lengths do not match");
   const payload = readExact(handle, payloadLength, INDEX_HEADER_BYTES);
-  if (headerView.getUint32(28, true) !== crc32(payload))
-    throw new Error("Invalid OPFS index checksum");
   const bytes = new Uint8Array(INDEX_HEADER_BYTES + payloadLength);
   bytes.set(header);
   bytes.set(payload, INDEX_HEADER_BYTES);
@@ -285,7 +321,6 @@ function parseIndex(
       kind: view.getUint8(offset + 24),
       encoding: view.getUint8(offset + 25),
       lastAccess: view.getFloat64(offset + 28, true),
-      checksum: view.getUint32(offset + 36, true),
     };
     offset += 44;
     if (
@@ -350,6 +385,27 @@ async function openSlot(
   if (!packHandle || !indexHandle)
     throw new Error("Unable to open OPFS cache files");
   try {
+    // A refresh can interrupt an append after the pack write but before the
+    // index is persisted. The index is the durable view of the cache, so an
+    // unindexed pack tail is safe to discard and should not invalidate the
+    // entire slot.
+    if (indexHandle.getSize() >= INDEX_HEADER_BYTES) {
+      const indexHeader = readExact(indexHandle, INDEX_HEADER_BYTES, 0);
+      const indexHeaderView = new DataView(indexHeader.buffer);
+      const expectedPackSize = indexHeaderView.getFloat64(16, true);
+      if (
+        indexHeaderView.getUint32(0, true) === INDEX_MAGIC &&
+        indexHeaderView.getUint16(4, true) === FORMAT_VERSION &&
+        indexHeaderView.getUint8(6) === namespaceCode(namespace) &&
+        Number.isSafeInteger(expectedPackSize) &&
+        expectedPackSize >= PACK_HEADER_BYTES &&
+        packHandle.getSize() > expectedPackSize
+      ) {
+        validatePack(packHandle, namespace);
+        packHandle.truncate(expectedPackSize);
+        packHandle.flush();
+      }
+    }
     const parsed = parseIndex(indexHandle, packHandle, namespace);
     return { ...parsed, slot, packHandle, indexHandle };
   } catch {
@@ -419,6 +475,7 @@ async function openNamespace(
     unused.indexHandle.close();
   }
   if (selected) return selected;
+  reinitializations++;
   await removeSlot(namespace, 0);
   await removeSlot(namespace, 1);
   return createSlot(namespace, 0, 1);
@@ -429,6 +486,11 @@ function persistIndex(state: NamespaceState): void {
   writeExact(state.indexHandle, bytes, 0);
   state.indexHandle.truncate(bytes.byteLength);
   state.indexHandle.flush();
+}
+
+function flushAndPersistIndex(state: NamespaceState): void {
+  state.packHandle.flush();
+  persistIndex(state);
 }
 
 async function updateEstimate(force = false): Promise<void> {
@@ -442,6 +504,66 @@ async function updateEstimate(force = false): Promise<void> {
   } catch {
     // Storage estimates are diagnostic and must never disable cache reads.
   }
+}
+
+function pendingBytes(): number {
+  return queuedBytes;
+}
+
+function acknowledgeWrites(): void {
+  if (pendingBytes() > QUEUE_RESUME_BYTES) return;
+  while (acceptedWrites.length > 0) {
+    const task = acceptedWrites.shift()!;
+    post({ type: "result", id: task.id, accepted: true });
+  }
+}
+
+function pendingWriteCount(): number {
+  return [...pendingWrites.values()].reduce((total, writes) => total + writes.size, 0);
+}
+
+function completeLifecycleFlushes(): void {
+  if (
+    flushDue ||
+    compactionDue ||
+    readQueue.length > 0 ||
+    pendingWriteCount() > 0 ||
+    inFlightBytes > 0
+  )
+    return;
+  for (const id of lifecycleFlushes.splice(0)) {
+    lifecycleFlushesCompleted++;
+    post({ type: "result", id });
+  }
+  if (lifecycleFlushStartedAt !== 0) {
+    lifecycleFlushDurationMs += performance.now() - lifecycleFlushStartedAt;
+    lifecycleFlushStartedAt = 0;
+  }
+}
+
+function queuePendingWrite(
+  namespace: CacheNamespace,
+  key: string,
+  value: CachedResource,
+): void {
+  const writes = pendingWrites.get(namespace)!;
+  const previous = writes.get(key);
+  if (previous) queuedBytes = Math.max(0, queuedBytes - previous.bytes.byteLength);
+  writes.set(key, value);
+  queuedBytes += value.bytes.byteLength;
+}
+
+function requeueInFlightWrite(
+  namespace: CacheNamespace,
+  key: string,
+  value: CachedResource,
+): void {
+  inFlightBytes = Math.max(0, inFlightBytes - value.bytes.byteLength);
+  const writes = pendingWrites.get(namespace)!;
+  if (writes.has(key)) {
+    return;
+  }
+  writes.set(key, value);
 }
 
 function recordHeader(length: number): Uint8Array {
@@ -476,14 +598,22 @@ async function readValues(task: ReadTask): Promise<void> {
   let indexDirty = false;
   for (const key of task.keys) {
     if (cancelledReads.delete(task.id)) {
-      if (indexDirty) persistIndex(state);
+      if (indexDirty) flushAndPersistIndex(state);
       return;
+    }
+    const pending = pendingWrites.get(task.namespace)!.get(key);
+    if (pending) {
+      pendingHits++;
+      values.push({ ...pending, bytes: pending.bytes.slice(0) });
+      continue;
     }
     const entry = state.entries.get(key);
     if (!entry) {
+      cacheMisses++;
       values.push(null);
       continue;
     }
+    cacheHits++;
     try {
       const bytes = readRecord(state, entry);
       const buffer = bytes.buffer as ArrayBuffer;
@@ -505,18 +635,10 @@ async function readValues(task: ReadTask): Promise<void> {
       compactionDue = true;
     }
   }
-  if (indexDirty) persistIndex(state);
+  if (indexDirty) flushAndPersistIndex(state);
+  if (cancelledReads.delete(task.id)) return;
   timing("OPFS read", performance.now() - started);
   post({ type: "result", id: task.id, values }, transfers);
-}
-
-function queueFlush(): void {
-  if (flushTimer !== undefined) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = undefined;
-    flushDue = true;
-    void pump();
-  }, WRITE_INTERVAL_MS) as unknown as number;
 }
 
 function totalActiveBytes(): number {
@@ -526,7 +648,7 @@ function totalActiveBytes(): number {
 }
 
 function evictIfNeeded(): void {
-  if (totalActiveBytes() <= MAX_CACHE_BYTES) return;
+  if (totalActiveBytes() <= cacheLimitBytes) return;
   evictToTarget();
 }
 
@@ -537,9 +659,10 @@ function evictToTarget(): void {
     )
     .sort((left, right) => left.entry.lastAccess - right.entry.lastAccess);
   for (const { state, entry } of entries) {
-    if (totalActiveBytes() <= EVICTION_TARGET_BYTES) break;
+    if (totalActiveBytes() <= Math.floor(cacheLimitBytes * 0.9)) break;
     if (!state.entries.delete(entry.key)) continue;
     state.activeBytes -= RECORD_HEADER_BYTES + entry.length;
+    evictionCount++;
   }
   compactionDue = true;
 }
@@ -566,7 +689,7 @@ async function writeBytes(
 async function flushWrites(): Promise<void> {
   flushDue = false;
   await updateEstimate();
-  if (cacheBytes() >= MAX_CACHE_BYTES * COMPACTION_PHYSICAL_FACTOR) {
+  if (cacheBytes() >= cacheLimitBytes * COMPACTION_PHYSICAL_FACTOR) {
     evictToTarget();
     compactionDue = true;
     return;
@@ -576,20 +699,22 @@ async function flushWrites(): Promise<void> {
       ? estimatedQuota - estimatedUsage - QUOTA_RESERVE_BYTES
       : Number.POSITIVE_INFINITY;
   let budget = WRITE_BATCH_BYTES;
-  const batches = new Map<CacheNamespace, [string, CachedResource][]>([
-    ["terrain", []],
-    ["scenery", []],
-  ]);
-  for (const namespace of ["terrain", "scenery"] as const) {
+  const batches = new Map<CacheNamespace, [string, CachedResource][]>(
+    CACHE_NAMESPACES.map((namespace) => [namespace, []]),
+  );
+  let wroteBytes = false;
+  for (const namespace of CACHE_NAMESPACES) {
     const writes = pendingWrites.get(namespace)!;
     for (const [key, value] of writes) {
       const bytes = value.bytes.byteLength + RECORD_HEADER_BYTES;
       if (budget < WRITE_BATCH_BYTES && bytes > budget) break;
       writes.delete(key);
       if (bytes > quotaBudget) {
+        queuedBytes = Math.max(0, queuedBytes - value.bytes.byteLength);
         compactionDue = true;
         continue;
       }
+      inFlightBytes += value.bytes.byteLength;
       batches.get(namespace)!.push([key, value]);
       quotaBudget -= bytes;
       budget -= Math.min(bytes, budget);
@@ -598,16 +723,9 @@ async function flushWrites(): Promise<void> {
     if (budget === 0) break;
   }
   const started = performance.now();
-  for (const namespace of ["terrain", "scenery"] as const) {
+  for (const namespace of CACHE_NAMESPACES) {
     const state = states.get(namespace)!;
     const batch = batches.get(namespace)!;
-    if (readQueue.length > 0) {
-      for (const [key, value] of batch)
-        pendingWrites.get(namespace)!.set(key, value);
-      batch.length = 0;
-      flushDue = true;
-      continue;
-    }
     for (let batchIndex = 0; batchIndex < batch.length; batchIndex++) {
       const [key, value] = batch[batchIndex];
       const bytes = new Uint8Array(value.bytes);
@@ -622,6 +740,7 @@ async function flushWrites(): Promise<void> {
         state.packHandle.truncate(recordOffset);
         state.packHandle.flush();
         if (isQuotaError(error)) {
+          requeueInFlightWrite(namespace, key, value);
           compactionDue = true;
           continue;
         }
@@ -630,6 +749,9 @@ async function flushWrites(): Promise<void> {
       if (previous) state.activeBytes -= RECORD_HEADER_BYTES + previous.length;
       state.packSize = payloadOffset + bytes.byteLength;
       state.activeBytes += RECORD_HEADER_BYTES + bytes.byteLength;
+      wroteBytes = true;
+      inFlightBytes = Math.max(0, inFlightBytes - bytes.byteLength);
+      queuedBytes = Math.max(0, queuedBytes - bytes.byteLength);
       state.entries.set(key, {
         key,
         offset: payloadOffset,
@@ -640,32 +762,28 @@ async function flushWrites(): Promise<void> {
         kind: value.kind,
         encoding: value.encoding,
         lastAccess: Date.now(),
-        checksum: 0,
       });
-      if (batchIndex + 1 < batch.length) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        if (readQueue.length > 0) {
-          for (const [remainingKey, remainingValue] of batch.slice(
-            batchIndex + 1,
-          ))
-            pendingWrites.get(namespace)!.set(remainingKey, remainingValue);
-          batch.splice(batchIndex + 1);
-          flushDue = true;
-          break;
-        }
+      if (lifecycleFlushes.length > 0) {
+        lifecycleFlushBytesDrained += bytes.byteLength;
+        lifecycleFlushWritesDrained++;
       }
     }
-    if (batches.get(namespace)!.length > 0) state.packHandle.flush();
   }
   evictIfNeeded();
-  for (const namespace of ["terrain", "scenery"] as const) {
-    if (batches.get(namespace)!.length > 0)
-      persistIndex(states.get(namespace)!);
-  }
-  timing("OPFS flush", performance.now() - started);
-  if ([...pendingWrites.values()].some((writes) => writes.size > 0)) {
+  const hasPendingWrites = [...pendingWrites.values()].some(
+    (writes) => writes.size > 0,
+  );
+  if (hasPendingWrites || (readQueue.length > 0 && !shutdownRequested)) {
     flushDue = true;
   }
+  if (wroteBytes) {
+    // Make each completed append durable. A later refresh must not discard
+    // records merely because another batch is still queued in memory.
+    for (const state of states.values()) flushAndPersistIndex(state);
+  }
+  timing("OPFS flush", performance.now() - started);
+  post({ type: "diagnostics", diagnostics: diagnostics() });
+  acknowledgeWrites();
   if (
     [...states.values()].some(
       (state) =>
@@ -679,6 +797,13 @@ async function flushWrites(): Promise<void> {
 async function handleControl(task: ControlTask): Promise<void> {
   timing("OPFS cache queue", Date.now() - task.queuedAt);
   try {
+    if (task.operation === "flush") {
+      lifecycleFlushesRequested++;
+      lifecycleFlushes.push(task.id);
+      if (lifecycleFlushStartedAt === 0) lifecycleFlushStartedAt = performance.now();
+      flushDue = true;
+      return;
+    }
     if (task.operation === "clear") {
       await clearNamespace(task.namespace);
     } else {
@@ -696,7 +821,7 @@ async function handleControl(task: ControlTask): Promise<void> {
       }
       if (changed) {
         const started = performance.now();
-        persistIndex(state);
+        flushAndPersistIndex(state);
         timing("OPFS flush", performance.now() - started);
         compactionDue = true;
       }
@@ -711,12 +836,33 @@ async function handleControl(task: ControlTask): Promise<void> {
   }
 }
 
+async function configure(request: Extract<CacheWorkerRequest, { operation: "configure" }>): Promise<void> {
+  desiredBytesByNamespace.set(
+    request.namespace,
+    Math.ceil(request.cacheFootprintBytes * 1.15),
+  );
+  desiredBytes = [...desiredBytesByNamespace.values()].reduce(
+    (total, bytes) => total + bytes,
+    0,
+  );
+  desiredBytes = Math.max(desiredBytes, cacheBytes());
+  await updateEstimate(true);
+  const nonCacheUsage = Math.max(0, estimatedUsage - cacheBytes());
+  const available = Math.max(0, estimatedQuota - nonCacheUsage - QUOTA_RESERVE_BYTES);
+  cacheLimitBytes = estimatedQuota > 0 ? Math.min(desiredBytes, available) : desiredBytes;
+  evictIfNeeded();
+  post({ type: "diagnostics", diagnostics: diagnostics() });
+  post({ type: "result", id: request.id });
+}
+
 async function clearNamespace(namespace: CacheNamespace): Promise<void> {
   const state = states.get(namespace);
   if (state) {
     state.packHandle.close();
     state.indexHandle.close();
   }
+  for (const value of pendingWrites.get(namespace)!.values())
+    queuedBytes -= value.bytes.byteLength;
   pendingWrites.get(namespace)!.clear();
   await removeSlot(namespace, 0);
   await removeSlot(namespace, 1);
@@ -727,9 +873,11 @@ async function clearNamespace(namespace: CacheNamespace): Promise<void> {
   post({ type: "diagnostics", diagnostics: diagnostics() });
 }
 
-async function drainReads(): Promise<void> {
-  while (readQueue.length > 0) {
+async function drainReads(maxTasks = Number.POSITIVE_INFINITY): Promise<void> {
+  let drained = 0;
+  while (readQueue.length > 0 && drained < maxTasks) {
     const task = readQueue.shift()!;
+    drained++;
     try {
       await readValues(task);
     } catch (error) {
@@ -794,7 +942,7 @@ async function compactNamespace(namespace: CacheNamespace): Promise<void> {
 
 async function compact(): Promise<void> {
   compactionDue = false;
-  for (const namespace of ["terrain", "scenery"] as const) {
+  for (const namespace of CACHE_NAMESPACES) {
     await compactNamespace(namespace);
     if (readQueue.length > 0) await drainReads();
   }
@@ -802,31 +950,80 @@ async function compact(): Promise<void> {
     flushDue = true;
 }
 
+function closeCache(): void {
+  enabled = false;
+  for (const task of readQueue.splice(0))
+    post({ type: "result", id: task.id, values: task.keys.map(() => null) });
+  lifecycleWritesRemainingAtShutdown = pendingWriteCount();
+  for (const state of states.values()) {
+    try {
+      flushAndPersistIndex(state);
+    } catch {
+      /* Cache is disposable. */
+    }
+    try {
+      state.packHandle.close();
+    } catch {
+      /* already closed */
+    }
+    try {
+      state.indexHandle.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  states.clear();
+}
+
 async function pump(): Promise<void> {
   if (!enabled || processing) return;
   processing = true;
+  let writeBatchesSinceRead = 0;
   try {
     while (enabled) {
-      if (readQueue.length > 0) {
-        await drainReads();
-        continue;
-      }
       if (controlQueue.length > 0) {
         await handleControl(controlQueue.shift()!);
         continue;
       }
+      if (flushDue && (readQueue.length === 0 || writeBatchesSinceRead === 0)) {
+        // Let reads posted while the last task was running enter the queue,
+        // then perform at most one write batch before yielding back to reads.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await flushWrites();
+        writeBatchesSinceRead++;
+        continue;
+      }
+      if (readQueue.length > 0 && !shutdownRequested) {
+        await drainReads(8);
+        writeBatchesSinceRead = 0;
+        continue;
+      }
       if (flushDue) {
         await flushWrites();
+        writeBatchesSinceRead++;
         continue;
       }
       if (compactionDue) {
         await new Promise((resolve) => setTimeout(resolve, 0));
-        if (readQueue.length === 0 && !flushDue) await compact();
+        if ((!shutdownRequested && readQueue.length === 0 || shutdownRequested) && !flushDue)
+          await compact();
         continue;
       }
       break;
     }
+    if (shutdownRequested) {
+      shutdownRequested = false;
+      closeCache();
+    }
+    completeLifecycleFlushes();
   } catch (error) {
+    lifecycleFlushesFailed += lifecycleFlushes.length;
+    for (const id of lifecycleFlushes.splice(0))
+      post({
+        type: "error",
+        id,
+        message: error instanceof Error ? error.message : String(error),
+      });
     disable(error instanceof Error ? error.message : String(error));
   } finally {
     processing = false;
@@ -856,6 +1053,9 @@ function disable(reason: string): void {
     }
   }
   states.clear();
+  lifecycleFlushesInterrupted += lifecycleFlushes.length;
+  for (const id of lifecycleFlushes.splice(0))
+    post({ type: "error", id, message: reason });
   for (const task of readQueue.splice(0))
     post({ type: "result", id: task.id, values: task.keys.map(() => null) });
   for (const task of controlQueue.splice(0))
@@ -867,9 +1067,10 @@ async function initialize(): Promise<void> {
   try {
     if (!navigator.storage?.getDirectory)
       throw new Error("OPFS is unavailable");
-    root = await navigator.storage.getDirectory();
-    states.set("terrain", await openNamespace("terrain"));
-    states.set("scenery", await openNamespace("scenery"));
+    const parent = await navigator.storage.getDirectory();
+    root = await parent.getDirectoryHandle("acterrain-format16", { create: true });
+    for (const namespace of CACHE_NAMESPACES)
+      states.set(namespace, await openNamespace(namespace));
     enabled = true;
     try {
       await navigator.storage.persist();
@@ -886,25 +1087,13 @@ async function initialize(): Promise<void> {
 scope.onmessage = (event) => {
   const request = event.data;
   if (request.operation === "shutdown") {
-    enabled = false;
-    for (const state of states.values()) {
-      try {
-        persistIndex(state);
-      } catch {
-        /* Cache is disposable. */
-      }
-      try {
-        state.packHandle.close();
-      } catch {
-        /* already closed */
-      }
-      try {
-        state.indexHandle.close();
-      } catch {
-        /* already closed */
-      }
-    }
-    states.clear();
+    const queuedWrites = [...pendingWrites.values()].reduce(
+      (total, writes) => total + writes.size,
+      0,
+    );
+    shutdownRequested = true;
+    if (queuedWrites > 0) flushDue = true;
+    void pump();
     return;
   }
   if (!enabled) {
@@ -933,17 +1122,23 @@ scope.onmessage = (event) => {
     }
     return;
   }
+  if (request.operation === "flush") {
+    controlQueue.push(request);
+    void pump();
+    return;
+  }
   if (request.operation === "setMany") {
-    const writes = pendingWrites.get(request.namespace)!;
-    for (const [key, value] of request.entries) writes.set(key, value);
-    let queuedBytes = 0;
-    for (const value of writes.values()) queuedBytes += value.bytes.byteLength;
-    if (queuedBytes >= WRITE_BATCH_BYTES) {
-      flushDue = true;
-      void pump();
-    } else {
-      queueFlush();
+    for (const [key, value] of request.entries) {
+      queuePendingWrite(request.namespace, key, value);
     }
+    acceptedWrites.push({ id: request.id, namespace: request.namespace, queuedAt: Date.now() });
+    flushDue = true;
+    void pump();
+    post({ type: "diagnostics", diagnostics: diagnostics() });
+    return;
+  }
+  if (request.operation === "configure") {
+    void configure(request).catch((error) => post({ type: "error", id: request.id, message: error instanceof Error ? error.message : String(error) }));
     return;
   }
   controlQueue.push(request);

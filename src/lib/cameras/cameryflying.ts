@@ -14,19 +14,20 @@ export class CameraFlying extends BaseCamera {
   private _near = 1;
   private _far = 100000;
 
-  private _moveSpeed = 25;
+  private _moveSpeed = 60;
   private _mouseSensitivity = 0.005; // Increased slightly as per previous suggestion
+  private _mobileMoveSensitivity = 85;
+  private _mobileLookSensitivity = 1.5;
+  private _mobileLookInvertY = false;
 
   private _forward = new Vector3(0, 1, 0); // Y-forward
   private _right = new Vector3(1, 0, 0);
   private _up = new Vector3(0, 0, 1); // Z-up
 
   private _keys: { [key: string]: boolean } = {};
-  private _touchPointers = new Map<number, Vector2>();
-  private _touchLastDistance = 0;
-  private _touchLastMidpoint: Vector2 | null = null;
-  private _touchLastAngle = 0;
-  private _pointerTouchActive = false;
+  private _mobileMovement = { x: 0, y: 0 };
+  private _mobileLook = { x: 0, y: 0 };
+  private _mobileInputActive = false;
 
   get Yaw() {
     return this._yaw;
@@ -62,11 +63,43 @@ export class CameraFlying extends BaseCamera {
     this._fov = Math.max(1, Math.min(179, v));
   }
 
+  get Far() {
+    return this._far;
+  }
+  set Far(v) {
+    this._far = Math.max(this._near + 1, v);
+  }
+
   get MoveSpeed() {
     return this._moveSpeed;
   }
+
+  get hasActiveInput(): boolean {
+    return this._mobileInputActive || Object.values(this._keys).some(Boolean);
+  }
   set MoveSpeed(v) {
-    this._moveSpeed = Math.max(0.1, Math.min(400, v));
+    this._moveSpeed = Math.max(0.1, Math.min(2000, v));
+  }
+
+  get MobileMoveSensitivity() {
+    return this._mobileMoveSensitivity;
+  }
+  set MobileMoveSensitivity(v) {
+    this._mobileMoveSensitivity = Math.max(0, Math.min(200, v));
+  }
+
+  get MobileLookSensitivity() {
+    return this._mobileLookSensitivity;
+  }
+  set MobileLookSensitivity(v) {
+    this._mobileLookSensitivity = Math.max(0, Math.min(3, v));
+  }
+
+  get MobileLookInvertY() {
+    return this._mobileLookInvertY;
+  }
+  set MobileLookInvertY(v) {
+    this._mobileLookInvertY = v;
   }
 
   get ViewProjection() {
@@ -97,7 +130,8 @@ export class CameraFlying extends BaseCamera {
   }
 
   protected setupEventListeners() {
-    this.setupTouchEvents();
+    // BaseCamera invokes this during super(), before CameraFlying fields exist.
+    Promise.resolve().then(() => this.setupMobileJoysticks());
 
     // Mouse events for looking around
     this.canvas.addEventListener("mousedown", (event) => {
@@ -146,211 +180,133 @@ export class CameraFlying extends BaseCamera {
       event.preventDefault();
       event.stopImmediatePropagation();
       this._moveSpeed *= event.deltaY > 0 ? 0.9 : 1.1;
-      this._moveSpeed = Math.max(0.01, Math.min(400, this._moveSpeed));
+      this._moveSpeed = Math.max(0.1, Math.min(2000, this._moveSpeed));
       this.renderer.updateFlyingCameraControls();
     });
   }
 
-  private setupTouchEvents() {
-    const touchOptions: AddEventListenerOptions = {
-      passive: false,
-      capture: true,
+  private setupMobileJoysticks() {
+    const controls = document.getElementById("mobile-controls");
+    if (!controls) return;
+
+    const isTouchDevice =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches ||
+      navigator.maxTouchPoints > 0 ||
+      typeof window.ontouchstart !== "undefined";
+    if (isTouchDevice) controls.classList.add("touch-device");
+
+    const setupJoystick = (
+      id: string,
+      output: { x: number; y: number },
+      onInput: (value: { x: number; y: number }) => void,
+    ) => {
+      const element = document.getElementById(id);
+      const knob = element?.querySelector<HTMLElement>(".mobile-joystick-knob");
+      if (!element || !knob) return;
+      let pointerId: number | null = null;
+      let touchId: number | null = null;
+      const radius = 48;
+
+      const update = (clientX: number, clientY: number) => {
+        let stage = "start";
+        stage = "finite-check";
+        if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+        stage = "viewport-center";
+        const centerX = id === "look-joystick" ? window.innerWidth - 90 : 90;
+        const centerY = window.innerHeight - 90;
+        stage = "coordinates";
+        const x = clientX - centerX;
+        const y = clientY - centerY;
+        stage = "joystick-math";
+        const distance = Math.min(radius, Math.hypot(x, y));
+        const angle = Math.atan2(y, x);
+        const normalizedDistance = distance / radius;
+        const curvedDistance = normalizedDistance * normalizedDistance;
+        const valueX = Math.cos(angle) * curvedDistance;
+        const visualValueY = -Math.sin(angle) * curvedDistance;
+        const valueY =
+          id === "look-joystick" && this._mobileLookInvertY
+            ? -visualValueY
+            : visualValueY;
+        stage = "state-update";
+        output.x = valueX;
+        output.y = valueY;
+        stage = "knob-style";
+        knob.style.transform = `translate(calc(-50% + ${valueX * radius}px), calc(-50% - ${visualValueY * radius}px))`;
+        stage = "camera-input";
+        onInput(output);
+      };
+
+      const clear = () => {
+        pointerId = null;
+        touchId = null;
+        output.x = 0;
+        output.y = 0;
+        knob.style.transform = "translate(-50%, -50%)";
+        element.classList.remove("active");
+        onInput(output);
+        this._mobileInputActive =
+          Math.hypot(this._mobileMovement.x, this._mobileMovement.y) > 0 ||
+          Math.hypot(this._mobileLook.x, this._mobileLook.y) > 0;
+      };
+
+      element.addEventListener("pointerdown", (event) => {
+        if (this.renderer.currentCamera != this || event.pointerType === "mouse") return;
+        event.preventDefault();
+        pointerId = event.pointerId;
+        if (typeof element.setPointerCapture === "function") {
+          element.setPointerCapture(pointerId);
+        }
+        element.classList.add("active");
+        update(event.clientX, event.clientY);
+      });
+      element.addEventListener("pointermove", (event) => {
+        if (event.pointerId !== pointerId) return;
+        event.preventDefault();
+        update(event.clientX, event.clientY);
+      });
+      element.addEventListener("pointerup", (event) => {
+        if (event.pointerId === pointerId) clear();
+      });
+      element.addEventListener("pointercancel", (event) => {
+        if (event.pointerId === pointerId) clear();
+      });
+
+      element.addEventListener("touchstart", (event) => {
+        if (pointerId !== null || touchId !== null) return;
+        const touch = event.changedTouches[0];
+        if (!touch) return;
+        event.preventDefault();
+        touchId = touch.identifier;
+        element.classList.add("active");
+        update(touch.clientX, touch.clientY);
+      }, { passive: false });
+      element.addEventListener("touchmove", (event) => {
+        const touch = Array.from(event.changedTouches).find(
+          (changedTouch) => changedTouch.identifier === touchId,
+        );
+        if (!touch) return;
+        event.preventDefault();
+        update(touch.clientX, touch.clientY);
+      }, { passive: false });
+      const endTouch = (event: TouchEvent) => {
+        if (touchId === null) return;
+        const ended = Array.from(event.changedTouches).some(
+          (touch) => touch.identifier === touchId,
+        );
+        if (ended) clear();
+      };
+      element.addEventListener("touchend", endTouch, { passive: false });
+      element.addEventListener("touchcancel", endTouch, { passive: false });
     };
 
-    // Pointer Events are the primary path on newer mobile browsers.
-    window.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (
-          this.renderer.currentCamera != this ||
-          event.pointerType === "mouse"
-        )
-          return;
-        event.preventDefault();
-        this._pointerTouchActive = true;
-        this.canvas.setPointerCapture(event.pointerId);
-        this._touchPointers.set(
-          event.pointerId,
-          new Vector2(event.clientX, event.clientY),
-        );
-        this._touchLastDistance = this.touchDistance();
-        this._touchLastMidpoint = this.touchMidpoint();
-        this._touchLastAngle = this.touchAngle();
-      },
-      touchOptions,
-    );
-
-    window.addEventListener(
-      "pointermove",
-      (event) => {
-        if (
-          this.renderer.currentCamera != this ||
-          event.pointerType === "mouse"
-        )
-          return;
-        const previous = this._touchPointers.get(event.pointerId);
-        if (!previous) return;
-        event.preventDefault();
-        const previousPositions = new Map(this._touchPointers);
-        this._touchPointers.set(
-          event.pointerId,
-          new Vector2(event.clientX, event.clientY),
-        );
-        this.processTouchMovement(previousPositions);
-      },
-      touchOptions,
-    );
-
-    const endPointerTouch = (event: PointerEvent) => {
-      if (event.pointerType === "mouse") return;
-      this._touchPointers.delete(event.pointerId);
-      this._pointerTouchActive = this._touchPointers.size > 0;
-      if (this._touchPointers.size < 2) {
-        this._touchLastDistance = 0;
-        this._touchLastMidpoint = this.touchMidpoint();
-        this._touchLastAngle = 0;
-      }
-    };
-
-    window.addEventListener("pointerup", endPointerTouch);
-    window.addEventListener("pointercancel", endPointerTouch);
-
-    window.addEventListener(
-      "touchstart",
-      (event) => {
-        if (this.renderer.currentCamera != this || this._pointerTouchActive)
-          return;
-        event.preventDefault();
-        if (event.touches.length === 1) this._touchPointers.clear();
-        for (const touch of Array.from(event.changedTouches)) {
-          this._touchPointers.set(
-            touch.identifier,
-            new Vector2(touch.clientX, touch.clientY),
-          );
-        }
-        this._touchLastDistance = this.touchDistance();
-        this._touchLastMidpoint = this.touchMidpoint();
-        this._touchLastAngle = this.touchAngle();
-      },
-      touchOptions,
-    );
-
-    window.addEventListener(
-      "touchmove",
-      (event) => {
-        if (this.renderer.currentCamera != this || this._pointerTouchActive)
-          return;
-        event.preventDefault();
-
-        const previousPositions = new Map(this._touchPointers);
-        const activeIds = new Set(
-          Array.from(event.touches).map((touch) => touch.identifier),
-        );
-        for (const identifier of this._touchPointers.keys()) {
-          if (!activeIds.has(identifier))
-            this._touchPointers.delete(identifier);
-        }
-        for (const touch of Array.from(event.touches)) {
-          this._touchPointers.set(
-            touch.identifier,
-            new Vector2(touch.clientX, touch.clientY),
-          );
-        }
-
-        this.processTouchMovement(previousPositions);
-      },
-      touchOptions,
-    );
-
-    const endTouch = (event: TouchEvent) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-      for (const touch of Array.from(event.changedTouches)) {
-        this._touchPointers.delete(touch.identifier);
-      }
-      if (this._touchPointers.size < 2) {
-        this._touchLastDistance = 0;
-        this._touchLastMidpoint = this.touchMidpoint();
-        this._touchLastAngle = 0;
-      }
-    };
-
-    window.addEventListener("touchend", endTouch, touchOptions);
-    window.addEventListener("touchcancel", endTouch, touchOptions);
-  }
-
-  private processTouchMovement(previousPositions: Map<number, Vector2>) {
-    if (this._touchPointers.size === 1) {
-      const [identifier, current] = Array.from(
-        this._touchPointers.entries(),
-      )[0];
-      const previous = previousPositions.get(identifier);
-      if (previous) {
-        this.handleMouseLook(current.x - previous.x, current.y - previous.y);
-      }
-      return;
-    }
-
-    if (this._touchPointers.size !== 2) return;
-    const midpoint = this.touchMidpoint()!;
-    const previousMidpoint = this._touchLastMidpoint ?? midpoint;
-    this.moveFromScreenDelta(
-      midpoint.x - previousMidpoint.x,
-      midpoint.y - previousMidpoint.y,
-    );
-
-    const angle = this.touchAngle();
-    let angleDelta = angle - this._touchLastAngle;
-    if (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
-    if (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
-    this.Yaw += angleDelta;
-    this._touchLastAngle = angle;
-
-    const distance = this.touchDistance();
-    if (this._touchLastDistance > 0) {
-      const dolly =
-        (distance - this._touchLastDistance) * this.touchMoveScale();
-      this.Position.add(this._forward.clone().scale(dolly));
-    }
-    this._touchLastDistance = distance;
-    this._touchLastMidpoint = midpoint;
-  }
-
-  private touchDistance() {
-    const points = Array.from(this._touchPointers.values());
-    if (points.length < 2) return 0;
-    const dx = points[0].x - points[1].x;
-    const dy = points[0].y - points[1].y;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  private touchMidpoint() {
-    const points = Array.from(this._touchPointers.values());
-    if (points.length < 2) return null;
-    return points[0].clone().add(points[1]).scale(0.5);
-  }
-
-  private touchAngle() {
-    const points = Array.from(this._touchPointers.values());
-    if (points.length < 2) return 0;
-    return Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x);
-  }
-
-  private touchMoveScale() {
-    return Math.max(0.5, this.Position.z * 0.002);
-  }
-
-  private moveFromScreenDelta(deltaX: number, deltaY: number) {
-    const horizontalForward = new Vector3(this._forward.x, this._forward.y, 0);
-    const horizontalLength = Math.sqrt(
-      horizontalForward.x * horizontalForward.x +
-        horizontalForward.y * horizontalForward.y,
-    );
-    if (horizontalLength > 0) horizontalForward.scale(1 / horizontalLength);
-
-    const scale = this.touchMoveScale();
-    this.Position.add(this._right.clone().scale(deltaX * scale));
-    this.Position.add(horizontalForward.scale(deltaY * scale));
+    setupJoystick("movement-joystick", this._mobileMovement, () => {
+      this._mobileInputActive = true;
+    });
+    setupJoystick("look-joystick", this._mobileLook, () => {
+      this._mobileInputActive = true;
+    });
   }
 
   private handleMouseLook(deltaX: number, deltaY: number) {
@@ -391,7 +347,33 @@ export class CameraFlying extends BaseCamera {
     if (this.renderer.currentCamera != this) return;
     const speedMultiplier =
       this._keys["shiftleft"] || this._keys["shiftright"] ? 2 : 1;
-    const moveDistance = ((this._moveSpeed * speedMultiplier) / 50000) * dt;
+    // MoveSpeed is the desktop movement rate in world units per second.
+    const moveDistance = (this._moveSpeed * speedMultiplier * dt) / 1000;
+
+    const horizontalForward = new Vector3(this._forward.x, this._forward.y, 0);
+    const horizontalLength = Math.hypot(horizontalForward.x, horizontalForward.y);
+    if (horizontalLength > 0) horizontalForward.scale(1 / horizontalLength);
+    if (Math.hypot(this._mobileMovement.x, this._mobileMovement.y) > 0) {
+      const movementRight = new Vector3(
+        horizontalForward.y,
+        -horizontalForward.x,
+        0,
+      );
+      // Touch movement has its own rate. Do not multiply it by MoveSpeed:
+      // changing the desktop control must not change joystick sensitivity.
+      const mobileMoveDistance =
+        (this._mobileMoveSensitivity * dt) / 1000;
+      this.Position.add(
+        movementRight.scale(-this._mobileMovement.x * mobileMoveDistance),
+      );
+      this.Position.add(
+        this._forward.clone().scale(this._mobileMovement.y * mobileMoveDistance),
+      );
+    }
+    if (Math.hypot(this._mobileLook.x, this._mobileLook.y) > 0) {
+      this.Yaw += (this._mobileLook.x * this._mobileLookSensitivity * dt) / 1000;
+      this.Pitch += (this._mobileLook.y * this._mobileLookSensitivity * dt) / 1000;
+    }
 
     // WASD movement
     if (this._keys["keyw"] || this._keys["arrowup"]) {
@@ -440,15 +422,15 @@ export class CameraFlying extends BaseCamera {
     return this._up.clone();
   }
   get ParticleRight() {
-    // These are upright Z-axis billboards, so only the camera's horizontal
-    // facing direction determines their rotation. Deriving the axis from the
-    // controller direction avoids mixing view-matrix rows/columns. Account
-    // for the Y conversion and view-space X mirror used by object rendering.
-    const forward = this.GetForward();
-    return new Vector3(forward.y, forward.x, 0).normalize();
+    // Particle vertices are converted from AC coordinates to renderer
+    // coordinates by flipping Y in particle.vert, while Transform mirrors
+    // view-space X. Convert the inverse-view right vector through both of
+    // those conventions so local +X is screen-right.
+    return new Vector3(-this._right.x, this._right.y, -this._right.z);
   }
   get ParticleUp() {
-    return new Vector3(0, 0, 1);
+    // Match the same AC -> renderer Y conversion used by particle.vert.
+    return new Vector3(this._up.x, -this._up.y, this._up.z);
   }
 
   GetMapPosition(): Vector3 {
@@ -457,20 +439,23 @@ export class CameraFlying extends BaseCamera {
       this.canvas.height / 2,
     );
     if (Math.abs(ray.direction.z) > 0.000001) {
-      const groundHeight = this.renderer.getTerrainHeightAt(
+      let groundHeight = this.renderer.getTerrainHeightAt(
         this.Position.x,
         this.Position.y,
       );
-      const distance = (groundHeight - ray.origin.z) / ray.direction.z;
-      if (distance >= 0) {
-        return ray.origin.clone().add(ray.direction.clone().scale(distance));
+      for (let iteration = 0; iteration < 2; iteration++) {
+        const distance = (groundHeight - ray.origin.z) / ray.direction.z;
+        if (distance < 0) return this.Position.clone();
+        const point = ray.origin.clone().add(ray.direction.clone().scale(distance));
+        groundHeight = this.renderer.getTerrainHeightAt(point.x, point.y);
+        if (iteration === 1) return point;
       }
     }
     return this.Position.clone();
   }
 
   WorldToScreen(worldPosition: Vector3): Vector3 {
-    const clipSpace = worldPosition.clone().transform(this.Transform);
+    const clipSpace = worldPosition.clone().transform(this.FrameTransform);
     const ndc = clipSpace.clone().scale(1 / 1);
 
     const screenX = (ndc.x + 1) * 0.5 * this.canvas.width;

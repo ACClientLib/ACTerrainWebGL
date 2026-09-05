@@ -1,5 +1,6 @@
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
 import { TerrainRenderer } from "../terrainrenderer";
+import { extractFrustumPlanes, FrustumPlanes } from "../objectvisibility";
 
 // Abstract base camera class
 export abstract class BaseCamera {
@@ -15,6 +16,7 @@ export abstract class BaseCamera {
   public mousePos = new Vector2(0, 0);
   private frameTransform: Matrix4 | null = null;
   private frameInverseTransform: Matrix4 | null = null;
+  private frameFrustum: FrustumPlanes | null = null;
 
   constructor(canvas: HTMLCanvasElement, renderer: TerrainRenderer) {
     this.canvas = canvas;
@@ -26,12 +28,14 @@ export abstract class BaseCamera {
 
   abstract get ViewProjection(): Matrix4;
   abstract get Transform(): Matrix4;
+  abstract WorldToScreen(worldPosition: Vector3): Vector3;
 
   // Build the camera matrix once after input/update and reuse it for the
   // complete render and culling pass.
   prepareFrame(): void {
     this.frameTransform = this.Transform;
     this.frameInverseTransform = this.frameTransform.clone().invert();
+    this.frameFrustum = extractFrustumPlanes(this.frameTransform);
   }
 
   get FrameTransform(): Matrix4 {
@@ -40,6 +44,10 @@ export abstract class BaseCamera {
 
   get FrameInverseTransform(): Matrix4 {
     return this.frameInverseTransform ?? this.FrameTransform.clone().invert();
+  }
+
+  get FrameFrustum(): FrustumPlanes {
+    return this.frameFrustum ?? extractFrustumPlanes(this.FrameTransform);
   }
 
   // Camera-relative particle expansion basis. The 2D camera lies in the

@@ -1,4 +1,3 @@
-import { LoadingProfiler, type LoadingTimingSnapshot } from "./loadingprofiler";
 import type {
   CacheDiagnostics,
   CacheNamespace,
@@ -22,10 +21,35 @@ const EMPTY_DIAGNOSTICS: CacheDiagnostics = {
   usageBytes: 0,
   quotaBytes: 0,
   cacheBytes: 0,
+  queuedBytes: 0,
+  cacheLimitBytes: 0,
+  evictionCount: 0,
+  hits: 0,
+  pendingHits: 0,
+  misses: 0,
+  reinitializations: 0,
+  lifecycleFlushesRequested: 0,
+  lifecycleFlushesCompleted: 0,
+  lifecycleFlushesFailed: 0,
+  lifecycleFlushesInterrupted: 0,
+  lifecycleFlushBytesDrained: 0,
+  lifecycleFlushWritesDrained: 0,
+  lifecycleFlushDurationMs: 0,
+  lifecycleWritesRemainingAtShutdown: 0,
 };
 
 interface PendingRequest {
   resolve: (values?: (CachedResource | null)[]) => void;
+  reject: (error: Error) => void;
+}
+
+interface QueuedRead {
+  namespace: CacheNamespace;
+  keys: string[];
+  signal?: AbortSignal;
+  aborted: boolean;
+  cancel?: () => void;
+  resolve: (values: (CachedResource | null)[]) => void;
   reject: (error: Error) => void;
 }
 
@@ -36,7 +60,8 @@ class OpfsCacheWorkerClient {
   private worker: Worker | null = null;
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
-  private profiler = new LoadingProfiler();
+  private queuedReads: QueuedRead[] = [];
+  private readBatchScheduled = false;
   private ready: Promise<boolean>;
   private resolveReady!: (enabled: boolean) => void;
   private initialized = false;
@@ -52,6 +77,10 @@ class OpfsCacheWorkerClient {
         this.handleMessage(event.data as CacheWorkerMessage);
       this.worker.onerror = (event) =>
         this.disable(event.message || "OPFS cache worker failed");
+      addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden")
+          void this.flush().catch(() => undefined);
+      });
       addEventListener("pagehide", () => this.shutdown(), { once: true });
       setTimeout(() => {
         if (!this.initialized) this.disable("initialization timed out");
@@ -61,9 +90,6 @@ class OpfsCacheWorkerClient {
     }
   }
 
-  get loadTimings(): LoadingTimingSnapshot {
-    return this.profiler.snapshot();
-  }
 
   async getMany(
     namespace: CacheNamespace,
@@ -72,13 +98,31 @@ class OpfsCacheWorkerClient {
   ): Promise<(CachedResource | null)[]> {
     if (keys.length === 0) return [];
     if (!(await this.ready) || !this.worker) return keys.map(() => null);
-    const values = await this.request({
-      operation: "getMany",
-      namespace,
-      keys,
-      queuedAt: Date.now(),
-    }, signal);
-    return values ?? keys.map(() => null);
+    return new Promise((resolve, reject) => {
+      const queued: QueuedRead = {
+        namespace,
+        keys,
+        signal,
+        aborted: false,
+        resolve,
+        reject,
+      };
+      const cancel = () => {
+        if (queued.aborted) return;
+        queued.aborted = true;
+        resolve(keys.map(() => null));
+      };
+      queued.cancel = cancel;
+      if (signal?.aborted) {
+        cancel();
+        return;
+      }
+      signal?.addEventListener("abort", cancel, { once: true });
+      this.queuedReads.push(queued);
+      if (this.readBatchScheduled) return;
+      this.readBatchScheduled = true;
+      setTimeout(() => this.flushReadBatch(), 0);
+    });
   }
 
   setMany(
@@ -86,16 +130,48 @@ class OpfsCacheWorkerClient {
     entries: readonly (readonly [string, CachedResource])[],
   ): Promise<void> {
     if (entries.length === 0) return Promise.resolve();
-    void this.ready.then((enabled) => {
+    return this.ready.then(async (enabled) => {
       if (!enabled || !this.worker) return;
       const request: CacheWorkerRequest = {
+        id: this.nextId++,
         operation: "setMany",
         namespace,
         entries,
       };
-      this.worker.postMessage(request);
+      await new Promise<void>((resolve, reject) => {
+        this.pending.set(request.id, {
+          resolve: () => resolve(),
+          reject,
+        });
+        this.worker!.postMessage(request);
+      });
     });
-    return Promise.resolve();
+  }
+
+  flush(): Promise<void> {
+    if (!this.worker || !this.initialized) return Promise.resolve();
+    return this.request({ operation: "flush", queuedAt: Date.now() }).then(
+      () => undefined,
+    );
+  }
+
+  async configure(
+    namespace: CacheNamespace,
+    formatVersion: number,
+    datasetVersion: string,
+    textureProfile: string,
+    cacheFootprintBytes: number,
+  ): Promise<void> {
+    if (!(await this.ready) || !this.worker) return;
+    await this.request({
+      operation: "configure",
+      namespace,
+      formatVersion,
+      datasetVersion,
+      textureProfile,
+      cacheFootprintBytes,
+      queuedAt: Date.now(),
+    });
   }
 
   async removeOtherVersions(
@@ -142,17 +218,56 @@ class OpfsCacheWorkerClient {
     });
   }
 
+  private flushReadBatch(): void {
+    this.readBatchScheduled = false;
+    const queued = this.queuedReads.splice(0);
+    const active = queued.filter((request) => !request.aborted);
+    if (active.length === 0) return;
+    for (const namespace of ["dat", "server"] as const) {
+      const requests = active.filter(
+        (request) => request.namespace === namespace,
+      );
+      if (requests.length > 0) this.flushNamespaceReads(namespace, requests);
+    }
+  }
+
+  private flushNamespaceReads(
+    namespace: CacheNamespace,
+    active: QueuedRead[],
+  ): void {
+    const keys = active.flatMap((request) => request.keys);
+    void this.request({
+      operation: "getMany",
+      namespace,
+      keys,
+      queuedAt: Date.now(),
+    }).then(
+      (values) => {
+        let offset = 0;
+        for (const request of active) {
+          const result =
+            values?.slice(offset, offset + request.keys.length) ??
+            request.keys.map(() => null);
+          offset += request.keys.length;
+          request.signal?.removeEventListener("abort", request.cancel!);
+          if (!request.aborted) request.resolve(result);
+        }
+      },
+      (error) => {
+        for (const request of active) {
+          request.signal?.removeEventListener("abort", request.cancel!);
+          if (!request.aborted) request.reject(error);
+        }
+      },
+    );
+  }
+
   private handleMessage(message: CacheWorkerMessage): void {
     if (message.type === "ready") {
       this.diagnostics = message.diagnostics;
       if (!this.initialized) {
         this.initialized = true;
         this.resolveReady(true);
-        if ("requestIdleCallback" in globalThis)
-          requestIdleCallback(() => this.deleteIndexedDbCaches(), {
-            timeout: 5000,
-          });
-        else setTimeout(() => this.deleteIndexedDbCaches(), 1000);
       }
       return;
     }
@@ -165,10 +280,7 @@ class OpfsCacheWorkerClient {
       this.diagnostics = message.diagnostics;
       return;
     }
-    if (message.type === "timing") {
-      this.profiler.record(message.timing.name, message.timing.duration);
-      return;
-    }
+    if (message.type === "timing") return;
     const pending = this.pending.get(message.id);
     if (!pending) return;
     this.pending.delete(message.id);
@@ -183,16 +295,21 @@ class OpfsCacheWorkerClient {
     if (!this.initialized) {
       this.initialized = true;
       this.resolveReady(false);
-      console.info(
-        `OPFS resource cache disabled; using network-only loading: ${reason}`,
-      );
     }
     for (const pending of this.pending.values()) pending.resolve();
     this.pending.clear();
+    for (const request of this.queuedReads) {
+      request.signal?.removeEventListener("abort", request.cancel!);
+      if (!request.aborted) request.resolve(request.keys.map(() => null));
+    }
+    this.queuedReads = [];
   }
 
   private shutdown(): void {
     if (!this.worker) return;
+    // Message ordering is significant: the worker drains the flush request
+    // before it handles shutdown and closes the OPFS handles.
+    if (this.initialized) void this.flush().catch(() => undefined);
     const request: CacheWorkerRequest = { operation: "shutdown" };
     this.worker.postMessage(request);
     this.worker = null;
@@ -215,13 +332,25 @@ class OpfsCacheWorkerClient {
 const sharedWorker = new OpfsCacheWorkerClient();
 
 export class DatObjectCache {
-  constructor(private namespace: CacheNamespace = "terrain") {}
+  constructor(private readonly namespace: CacheNamespace) {}
 
-  get loadTimings(): LoadingTimingSnapshot {
-    return sharedWorker.loadTimings;
-  }
   get diagnostics(): CacheDiagnostics {
     return { ...sharedWorker.diagnostics };
+  }
+
+  configure(
+    formatVersion: number,
+    datasetVersion: string,
+    textureProfile: string,
+    cacheFootprintBytes: number,
+  ): Promise<void> {
+    return sharedWorker.configure(
+      this.namespace,
+      formatVersion,
+      datasetVersion,
+      textureProfile,
+      cacheFootprintBytes,
+    );
   }
 
   async get(key: string): Promise<CachedResource | null> {
@@ -245,6 +374,10 @@ export class DatObjectCache {
     return sharedWorker.setMany(this.namespace, entries);
   }
 
+  flush(): Promise<void> {
+    return sharedWorker.flush();
+  }
+
   removeOtherVersions(
     formatVersion: number,
     datasetVersion: string,
@@ -258,5 +391,32 @@ export class DatObjectCache {
 
   clear(): Promise<void> {
     return sharedWorker.clear(this.namespace);
+  }
+
+  async removeLegacyCaches(): Promise<void> {
+    await sharedWorker.flush();
+    if ("indexedDB" in globalThis) {
+      for (const name of DATABASE_NAMES) {
+        try {
+          const request = indexedDB.deleteDatabase(name);
+          request.onerror = () => undefined;
+          request.onblocked = () => undefined;
+        } catch {
+          // Legacy cache deletion is best effort after v3 initialization.
+        }
+      }
+    }
+    try {
+      const root = await navigator.storage.getDirectory();
+      for (const name of [
+        "acterrain-format10",
+        "acterrain-format13",
+        "acterrain-format15",
+      ]) {
+        await root.removeEntry(name, { recursive: true }).catch(() => undefined);
+      }
+    } catch {
+      // The legacy OPFS namespace may not exist.
+    }
   }
 }

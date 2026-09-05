@@ -11,9 +11,11 @@ layout(location = 4) in vec4 instanceRotation;
 layout(location = 5) in vec3 instanceScale;
 
 uniform mat4 xWorld;
+uniform int cameraMode;
 
 out vec2 uv;
 out vec3 normal;
+out vec3 fragmentWorldPosition;
 
 vec3 rotateByQuaternion(vec3 value, vec4 rotation) {
   return value + 2.0 * cross(rotation.xyz, cross(rotation.xyz, value) + rotation.w * value);
@@ -21,7 +23,10 @@ vec3 rotateByQuaternion(vec3 value, vec4 rotation) {
 
 void main() {
   vec3 acPosition = instanceOrigin + rotateByQuaternion(localPosition * instanceScale, instanceRotation);
-  vec3 worldPosition = vec3(acPosition.x, ${MAP_SIZE.toFixed(1)} - acPosition.y, acPosition.z);
+  vec3 worldPosition = vec3(
+    acPosition.x,
+    ${MAP_SIZE.toFixed(1)} - acPosition.y,
+    acPosition.z);
   vec3 normalScale = vec3(
     abs(instanceScale.x) < 0.000001 ? 1.0 : instanceScale.x,
     abs(instanceScale.y) < 0.000001 ? 1.0 : instanceScale.y,
@@ -29,6 +34,7 @@ void main() {
   vec3 acNormal = normalize(rotateByQuaternion(localNormal / normalScale, instanceRotation));
   normal = vec3(acNormal.x, -acNormal.y, acNormal.z);
   uv = textureUv;
+  fragmentWorldPosition = worldPosition;
   gl_Position = xWorld * vec4(worldPosition, 1.0);
 }
 `;
