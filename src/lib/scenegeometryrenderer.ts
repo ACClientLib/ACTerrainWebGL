@@ -631,8 +631,11 @@ export class SceneGeometryRenderer {
     this.particleLastFrameTime = now;
     this.particleFrameDeltaTime = deltaTime;
     const visibleKey = visibleBlocks.map(([x, y]) => `${x},${y}`).join("|");
+    const preparedKey = mode === CameraMode.Camera2D
+      ? `${visibleKey}|zoom:${(camera as Camera2D).Zoom}`
+      : visibleKey;
     if (mode === CameraMode.Camera2D &&
-        visibleKey === this.twoDPreparedVisibleKey &&
+        preparedKey === this.twoDPreparedVisibleKey &&
         !this.twoDPreparedDirty) {
       for (const submission of this.twoDPreparedSubmissions) submit(submission);
       return;
@@ -764,7 +767,7 @@ export class SceneGeometryRenderer {
       if (!this.particleSimulationSeen.has(key)) this.particleFrozenData.delete(key);
     }
     if (mode === CameraMode.Camera2D) {
-      this.twoDPreparedVisibleKey = visibleKey;
+      this.twoDPreparedVisibleKey = preparedKey;
       this.twoDPreparedSubmissions = preparedSubmissions;
       this.twoDPreparedDirty = false;
     } else {
