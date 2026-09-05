@@ -1037,10 +1037,16 @@ export class SceneGeometryRenderer {
     // The preload list is sorted by camera movement, so its order can change
     // while the requested set stays the same. Use a canonical key to avoid
     // aborting an otherwise valid load on every movement/zoom event.
-    const requestKey = [...visibleBlocks, ...preloadBlocks]
+    const visibleKey = visibleBlocks
       .map(([x, y]) => `${x},${y}`)
       .sort()
       .join("|");
+    const preloadKey = preloadBlocks
+      .map(([x, y]) => `${x},${y}`)
+      .sort()
+      .join("|");
+    // Promoting a prefetched block to visible still needs to publish its chunk.
+    const requestKey = `${visibleKey};${preloadKey}`;
     if (requestKey === this.lastResourceRequest) return;
     if (performance.now() < this.nextResourceRetry) return;
     this.decodeController.abort();
@@ -1112,8 +1118,11 @@ export class SceneGeometryRenderer {
         }
       })
       .finally(() => {
-        if (generation === this.cacheGeneration)
+        if (generation === this.cacheGeneration) {
           this.pendingMeshes.delete(modelIndex);
+          // Aborted requests must be retried even when the 2D camera is still.
+          this.twoDPreparedDirty = true;
+        }
       });
   }
 
@@ -1146,8 +1155,10 @@ export class SceneGeometryRenderer {
         }
       })
       .finally(() => {
-        if (generation === this.cacheGeneration)
+        if (generation === this.cacheGeneration) {
           this.pendingBakedMeshes.delete(resourceId);
+          this.twoDPreparedDirty = true;
+        }
       });
   }
 
