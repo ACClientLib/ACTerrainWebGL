@@ -132,6 +132,7 @@ export class TerrainRenderer {
     datDescriptorPath = "v3/dataset",
     serverDescriptorPath?: string,
     labelsPath?: string,
+    labelsRevision?: string,
   ) {
     this.canvas = canvas;
     this.loader = loader;
@@ -163,7 +164,7 @@ export class TerrainRenderer {
       ? new SceneGeometryRenderer(this.gl, serverDescriptorPath, "server")
       : undefined;
     if (labelsPath) {
-      this.#labels = new LabelsClient(labelsPath, document.querySelector<HTMLElement>("#labels-overlay")!);
+      this.#labels = new LabelsClient(labelsPath, document.querySelector<HTMLElement>("#labels-overlay")!, labelsRevision);
       this.#labels.loadPois();
     }
     this.#applySettings();

@@ -10,6 +10,7 @@ export interface ServerCatalogEntry {
   datId: string;
   datVersion: string;
   version: string;
+  labelVersion?: string;
 }
 
 export interface DatasetCatalog {

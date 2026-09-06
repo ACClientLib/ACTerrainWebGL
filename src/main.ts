@@ -35,6 +35,7 @@ async function start(): Promise<void> {
           apiRoot,
         ).toString()
       : undefined,
+    selection.server?.labelVersion ?? selection.server?.version,
   );
   populateDatasetSelector(selector, catalog, selection, () => renderer.shutdown());
   if (selection.server) {

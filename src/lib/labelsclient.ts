@@ -30,9 +30,27 @@ export class LabelsClient {
   private readonly lifecycleController = new AbortController();
   private lastCamera: BaseCamera | null = null;
   private maximum3DDistance = Number.POSITIVE_INFINITY;
-  private readonly cachePromise = typeof caches === "undefined" ? null : caches.open(CACHE_NAME);
+  private readonly cachePromise: Promise<Cache> | null;
 
-  constructor(private readonly endpoint: string, private readonly overlay: HTMLElement) {}
+  constructor(
+    private readonly endpoint: string,
+    private readonly overlay: HTMLElement,
+    private readonly revision = "legacy",
+  ) {
+    this.cachePromise = typeof caches === "undefined"
+      ? null
+      : caches.open(CACHE_NAME).then(async (cache) => {
+          const endpointUrl = new URL(this.endpoint);
+          const entries = await cache.keys();
+          await Promise.all(entries.filter((entry) => {
+            const url = new URL(entry.url);
+            return url.origin === endpointUrl.origin &&
+              (url.pathname === endpointUrl.pathname || url.pathname === `${endpointUrl.pathname}/pois`) &&
+              url.searchParams.get("labelsRevision") !== this.revision;
+          }).map((entry) => cache.delete(entry)));
+          return cache;
+        });
+  }
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
@@ -105,7 +123,7 @@ export class LabelsClient {
   }
 
   private async loadAllPois(): Promise<void> {
-    const url = this.endpoint.replace(/\/labels$/, "/labels/pois");
+    const url = this.withRevision(this.endpoint.replace(/\/labels$/, "/labels/pois"));
     const cache = await this.cachePromise;
     let response = cache ? await cache.match(url) : undefined;
     this.lifecycleController.signal.throwIfAborted();
@@ -133,7 +151,7 @@ export class LabelsClient {
   }
 
   private async read(key: string, tileX: number, tileY: number, types: string): Promise<void> {
-    const url = `${this.endpoint}?tileX=${tileX}&tileY=${tileY}&types=${encodeURIComponent(types)}`;
+    const url = this.withRevision(`${this.endpoint}?tileX=${tileX}&tileY=${tileY}&types=${encodeURIComponent(types)}`);
     const cache = await this.cachePromise;
     let response = cache ? await cache.match(url) : undefined;
     this.lifecycleController.signal.throwIfAborted();
@@ -147,6 +165,12 @@ export class LabelsClient {
     this.lifecycleController.signal.throwIfAborted();
     this.loaded.set(key, (body.labels ?? body.Labels ?? []).map((value) => normalizeLabel(value as unknown as Record<string, unknown>)));
     if (this.lastCamera) this.draw(this.lastCamera);
+  }
+
+  private withRevision(url: string): string {
+    const value = new URL(url);
+    value.searchParams.set("labelsRevision", this.revision);
+    return value.toString();
   }
 
   private draw(camera: BaseCamera): void {

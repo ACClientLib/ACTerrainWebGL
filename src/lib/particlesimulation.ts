@@ -194,10 +194,11 @@ export class ParticleSimulation {
             [angular[0] / magnitude, angular[1] / magnitude, angular[2] / magnitude],
             magnitude,
           );
-          // WorldC is world-space for every rotating particle type. Apply its
-          // spin before the particle frame so the placement orientation does
-          // not rotate the axis a second time.
-          rotation = this.mulQuat(spin, rotation);
+          // Type 9 transforms C into world space at emission. Types 4 and 11
+          // retain the authored axis and must spin in the particle's frame.
+          rotation = p.particleType === 9
+            ? this.mulQuat(spin, rotation)
+            : this.mulQuat(rotation, spin);
         }
       }
       result.push({
