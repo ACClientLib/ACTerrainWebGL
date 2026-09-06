@@ -181,10 +181,12 @@ export class LabelsClient {
     const flyingCamera = camera instanceof CameraFlying ? camera : null;
     const is3D = flyingCamera !== null;
     const visible: TerrainLabel[] = [];
+    const mapBlend = flyingCamera ? flyingCamera.MapProjectionBlend : 1;
+    const mapZoom = flyingCamera ? flyingCamera.MapProjectionZoom : (camera as Camera2D).Zoom;
     for (const labels of this.loaded.values()) {
       for (const label of labels) {
-        if (is3D && label.type === "poi") continue;
-        if (!is3D && camera instanceof Camera2D && camera.Zoom < label.minZoom) continue;
+        if (mapBlend === 0 && label.type === "poi") continue;
+        if (mapBlend === 1 && mapZoom < label.minZoom) continue;
         visible.push(label);
       }
     }
@@ -213,6 +215,23 @@ export class LabelsClient {
         ? label.z + (label.type === "portal" ? 2.5 : 2)
         : 1;
       const worldPosition = new Vector3(label.x, label.y, z);
+      const mapOpacity = mapZoom >= label.minZoom ? 1 : 0;
+      let flyingOpacity = 0;
+      if (flyingCamera && label.type !== "poi") {
+        const distance = Math.hypot(
+          worldPosition.x - camera.Position.x,
+          worldPosition.y - camera.Position.y,
+          worldPosition.z - camera.Position.z,
+        );
+        if (distance <= this.maximum3DDistance) {
+          const distanceRatio = Math.min(1, distance / Math.max(1, Math.min(flyingCamera.Far, this.maximum3DDistance)));
+          flyingOpacity = 1 - distanceRatio * 0.9;
+        }
+      }
+      const opacity = flyingOpacity * (1 - mapBlend) + mapOpacity * mapBlend;
+      if (opacity === 0) {
+        continue;
+      }
       const point = camera.WorldToScreen(worldPosition);
       if (is3D && (point.z < -1 || point.z > 1)) continue;
       const x = point.x * scaleX;
@@ -253,23 +272,7 @@ export class LabelsClient {
         this.elements.set(key, element);
       }
       element.style.transform = `translate3d(${placement.x}px, ${placement.y}px, 0) translate(-50%, -50%)`;
-      if (is3D) {
-        const distance = Math.hypot(
-          worldPosition.x - camera.Position.x,
-          worldPosition.y - camera.Position.y,
-          worldPosition.z - camera.Position.z,
-        );
-        if (distance > this.maximum3DDistance) {
-          active.delete(key);
-          element.remove();
-          this.elements.delete(key);
-          continue;
-        }
-        const distanceRatio = Math.min(1, distance / Math.max(1, Math.min(flyingCamera!.Far, this.maximum3DDistance)));
-        element.style.opacity = String(1 - distanceRatio * 0.9);
-      } else {
-        element.style.opacity = "";
-      }
+      element.style.opacity = String(opacity);
     }
     for (const [key, element] of this.elements) if (!active.has(key)) { element.remove(); this.elements.delete(key); }
   }

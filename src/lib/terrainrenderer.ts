@@ -32,6 +32,8 @@ import { createSceneView, type SceneLighting, type SceneView } from "./sceneview
 import type { SceneSubmission } from "./scenesubmission";
 import { LabelsClient } from "./labelsclient";
 
+const CAMERA_TRANSITION_DURATION_MS = 200;
+
 function isTouchDevice() {
   return (
     (typeof window.matchMedia === "function" &&
@@ -106,6 +108,13 @@ export class TerrainRenderer {
   flyingCamera: CameraFlying;
   currentCamera: BaseCamera;
   currentCameraMode: CameraMode = CameraMode.Camera2D;
+  private cameraTransition: {
+    mode: CameraMode;
+    elapsed: number;
+    yaw: number;
+    pitch: number;
+    roll: number;
+  } | null = null;
   #restoredFlyingCameraRoute = false;
   #updateMoveSpeedControl: (() => void) | null = null;
   #isShutdown = false;
@@ -245,7 +254,7 @@ export class TerrainRenderer {
   }
 
   #resetCamera() {
-    this.switchCamera(CameraMode.Camera2D);
+    this.switchCamera(CameraMode.Camera2D, false);
     this.camera2D.Position = new Vector3(24162.252488664108, 29663.566666805677, 2.4964);
     this.invalidate("input");
   }
@@ -345,7 +354,7 @@ export class TerrainRenderer {
       url.searchParams.delete("dataset");
       window.location.assign(url.toString());
     });
-    document.querySelector<HTMLButtonElement>("#switch-camera")!.addEventListener("click", () => this.switchCamera(this.currentCameraMode === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D), { signal: this.shutdownSignal });
+    document.querySelector<HTMLButtonElement>("#switch-camera")!.addEventListener("click", () => this.switchCamera(this.currentCameraType === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D), { signal: this.shutdownSignal });
     document.querySelector<HTMLButtonElement>("#reset-camera")!.addEventListener("click", () => this.#resetCamera(), { signal: this.shutdownSignal });
     settings.subscribe(() => {
       this.#applySettings();
@@ -424,7 +433,7 @@ export class TerrainRenderer {
   }
 
   focusLocation(x: number, y: number, type: "poi" | "npc" | "portal"): void {
-    if (this.currentCameraMode !== CameraMode.Camera2D) this.switchCamera(CameraMode.Camera2D);
+    if (this.currentCameraMode !== CameraMode.Camera2D) this.switchCamera(CameraMode.Camera2D, false);
     this.camera2D.Zoom = this.capCameraZoom(type === "poi" ? 0.12 : 40);
     this.camera2D.CenterOnVec(new Vector3(x, y, 1));
     this.invalidate("input");
@@ -436,89 +445,102 @@ export class TerrainRenderer {
       ?.classList.toggle("camera-2d", this.currentCameraMode === CameraMode.Camera2D);
   }
 
-  switchCamera(mode: CameraMode) {
-    if (mode === this.currentCameraMode) return;
-
-    const oldMode = this.currentCameraMode;
-    this.currentCameraMode = mode;
-    this.#updateMobileControlsVisibility();
-
-    if (mode === CameraMode.Camera2D) {
-      // Switching to 2D camera
-      this.currentCamera = this.camera2D;
-
-      // Preserve the map location represented by the camera transition.
-      if (oldMode === CameraMode.Flying) {
-        // The tilted camera is offset behind the focal point, so use the
-        // terrain point at the center of the 3D view rather than camera XY.
-        const pos2D = this.flyingCamera.GetMapPosition();
-        pos2D.z = 1;
-        this.camera2D.CenterOnVec(pos2D);
-
-        const terrainHeight = this.getTerrainClearanceHeightAt(
-          pos2D.x,
-          pos2D.y,
-        );
-        const height = Math.min(
-          Math.max(1, this.flyingCamera.Position.z - terrainHeight),
-          settings.data.distanceLandblocks * LAND_BLOCK_SIZE * 0.8,
-        );
-        const zoom = this.zoomForFlyingHeight(height);
-        this.camera2D.Zoom = this.capCameraZoom(zoom);
+  switchCamera(mode: CameraMode, animate = true) {
+    if (this.cameraTransition && animate) {
+      if (mode !== this.cameraTransition.mode) {
+        this.cameraTransition.mode = mode;
+        this.cameraTransition.elapsed = CAMERA_TRANSITION_DURATION_MS - this.cameraTransition.elapsed;
       }
-    } else if (mode === CameraMode.Flying) {
-      // Switching to flying camera
-      this.currentCamera = this.flyingCamera;
-
-      // Try to preserve context - position flying camera based on 2D camera
-      if (oldMode === CameraMode.Camera2D) {
-        const pos2D = this.camera2D.Position;
-        // Both cameras use the terrain renderer's world-space coordinates.
-        // Set the same north-up, near-vertical view used by the initial flying
-        // camera before measuring the viewport footprint. Calling LookAt on
-        // the point directly below the camera would reset yaw to zero and
-        // make the view nearly vertical.
-        this.flyingCamera.SetRotation(
-          Math.PI,
-          -(Math.PI / 2 - Math.PI / 18),
-          0,
-        );
-        const terrainHeight = this.getTerrainClearanceHeightAt(
-          pos2D.x,
-          pos2D.y,
-        );
-        const desiredHeight = this.flyingHeightForZoom(this.camera2D.Zoom);
-        const height = Math.min(
-          desiredHeight,
-          settings.data.distanceLandblocks * LAND_BLOCK_SIZE * 0.8,
-        );
-        const forward = this.flyingCamera.GetForward();
-        const groundDistance = height / Math.max(0.0001, -forward.z);
-        const cameraX = pos2D.x - forward.x * groundDistance;
-        const cameraY = pos2D.y - forward.y * groundDistance;
-        const viewTerrainHeight = this.getTerrainClearanceHeightInArea(
-          cameraX,
-          cameraY,
-          height * 1.5,
-        );
-        this.flyingCamera.Position = new Vector3(
-          cameraX,
-          cameraY,
-          Math.max(
-            terrainHeight + height,
-            viewTerrainHeight + 1,
-          ),
-        );
-      }
+      this.invalidate("input");
+      return;
+    }
+    if (this.cameraTransition) {
+      this.finishCameraTransition();
+    }
+    if (mode === this.currentCameraMode) {
+      return;
     }
 
-    // Update viewport size for new camera
-    this.currentCamera.ViewportSize.x = this.canvas.width;
-    this.currentCamera.ViewportSize.y = this.canvas.height;
+    const camera = this.flyingCamera;
+    camera.MapProjectionBlend = 0;
+    if (mode === CameraMode.Camera2D) {
+      this.camera2D.CenterOnVec(new Vector3(camera.Position.x, camera.Position.y, 1));
+      const height = Math.max(1, camera.Position.z - this.getTerrainClearanceHeightAt(
+        camera.Position.x,
+        camera.Position.y,
+      ));
+      this.camera2D.Zoom = this.capCameraZoom(this.zoomForFlyingHeight(height));
+    } else {
+      const position = this.camera2D.Position;
+      camera.SetRotation(Math.PI, -(Math.PI / 2 - Math.PI / 18), 0);
+      const height = Math.min(
+        this.flyingHeightForZoom(this.camera2D.Zoom),
+        settings.data.distanceLandblocks * LAND_BLOCK_SIZE * 0.8,
+      );
+      camera.Position = new Vector3(
+        position.x,
+        position.y,
+        Math.max(
+          this.getTerrainClearanceHeightAt(position.x, position.y) + height,
+          this.getTerrainClearanceHeightInArea(position.x, position.y, height * 1.5) + 1,
+        ),
+      );
+    }
+
+    camera.MapProjectionZoom = this.camera2D.Zoom;
+    camera.MapProjectionHeight = Math.max(1, camera.Position.z - this.getTerrainClearanceHeightAt(
+      camera.Position.x,
+      camera.Position.y,
+    ));
+    this.cameraTransition = {
+      mode,
+      elapsed: 0,
+      yaw: Math.PI + Math.atan2(Math.sin(camera.Yaw - Math.PI), Math.cos(camera.Yaw - Math.PI)),
+      pitch: camera.Pitch,
+      roll: Math.atan2(Math.sin(camera.Roll), Math.cos(camera.Roll)),
+    };
+    this.currentCamera = camera;
+    this.currentCameraMode = CameraMode.Flying;
+    if (animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      this.updateCameraTransition(0);
+    } else {
+      this.finishCameraTransition();
+    }
+    this.#updateMobileControlsVisibility();
     this.invalidate("input");
   }
 
+  private updateCameraTransition(dt: number): void {
+    const transition = this.cameraTransition!;
+    transition.elapsed += dt;
+    const progress = Math.min(1, transition.elapsed / CAMERA_TRANSITION_DURATION_MS);
+    const eased = progress * progress * (3 - 2 * progress);
+    const mapBlend = transition.mode === CameraMode.Camera2D ? eased : 1 - eased;
+    this.flyingCamera.SetRotation(
+      transition.yaw + (Math.PI - transition.yaw) * mapBlend,
+      transition.pitch + (-Math.PI / 2 - transition.pitch) * mapBlend,
+      transition.roll * (1 - mapBlend),
+    );
+    this.flyingCamera.MapProjectionBlend = mapBlend;
+    if (progress === 1) {
+      this.finishCameraTransition();
+    }
+  }
+
+  private finishCameraTransition(): void {
+    const transition = this.cameraTransition!;
+    this.flyingCamera.SetRotation(transition.yaw, transition.pitch, transition.roll);
+    this.flyingCamera.MapProjectionBlend = 0;
+    this.currentCameraMode = transition.mode;
+    this.currentCamera = transition.mode === CameraMode.Camera2D ? this.camera2D : this.flyingCamera;
+    this.currentCamera.ViewportSize.x = this.canvas.width;
+    this.currentCamera.ViewportSize.y = this.canvas.height;
+    this.cameraTransition = null;
+    this.#updateMobileControlsVisibility();
+  }
   restoreCameraRoute(route: CameraRoute) {
+    this.cameraTransition = null;
+    this.flyingCamera.MapProjectionBlend = 0;
     if (route.mode === "2d") {
       this.camera2D.Position = new Vector3(
         route.position.x,
@@ -552,7 +574,7 @@ export class TerrainRenderer {
   }
 
   get animationActive(): boolean {
-    return (
+    return this.cameraTransition !== null || (
       this.currentCamera === this.flyingCamera &&
       this.flyingCamera.hasActiveInput
     );
@@ -594,27 +616,9 @@ export class TerrainRenderer {
   }
 
   private groundSpanPerFlyingHeight() {
-    const transform = this.flyingCamera.Transform;
-    const inverseTransform = transform.clone().invert();
-    const topRay = this.flyingCamera.ScreenToWorldRay(
-      this.canvas.width / 2,
-      0,
-      transform,
-      inverseTransform,
-    );
-    const bottomRay = this.flyingCamera.ScreenToWorldRay(
-      this.canvas.width / 2,
-      this.canvas.height,
-      transform,
-      inverseTransform,
-    );
-    const topDistance = -1 / topRay.direction.z;
-    const bottomDistance = -1 / bottomRay.direction.z;
-    const topY = topRay.direction.y * topDistance;
-    const bottomY = bottomRay.direction.y * bottomDistance;
-    return Math.max(0.0001, Math.abs(bottomY - topY));
+    // Match scale beneath the camera independently of its look direction.
+    return 2 * Math.tan((this.flyingCamera.FOV * Math.PI) / 360);
   }
-
   getTerrainHeightAt(worldX: number, worldY: number) {
     this.#terrainHeightData ??= this.#dataTexture.pixels;
 
@@ -741,7 +745,7 @@ export class TerrainRenderer {
     window.addEventListener("keydown", (event) => {
       if (event.key === "c" || event.key === "C") {
         const newMode =
-          this.currentCameraMode === CameraMode.Camera2D
+          this.currentCameraType === CameraMode.Camera2D
             ? CameraMode.Flying
             : CameraMode.Camera2D;
         this.switchCamera(newMode);
@@ -1133,7 +1137,11 @@ export class TerrainRenderer {
     this.currentCamera.ViewportSize.y = this.canvas.height;
 
     // Update the current camera
-    this.currentCamera.update(dt);
+    if (this.cameraTransition) {
+      this.updateCameraTransition(dt);
+    } else {
+      this.currentCamera.update(dt);
+    }
     this.currentCamera.prepareFrame();
     this.sceneView = createSceneView(
       this.currentCamera,
@@ -1642,7 +1650,7 @@ export class TerrainRenderer {
 
   // Utility methods for external access
   get currentCameraType(): CameraMode {
-    return this.currentCameraMode;
+    return this.cameraTransition?.mode ?? this.currentCameraMode;
   }
 
   getCamera2D(): Camera2D {

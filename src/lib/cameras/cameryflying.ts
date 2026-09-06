@@ -1,8 +1,12 @@
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
 import { BaseCamera } from "./basecamera";
+import * as settings from "../../settings";
 
 // Flying 3D Camera implementation
 export class CameraFlying extends BaseCamera {
+  public MapProjectionBlend = 0;
+  public MapProjectionZoom = 1;
+  public MapProjectionHeight = 1;
   private _yaw = 0; // Rotation around Z axis (left/right, since Y is forward)
   private _pitch = 0; // Rotation around X axis (up/down)
   private _roll = 0; // Rotation around Y axis (banking)
@@ -104,12 +108,30 @@ export class CameraFlying extends BaseCamera {
 
   get ViewProjection() {
     const aspect = this.canvas.width / this.canvas.height;
-    return new Matrix4().perspective({
+    const projection = new Matrix4().perspective({
       fovy: (this._fov * Math.PI) / 180,
       aspect: aspect,
       near: this._near,
       far: this._far,
     });
+    if (this.MapProjectionBlend === 0) {
+      return projection;
+    }
+    const halfHeight = this.canvas.height * settings.data.renderScale / (2 * this.MapProjectionZoom);
+    const orthographic = new Matrix4().ortho({
+      left: -halfHeight * aspect,
+      right: halfHeight * aspect,
+      bottom: -halfHeight,
+      top: halfHeight,
+      near: this._near,
+      far: this._far,
+    });
+    // Normalize perspective at the ground plane for an even change in scale.
+    for (let i = 0; i < 16; i++) {
+      projection[i] = projection[i] / this.MapProjectionHeight * (1 - this.MapProjectionBlend)
+        + orthographic[i] * this.MapProjectionBlend;
+    }
+    return projection;
   }
 
   get ViewMatrix() {
@@ -407,9 +429,10 @@ export class CameraFlying extends BaseCamera {
   }
 
   SetRotation(yaw: number, pitch: number, roll: number = 0) {
-    this.Yaw = yaw;
-    this.Pitch = pitch;
-    this.Roll = roll;
+    this._yaw = yaw;
+    this._pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+    this._roll = roll;
+    this.updateVectors();
   }
 
   GetForward() {
