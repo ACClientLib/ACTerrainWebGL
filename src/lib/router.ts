@@ -1,5 +1,5 @@
 import { debounce } from "lodash";
-import { MAP_SIZE } from "./worldgeometry";
+
 import Coordinates, {
   mapCoordinatesToWorld,
   worldToMapCoordinates,
@@ -41,7 +41,7 @@ function makeRoute(route: CameraRoute) {
     const location = selection.cellId?.toString(16).padStart(8, "0")
       ?? selection.landblock.toString(16).padStart(4, "0");
     return [route.mode, location,
-      route.position.x.toFixed(3), (MAP_SIZE - route.position.y).toFixed(3),
+      route.position.x.toFixed(3), (-route.position.y).toFixed(3),
       ...(route.mode === "2d" ? [route.zoom!.toFixed(4)] :
         [route.position.z.toFixed(3), formatAngle(route.yaw!), formatAngle(route.pitch!), formatAngle(route.roll!)])].join(",");
   }
@@ -118,7 +118,7 @@ export function parseRoute(route: string): CameraRoute | undefined {
     if (parts.slice(2).some(value => !value.trim()) || values.some(value => !Number.isFinite(value)) || values[2] <= 0) {
       return undefined;
     }
-    return { dungeon: location, mode: "2d", position: { x: values[0], y: MAP_SIZE - values[1], z: 1 }, zoom: values[2] };
+    return { dungeon: location, mode: "2d", position: { x: values[0], y: -values[1], z: 1 }, zoom: values[2] };
   }
 
   if (parts[0] === "3d" && parts.length === 8 && parseDungeonLocation(parts[1])) {
@@ -127,7 +127,7 @@ export function parseRoute(route: string): CameraRoute | undefined {
     if (parts.slice(2).some(value => !value.trim()) || values.some(value => !Number.isFinite(value))) {
       return undefined;
     }
-    return { dungeon: location, mode: "3d", position: { x: values[0], y: MAP_SIZE - values[1], z: values[2] },
+    return { dungeon: location, mode: "3d", position: { x: values[0], y: -values[1], z: values[2] },
       yaw: values[3] * Math.PI / 180, pitch: values[4] * Math.PI / 180, roll: values[5] * Math.PI / 180 };
   }
 

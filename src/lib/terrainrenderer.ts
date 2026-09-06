@@ -33,6 +33,7 @@ import type { SceneSubmission } from "./scenesubmission";
 import { LabelsClient } from "./labelsclient";
 import { dungeonCoordinates, dungeonName, type DungeonCell, type DungeonSelection } from "./dungeons";
 import type { LocationTarget } from "./locationsearch";
+import { isTextEditingTarget } from "./keyboard";
 
 const CAMERA_TRANSITION_DURATION_MS = 200;
 
@@ -120,10 +121,10 @@ export class TerrainRenderer {
       Math.max(1, maximum[2] - minimum[2]),
     );
     this.dungeonRadius = Math.max(1, Math.hypot(...maximum.map((value, axis) => value - minimum[axis])) / 2);
-    // Opening a dungeon always frames its bounds; the anchor retains the chosen camera mode.
-    this.frameDungeon();
-    if (route?.mode === "2d") {
-      this.restoreCameraRoute({ mode: "2d", position: this.camera2D.Position, zoom: this.camera2D.Zoom });
+    // Location selections frame the dungeon; anchor routes restore their saved camera position.
+    this.frameDungeon(route === undefined);
+    if (route) {
+      this.restoreCameraRoute(route);
     }
     document.body.classList.add("loaded");
     this.canvas.dispatchEvent(new Event("locationchange"));
@@ -150,26 +151,31 @@ export class TerrainRenderer {
     this.invalidate("input");
   }
 
-  private frameDungeon(): void {
+  private frameDungeon(recenter = true): void {
     this.#handleResize();
     const camera = this.flyingCamera;
-    const points: Vector3[] = [];
-    for (const bounds of this.dungeonBounds) {
-      for (const x of [bounds.minimum[0], bounds.maximum[0]]) {
-        for (const y of [bounds.minimum[1], bounds.maximum[1]]) {
-          for (const z of [bounds.minimum[2], bounds.maximum[2]]) {
-            points.push(new Vector3(x, y, z));
+    if (recenter) {
+      const points: Vector3[] = [];
+      for (const bounds of this.dungeonBounds) {
+        for (const x of [bounds.minimum[0], bounds.maximum[0]]) {
+          for (const y of [bounds.minimum[1], bounds.maximum[1]]) {
+            for (const z of [bounds.minimum[2], bounds.maximum[2]]) {
+              points.push(new Vector3(x, y, z));
+            }
           }
         }
       }
+      camera.Near = 1;
+      camera.FitToPoints(points, this.dungeonCenter);
+      this.camera2D.Position = new Vector3(this.dungeonCenter.x, this.dungeonCenter.y, 1);
+      this.camera2D.Zoom = Math.min(this.canvas.width / this.dungeonExtents.x,
+        this.canvas.height / this.dungeonExtents.y) * settings.data.renderScale * 0.9;
     }
-    camera.FitToPoints(points, this.dungeonCenter);
-    this.camera2D.Position = new Vector3(this.dungeonCenter.x, this.dungeonCenter.y, 1);
     this.camera2D.DepthRange = Math.max(4096, Math.abs(this.dungeonCenter.z) + this.dungeonRadius + 2);
-    this.camera2D.Zoom = Math.min(this.canvas.width / this.dungeonExtents.x,
-      this.canvas.height / this.dungeonExtents.y) * settings.data.renderScale * 0.9;
-    this.restoreCameraRoute({ mode: "3d", position: camera.Position, yaw: camera.Yaw, pitch: camera.Pitch,
-      roll: 0 });
+    if (recenter) {
+      this.restoreCameraRoute({ mode: "3d", position: camera.Position, yaw: camera.Yaw, pitch: camera.Pitch,
+        roll: 0 });
+    }
     this.#updateFlyingFarPlane();
   }
 
@@ -618,6 +624,12 @@ export class TerrainRenderer {
     document
       .getElementById("mobile-controls")
       ?.classList.toggle("camera-2d", this.currentCameraMode === CameraMode.Camera2D);
+    const hint = document.getElementById("camera-hint");
+    if (hint && !isTouchDevice()) {
+      hint.textContent = this.currentCameraMode === CameraMode.Flying
+        ? "WASD to move · Right click + drag to look · Press 'C' to switch cameras"
+        : "Left or right click + drag to pan · Press 'C' to switch cameras";
+    }
   }
 
   switchCamera(mode: CameraMode, animate = true) {
@@ -923,6 +935,7 @@ export class TerrainRenderer {
 
     // Add keyboard shortcut for quick camera switching
     window.addEventListener("keydown", (event) => {
+      if (isTextEditingTarget(event.target)) return;
       if (event.key === "c" || event.key === "C") {
         const newMode =
           this.currentCameraType === CameraMode.Camera2D
@@ -1832,10 +1845,16 @@ export class TerrainRenderer {
 
   #updateFlyingFarPlane(): void {
     if (this.dungeonSelection) {
-      this.flyingCamera.Far = Math.max(100,
-        this.flyingCamera.Position.clone().subtract(this.dungeonCenter).len() + this.dungeonRadius * 2 + 1);
+      // Dungeon geometry is bounded and much smaller than the world. Keep the
+      // far plane just beyond the dungeon's bounding sphere so the 24-bit
+      // depth buffer retains useful precision for close floor surfaces.
+      // Outside the sphere, move the near plane up to its closest extent.
+      const distance = this.flyingCamera.Position.clone().subtract(this.dungeonCenter).len();
+      this.flyingCamera.Near = Math.max(1, distance - this.dungeonRadius - 1);
+      this.flyingCamera.Far = Math.max(10, distance + this.dungeonRadius + 1);
       return;
     }
+    this.flyingCamera.Near = 1;
     this.flyingCamera.Far = Math.max(
       4096,
       settings.data.distanceLandblocks * LAND_BLOCK_SIZE +

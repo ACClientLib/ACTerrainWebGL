@@ -1,5 +1,3 @@
-import { MAP_SIZE } from "../lib/worldgeometry";
-
 export const ParticleVertSource = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 quad;
@@ -10,6 +8,8 @@ layout(location=4) in vec4 planeOrientation;
 layout(location=5) in vec4 rotation;
 layout(location=6) in float billboard;
 uniform mat4 xWorld;
+// Dungeon placements are landblock-local; the world view retains its map Y offset.
+uniform float acYOrigin;
 uniform vec3 cameraRight;
 uniform vec3 cameraUp;
 uniform vec3 cameraPosition;
@@ -44,6 +44,6 @@ void main() {
   else if (billboard >= 2.5) offset = constrainedBillboardOffset(orientedLocal, rotation, int(billboard) - 3, center - cameraPosition);
   else offset = qrot(orientedLocal, rotation);
   vec3 p = center + offset;
-  fragmentWorldPosition = vec3(p.x, ${MAP_SIZE.toFixed(1)} - p.y, p.z);
+  fragmentWorldPosition = vec3(p.x, acYOrigin - p.y, p.z);
   gl_Position = xWorld * vec4(fragmentWorldPosition, 1.0);
 }`;

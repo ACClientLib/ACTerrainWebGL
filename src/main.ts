@@ -55,7 +55,10 @@ async function start(): Promise<void> {
     const request = ++routeRequest;
     const route = parseRoute(window.location.hash);
     if (!route) {
+      cancelCameraRouteUpdate();
       renderer.cancelDungeonLoad();
+      renderer.showWorld();
+      document.querySelector<HTMLElement>("#locations-content [role=status]")!.textContent = "";
       restoringRoute = false;
       return;
     }
@@ -70,8 +73,9 @@ async function start(): Promise<void> {
       }
     } catch (error) {
       if (request === routeRequest) {
-        document.querySelector<HTMLElement>("#locations-content [role=status]")!.textContent =
-          error instanceof Error ? error.message : String(error);
+        renderer.cancelDungeonLoad();
+        renderer.showWorld();
+        document.querySelector<HTMLElement>("#locations-content [role=status]")!.textContent = "";
       }
     } finally {
       if (request === routeRequest) {

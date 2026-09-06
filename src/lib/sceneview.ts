@@ -26,7 +26,6 @@ export interface SceneView {
   readonly lighting: SceneLighting;
   readonly cameraMode: CameraMode;
 }
-
 export function createSceneView(camera: {
   readonly FrameTransform: Matrix4;
   readonly Position: Vector3;

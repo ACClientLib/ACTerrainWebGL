@@ -1,6 +1,7 @@
 import { Matrix4, Vector3, Vector4, Vector2 } from "@math.gl/core";
 import { BaseCamera } from "./basecamera";
 import * as settings from "../../settings";
+import { isTextEditingTarget } from "../keyboard";
 
 // Flying 3D Camera implementation
 export class CameraFlying extends BaseCamera {
@@ -65,6 +66,13 @@ export class CameraFlying extends BaseCamera {
   }
   set FOV(v) {
     this._fov = Math.max(1, Math.min(179, v));
+  }
+
+  get Near() {
+    return this._near;
+  }
+  set Near(v: number) {
+    this._near = v;
   }
 
   get Far() {
@@ -158,7 +166,7 @@ export class CameraFlying extends BaseCamera {
     // Mouse events for looking around
     this.canvas.addEventListener("mousedown", (event) => {
       if (this.renderer.currentCamera != this) return;
-      if (event.button === 0) {
+      if (event.button === 2) {
         this._mouseDown = true;
         this.canvas.requestPointerLock();
         event.preventDefault();
@@ -167,11 +175,16 @@ export class CameraFlying extends BaseCamera {
 
     this.canvas.addEventListener("mouseup", (event) => {
       if (this.renderer.currentCamera != this) return;
-      if (event.button === 0) {
+      if (event.button === 2) {
         this._mouseDown = false;
         document.exitPointerLock();
         event.preventDefault();
       }
+    }, { signal: this.renderer.shutdownSignal });
+
+    this.canvas.addEventListener("contextmenu", (event) => {
+      if (this.renderer.currentCamera != this) return;
+      event.preventDefault();
     }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("mousemove", (event) => {
@@ -187,14 +200,28 @@ export class CameraFlying extends BaseCamera {
 
     // Keyboard events for movement
     window.addEventListener("keydown", (event) => {
-      if (this.renderer.currentCamera != this) return;
+      if (this.renderer.currentCamera != this || isTextEditingTarget(event.target)) return;
       this._keys[event.code.toLowerCase()] = true;
     }, { signal: this.renderer.shutdownSignal });
 
     window.addEventListener("keyup", (event) => {
-      if (this.renderer.currentCamera != this) return;
+      if (this.renderer.currentCamera != this || isTextEditingTarget(event.target)) return;
       this._keys[event.code.toLowerCase()] = false;
     }, { signal: this.renderer.shutdownSignal });
+
+    const cancelInput = () => {
+      this._keys = {};
+      this._mobileMovement.x = 0;
+      this._mobileMovement.y = 0;
+      this._mobileLook.x = 0;
+      this._mobileLook.y = 0;
+      this._mobileInputActive = false;
+      this.cancelPointerInput();
+      if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+    };
+    window.addEventListener("blur", cancelInput, { signal: this.renderer.shutdownSignal });
+    document.addEventListener("visibilitychange", cancelInput, { signal: this.renderer.shutdownSignal });
+    this.canvas.addEventListener("focusout", cancelInput, { signal: this.renderer.shutdownSignal });
 
     // Mouse wheel for speed adjustment
     this.canvas.addEventListener("wheel", (event) => {
@@ -411,14 +438,6 @@ export class CameraFlying extends BaseCamera {
       this.Position.subtract(this._right.clone().scale(moveDistance));
     }
 
-    // Vertical movement always follows AC's world Z axis, independent of view pitch.
-    const worldUp = new Vector3(0, 0, 1);
-    if (this._keys["space"]) {
-      this.Position.add(worldUp.clone().scale(moveDistance));
-    }
-    if (this._keys["controlleft"] || this._keys["controlright"]) {
-      this.Position.subtract(worldUp.scale(moveDistance));
-    }
   }
 
   FitToPoints(points: readonly Vector3[], center: Vector3): void {

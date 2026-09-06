@@ -80,6 +80,11 @@ export abstract class BaseCamera {
 
   protected abstract handleDrag(delta: Vector2): void;
 
+  protected cancelPointerInput(): void {
+    this._mouseDown = false;
+    this._isDragging = false;
+  }
+
   getClipSpaceMousePosition(x: number, y: number): Vector2 {
     const rect = this.canvas.getBoundingClientRect();
     const cssX = x - rect.left;

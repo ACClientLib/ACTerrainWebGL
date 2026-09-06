@@ -1,3 +1,4 @@
+import { MAP_SIZE } from "./worldgeometry";
 import { Vector3 } from "@math.gl/core";
 import { BaseCamera } from "./cameras/basecamera";
 import { Camera2D } from "./cameras/camera2d";
@@ -212,7 +213,7 @@ export class LabelsClient {
         }
         if (mapBlend === 0 && label.type === "poi") continue;
         if (mapBlend === 1 && mapZoom < label.minZoom) continue;
-        visible.push(label);
+        visible.push(this.dungeonKey === null ? label : { ...label, y: label.y - MAP_SIZE });
       }
     }
     visible.sort((a, b) => {

@@ -115,7 +115,7 @@ export class Camera2D extends BaseCamera {
   private setupMouseEvents() {
     this.canvas.addEventListener("mousedown", (event) => {
       if (this.renderer.currentCamera != this) return;
-      if (event.button == 0) {
+      if (event.button === 0 || event.button === 2) {
         this._mouseDown = true;
         event.preventDefault();
       }
@@ -123,10 +123,15 @@ export class Camera2D extends BaseCamera {
 
     this.canvas.addEventListener("mouseup", (event) => {
       if (this.renderer.currentCamera != this) return;
-      if (event.button == 0) {
+      if (event.button === 0 || event.button === 2) {
         this._mouseDown = false;
         event.preventDefault();
       }
+    }, { signal: this.renderer.shutdownSignal });
+
+    this.canvas.addEventListener("contextmenu", (event) => {
+      if (this.renderer.currentCamera != this) return;
+      event.preventDefault();
     }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("mousemove", (event) => {
@@ -141,6 +146,11 @@ export class Camera2D extends BaseCamera {
       event.stopImmediatePropagation();
       this.handleWheel(event);
     }, { signal: this.renderer.shutdownSignal });
+
+    const cancelInput = () => this.cancelPointerInput();
+    window.addEventListener("blur", cancelInput, { signal: this.renderer.shutdownSignal });
+    document.addEventListener("visibilitychange", cancelInput, { signal: this.renderer.shutdownSignal });
+    this.canvas.addEventListener("focusout", cancelInput, { signal: this.renderer.shutdownSignal });
   }
 
   private handlePinch(event: TouchEvent) {

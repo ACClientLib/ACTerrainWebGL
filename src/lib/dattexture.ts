@@ -211,7 +211,7 @@ class PaletteTextureMaterializer {
       return result;
     } catch (error) { gl.deleteTexture(result); throw error; }
     finally {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, oldFramebuffer); gl.viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]); gl.useProgram(oldProgram); gl.bindVertexArray(oldVao); if (oldBlend) gl.enable(gl.BLEND); else gl.disable(gl.BLEND); if (oldDepthTest) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST); gl.pixelStorei(gl.UNPACK_ALIGNMENT, oldUnpack); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, oldTexture0); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, oldTexture1); gl.activeTexture(oldActive);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, oldFramebuffer); gl.viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]); if (!oldProgram || gl.isProgram(oldProgram)) gl.useProgram(oldProgram); gl.bindVertexArray(oldVao); if (oldBlend) gl.enable(gl.BLEND); else gl.disable(gl.BLEND); if (oldDepthTest) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST); gl.pixelStorei(gl.UNPACK_ALIGNMENT, oldUnpack); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, oldTexture0); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, oldTexture1); gl.activeTexture(oldActive);
     }
   }
 }

@@ -1,5 +1,3 @@
-import { MAP_SIZE } from "../lib/worldgeometry";
-
 export const Building3DVertSource = `#version 300 es
 precision highp float;
 
@@ -11,6 +9,8 @@ layout(location = 4) in vec4 instanceRotation;
 layout(location = 5) in vec3 instanceScale;
 
 uniform mat4 xWorld;
+// Dungeon placements are landblock-local; the world view retains its map Y offset.
+uniform float acYOrigin;
 uniform int cameraMode;
 
 out vec2 uv;
@@ -25,7 +25,7 @@ void main() {
   vec3 acPosition = instanceOrigin + rotateByQuaternion(localPosition * instanceScale, instanceRotation);
   vec3 worldPosition = vec3(
     acPosition.x,
-    ${MAP_SIZE.toFixed(1)} - acPosition.y,
+    acYOrigin - acPosition.y,
     acPosition.z);
   vec3 normalScale = vec3(
     abs(instanceScale.x) < 0.000001 ? 1.0 : instanceScale.x,

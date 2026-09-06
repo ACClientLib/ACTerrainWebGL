@@ -23,6 +23,14 @@ body {
   height: 100%;
   overflow: hidden;
   touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#sidebar,
+#sidebar * {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 canvas {
@@ -67,6 +75,9 @@ canvas {
   border-radius: 50%;
   pointer-events: auto;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .mobile-joystick-ring {

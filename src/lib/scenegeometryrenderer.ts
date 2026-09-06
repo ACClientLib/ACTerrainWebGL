@@ -123,13 +123,10 @@ const MAX_2D_STATIC_FOOTPRINT = 192;
 const INSTANCE_FLOATS = 10;
 const PARTICLE_INSTANCE_FLOATS = 19;
 const MAX_2D_PARTICLE_INSTANCES = 12000;
-// Dungeon DAT statics can sit only a few millimetres above the env-cell floor.
-// Give those floor pieces a little more separation in the 3D depth buffer;
-// world geometry keeps the existing bias.
-const DUNGEON_STATIC_Z_BIAS = 0.05;
 
 export class SceneGeometryRenderer {
   private dungeonPlacements: IndexedPlacement[] = [];
+  private acYOrigin = MAP_SIZE;
 
   async loadDungeon(cells: readonly import("./dungeons").DungeonCell[]): Promise<void> {
     const modelIndexes = [...new Set(cells.flatMap(cell => cell.placements.map(p => p.modelIndex)))];
@@ -146,6 +143,8 @@ export class SceneGeometryRenderer {
   }
 
   setDungeon(cells: readonly import("./dungeons").DungeonCell[]): void {
+    this.acYOrigin = cells.length > 0 ? 0 : MAP_SIZE;
+    this.placementBoundsCache = new WeakMap<IndexedPlacement, Bounds3>();
     this.dungeonPlacements = cells.flatMap(cell => cell.placements);
     this.cacheGeneration++;
     this.decodeController.abort();
@@ -184,7 +183,7 @@ export class SceneGeometryRenderer {
     this.diagnostics.visiblePlacements = this.dungeonPlacements.length;
     // Reuse instancing without exterior distance, zoom, or 2D category filters.
     this.twoDPreparedDirty = true;
-    this.prepareCommonSubmissions(camera, mode, this.groupVisible3D(this.dungeonPlacements), [], submit, true);
+    this.prepareCommonSubmissions(camera, mode, this.groupVisible3D(this.dungeonPlacements), [], submit);
   }
 
   loadDistance = 8;
@@ -199,6 +198,7 @@ export class SceneGeometryRenderer {
   private instanceUploadData = new Float32Array(0);
   private uniforms: {
     xWorld: WebGLUniformLocation | null;
+    acYOrigin: WebGLUniformLocation | null;
     cameraMode: WebGLUniformLocation | null;
     texture: WebGLUniformLocation | null;
     diffuse: WebGLUniformLocation | null;
@@ -218,6 +218,7 @@ export class SceneGeometryRenderer {
   };
   private particleUniforms: {
     xWorld: WebGLUniformLocation | null;
+    acYOrigin: WebGLUniformLocation | null;
     texture: WebGLUniformLocation | null;
     cameraRight: WebGLUniformLocation | null;
     cameraUp: WebGLUniformLocation | null;
@@ -333,6 +334,7 @@ export class SceneGeometryRenderer {
     }
     this.configureParticleVao();
     this.particleUniforms = {
+      acYOrigin: this.particleProgram ? gl.getUniformLocation(this.particleProgram, "acYOrigin") : null,
       xWorld: this.particleProgram
         ? gl.getUniformLocation(this.particleProgram, "xWorld")
         : null,
@@ -374,6 +376,7 @@ export class SceneGeometryRenderer {
         : null,
     };
     this.uniforms = {
+      acYOrigin: this.program ? gl.getUniformLocation(this.program, "acYOrigin") : null,
       xWorld: this.program
         ? gl.getUniformLocation(this.program, "xWorld")
         : null,
@@ -720,7 +723,6 @@ export class SceneGeometryRenderer {
     groups: Map<string, SceneGroup>,
     visibleBlocks: [number, number][],
     submit: SceneSubmissionSink,
-    dungeonMode = false,
   ): void {
     const now = performance.now() * 0.001;
     const deltaTime = this.particleLastFrameTime === 0 ? 1 / 60 : Math.max(0, now - this.particleLastFrameTime);
@@ -784,7 +786,7 @@ export class SceneGeometryRenderer {
         let itemOffset = 0;
         for (const placements of group.placementSegments) {
           for (const placement of placements) {
-            this.writePlacementInstance(this.instanceUploadData, groupOffset + itemOffset * INSTANCE_FLOATS, placement, dungeonMode);
+            this.writePlacementInstance(this.instanceUploadData, groupOffset + itemOffset * INSTANCE_FLOATS, placement);
             itemOffset++;
           }
         }
@@ -900,6 +902,7 @@ export class SceneGeometryRenderer {
       state.particleOffset = -1;
       gl.useProgram(this.program);
       gl.uniformMatrix4fv(this.uniforms.xWorld, false, view.viewProjection);
+      gl.uniform1f(this.uniforms.acYOrigin, this.acYOrigin);
       gl.uniform1i(this.uniforms.cameraMode, view.cameraMode === CameraMode.Camera2D ? 0 : 1);
       gl.uniform3f(this.uniforms.cameraPosition, ...view.cameraPosition);
       gl.uniform3f(this.uniforms.fogColor, ...view.fog.color);
@@ -1059,6 +1062,7 @@ export class SceneGeometryRenderer {
       gl.useProgram(this.particleProgram);
       gl.bindVertexArray(this.particleVao);
       gl.uniformMatrix4fv(this.particleUniforms.xWorld, false, view.viewProjection);
+      gl.uniform1f(this.particleUniforms.acYOrigin, this.acYOrigin);
       gl.uniform3f(this.particleUniforms.cameraRight, ...view.particleRight);
       gl.uniform3f(this.particleUniforms.cameraUp, ...view.particleUp);
       gl.uniform3f(this.particleUniforms.cameraPosition, ...view.cameraPosition);
@@ -1367,7 +1371,7 @@ export class SceneGeometryRenderer {
   private particleDepth(data: number[], camera: BaseCamera): number {
     if (data.length < 3) return 0;
     const dx = data[0] - camera.Position.x;
-    const dy = MAP_SIZE - data[1] - camera.Position.y;
+    const dy = this.acYOrigin - data[1] - camera.Position.y;
     const dz = data[2] - camera.Position.z;
     return dx * dx + dy * dy + dz * dz;
   }
@@ -1450,14 +1454,10 @@ export class SceneGeometryRenderer {
     target: Float32Array,
     base: number,
     placement: IndexedPlacement,
-    dungeonMode = false,
   ): void {
     target[base] = placement.origin[0];
     target[base + 1] = placement.origin[1];
-    const dungeonStaticBias = dungeonMode && placement.category === STATICS
-      ? DUNGEON_STATIC_Z_BIAS
-      : 0;
-    target[base + 2] = placement.origin[2] + OBJECT_Z_BIAS + dungeonStaticBias;
+    target[base + 2] = placement.origin[2] + OBJECT_Z_BIAS;
     target[base + 3] = placement.rotation[0];
     target[base + 4] = placement.rotation[1];
     target[base + 5] = placement.rotation[2];
@@ -1679,7 +1679,7 @@ export class SceneGeometryRenderer {
         placement.origin[0] +
           scaled.x +
           2 * cross.x,
-        MAP_SIZE -
+        this.acYOrigin -
           (placement.origin[1] + scaled.y + 2 * cross.y),
         placement.origin[2] + scaled.z + 2 * cross.z,
       );
@@ -1801,7 +1801,7 @@ export class SceneGeometryRenderer {
     this.configureParticleVao();
     const uniform = (program: WebGLProgram | null, name: string) => program ? gl.getUniformLocation(program, name) : null;
     this.uniforms = {
-      xWorld: uniform(this.program, "xWorld"), cameraMode: uniform(this.program, "cameraMode"), texture: uniform(this.program, "buildingTexture"),
+      acYOrigin: uniform(this.program, "acYOrigin"), xWorld: uniform(this.program, "xWorld"), cameraMode: uniform(this.program, "cameraMode"), texture: uniform(this.program, "buildingTexture"),
       diffuse: uniform(this.program, "diffuseAmount"), luminosity: uniform(this.program, "luminosity"), opacity: uniform(this.program, "opacity"),
       alphaMode: uniform(this.program, "alphaMode"), alphaCutoff: uniform(this.program, "alphaCutoff"), renderPass: uniform(this.program, "renderPass"),
       cameraPosition: uniform(this.program, "cameraPosition"), fogColor: uniform(this.program, "fogColor"), fogStart: uniform(this.program, "fogStart"),
@@ -1809,7 +1809,7 @@ export class SceneGeometryRenderer {
       sunlightColor: uniform(this.program, "sunlightColor"), ambientColor: uniform(this.program, "ambientColor"),
     };
     this.particleUniforms = {
-      xWorld: uniform(this.particleProgram, "xWorld"), texture: uniform(this.particleProgram, "particleTexture"), cameraRight: uniform(this.particleProgram, "cameraRight"),
+      acYOrigin: uniform(this.particleProgram, "acYOrigin"), xWorld: uniform(this.particleProgram, "xWorld"), texture: uniform(this.particleProgram, "particleTexture"), cameraRight: uniform(this.particleProgram, "cameraRight"),
       cameraUp: uniform(this.particleProgram, "cameraUp"), opacity: uniform(this.particleProgram, "materialOpacity"), alphaMode: uniform(this.particleProgram, "alphaMode"), alphaCutoff: uniform(this.particleProgram, "alphaCutoff"), renderPass: uniform(this.particleProgram, "renderPass"),
       cameraPosition: uniform(this.particleProgram, "cameraPosition"), fogColor: uniform(this.particleProgram, "fogColor"), fogStart: uniform(this.particleProgram, "fogStart"),
       fogEnd: uniform(this.particleProgram, "fogEnd"), fogEnabled: uniform(this.particleProgram, "fogEnabled"),

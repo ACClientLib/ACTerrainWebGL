@@ -1,5 +1,5 @@
 import type { IndexedPlacement } from "./acdatclient";
-import { LAND_BLOCK_SIZE, MAP_SIZE } from "./worldgeometry";
+
 
 export interface DungeonSelection {
   landblock: number;
@@ -83,15 +83,12 @@ export function hexId(id: number, digits = 8): string {
 }
 
 export function dungeonCoordinates(selection: DungeonSelection, cells: readonly DungeonCell[], position: { x: number; y: number; z: number }): string {
-  const point = [position.x, MAP_SIZE - position.y, position.z];
+  const point = [position.x, -position.y, position.z];
   const cell = cells.find(cell => cell.planes !== null && cell.planes.every(
     plane => plane[0] * point[0] + plane[1] * point[1] + plane[2] * point[2] + plane[3] >= -0.0002,
   ));
   if (cell) {
-    return `${hexId(cell.id)} ${point.map(value => value.toFixed(2)).join(" ")}`;
+    return `${selection.name ? `${selection.name} ` : ""}${hexId(cell.id)} ${point.map(value => value.toFixed(2)).join(" ")}`;
   }
-  const landblockX = (selection.landblock >>> 8) & 0xff;
-  const landblockY = selection.landblock & 0xff;
-  const local = [point[0] - landblockX * LAND_BLOCK_SIZE, point[1] - landblockY * LAND_BLOCK_SIZE, point[2]];
-  return `${selection.name ? `${selection.name} ` : ""}${hexId(selection.landblock, 4)} ${local.map(value => value.toFixed(2)).join(" ")}`;
+  return `${selection.name ? `${selection.name} ` : ""}${hexId(selection.landblock, 4)} ${point.map(value => value.toFixed(2)).join(" ")}`;
 }

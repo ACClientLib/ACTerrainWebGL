@@ -59,7 +59,7 @@ export function parseLocationTargets(query: string): LocationTarget[] {
     return [{ text: `Go to ${query}`, landblock: interior ? landblock : undefined,
       cellId: interior ? cellId : undefined,
       position: { x: x + (interior ? 0 : (landblock >>> 8) * LAND_BLOCK_SIZE),
-        y: MAP_SIZE - y - (interior ? 0 : (landblock & 0xff) * LAND_BLOCK_SIZE), z },
+        y: interior ? -y : MAP_SIZE - y - (landblock & 0xff) * LAND_BLOCK_SIZE, z },
       rotation: quaternion ? rotation(quaternion) : undefined }];
   }
   const block = query.match(/^(?:0x)?([0-9a-f]{1,4}|[0-9a-f]{8})$/i);
@@ -84,7 +84,7 @@ export function locationTarget(result: LocationResult): LocationTarget {
     text: result.text,
     landblock: dungeon ? result.cellId >>> 16 : undefined,
     cellId: dungeon ? result.cellId : undefined,
-    position: result.type === "dungeon" ? undefined : { x: result.x, y: result.y, z: result.z },
+    position: result.type === "dungeon" ? undefined : { x: result.x, y: dungeon ? result.y - MAP_SIZE : result.y, z: result.z },
     type: result.type === "dungeon" ? undefined : result.type,
   };
 }
