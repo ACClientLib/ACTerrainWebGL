@@ -17,7 +17,7 @@ import { CameraRoute } from "./router";
 import { TerrainDataClient } from "./terraindataclient";
 import { SceneGeometryRenderer } from "./scenegeometryrenderer";
 import { invalidateSceneDrawState } from "./scenedrawstate";
-import { intersectsFrustum } from "./objectvisibility";
+import { intersectsFrustum, type Bounds3 } from "./objectvisibility";
 import {
   LAND_BLOCK_SIDE,
   LAND_BLOCK_SIZE,
@@ -31,6 +31,8 @@ import { SceneRenderer } from "./scenerenderer";
 import { createSceneView, type SceneLighting, type SceneView } from "./sceneview";
 import type { SceneSubmission } from "./scenesubmission";
 import { LabelsClient } from "./labelsclient";
+import { dungeonCoordinates, dungeonName, type DungeonCell, type DungeonSelection } from "./dungeons";
+import type { LocationTarget } from "./locationsearch";
 
 const CAMERA_TRANSITION_DURATION_MS = 200;
 
@@ -44,6 +46,133 @@ function isTouchDevice() {
 }
 
 export class TerrainRenderer {
+  dungeonSelection: DungeonSelection | undefined;
+  private dungeonCells: DungeonCell[] = [];
+  private dungeonRequest = 0;
+  private worldRoute: CameraRoute | undefined;
+  private dungeonCenter = new Vector3();
+  private dungeonExtents = new Vector3(1, 1, 1);
+  private dungeonBounds: Bounds3[] = [];
+  private dungeonRadius = 1;
+
+  get cameraRoute(): CameraRoute {
+    const position = this.currentCamera.Position;
+    return { dungeon: this.dungeonSelection, position: { x: position.x, y: position.y, z: position.z },
+      ...(this.currentCameraMode === CameraMode.Camera2D
+        ? { mode: "2d" as const, zoom: this.camera2D.Zoom }
+        : { mode: "3d" as const, yaw: this.flyingCamera.Yaw, pitch: this.flyingCamera.Pitch,
+            roll: this.flyingCamera.Roll }) };
+  }
+
+  get dungeonCoordinateText(): string {
+    return dungeonCoordinates(this.dungeonSelection!, this.dungeonCells, this.currentCamera.Position);
+  }
+
+  cancelDungeonLoad(): void {
+    this.dungeonRequest++;
+  }
+
+  async showDungeon(selection: DungeonSelection, route?: CameraRoute): Promise<void> {
+    const request = ++this.dungeonRequest;
+    const [data, server] = await Promise.all([
+      this.#sceneGeometry.datClient.dungeon(selection.landblock),
+      this.#serverGeometry?.datClient.dungeon(selection.landblock),
+    ]);
+    if (request !== this.dungeonRequest || this.isShutdown) {
+      return;
+    }
+    const selectedCell = selection.cellId === undefined ? undefined : data.cells.find(cell => cell.id === selection.cellId);
+    if (selection.cellId !== undefined && !selectedCell) {
+      throw new Error("The selected dungeon cell is not in this DAT dataset.");
+    }
+    const cells = selectedCell ? data.cells.filter(cell => cell.groupId === selectedCell.groupId) : data.cells;
+    if (cells.length === 0) {
+      throw new Error("This landblock contains no packed envcells.");
+    }
+    const ids = new Set(cells.map(cell => cell.id));
+    const serverCells = server?.cells.filter(cell => ids.has(cell.id)) ?? [];
+    await Promise.all([this.#sceneGeometry.loadDungeon(cells), this.#serverGeometry?.loadDungeon(serverCells)]);
+    if (request !== this.dungeonRequest || this.isShutdown) {
+      return;
+    }
+    if (!this.dungeonSelection) {
+      this.worldRoute = this.cameraRoute;
+    }
+    this.dungeonSelection = { ...selection, name: selection.name ?? dungeonName(selection.landblock, selection.cellId) };
+    this.dungeonCells = cells;
+    this.#sceneGeometry.setDungeon(cells);
+    this.#serverGeometry?.setDungeon(serverCells);
+    this.#labels?.setDungeon(selection.landblock, ids);
+    this.dungeonBounds = this.#sceneGeometry.getDungeonBounds();
+    const minimum = [Infinity, Infinity, Infinity];
+    const maximum = [-Infinity, -Infinity, -Infinity];
+    for (const bounds of this.dungeonBounds) {
+      for (let axis = 0; axis < 3; axis++) {
+        minimum[axis] = Math.min(minimum[axis], bounds.minimum[axis]);
+        maximum[axis] = Math.max(maximum[axis], bounds.maximum[axis]);
+      }
+    }
+    this.dungeonCenter = new Vector3((minimum[0] + maximum[0]) / 2,
+      (minimum[1] + maximum[1]) / 2, (minimum[2] + maximum[2]) / 2);
+    this.dungeonExtents = new Vector3(
+      Math.max(1, maximum[0] - minimum[0]),
+      Math.max(1, maximum[1] - minimum[1]),
+      Math.max(1, maximum[2] - minimum[2]),
+    );
+    this.dungeonRadius = Math.max(1, Math.hypot(...maximum.map((value, axis) => value - minimum[axis])) / 2);
+    // Opening a dungeon always frames its bounds; the anchor retains the chosen camera mode.
+    this.frameDungeon();
+    if (route?.mode === "2d") {
+      this.restoreCameraRoute({ mode: "2d", position: this.camera2D.Position, zoom: this.camera2D.Zoom });
+    }
+    document.body.classList.add("loaded");
+    this.canvas.dispatchEvent(new Event("locationchange"));
+  }
+
+  showWorld(): void {
+    this.dungeonRequest++;
+    if (!this.dungeonSelection) {
+      return;
+    }
+    this.dungeonSelection = undefined;
+    this.dungeonCells = [];
+    this.dungeonBounds = [];
+    this.#labels?.setDungeon();
+    this.#sceneGeometry.setDungeon([]);
+    this.#serverGeometry?.setDungeon([]);
+    this.camera2D.DepthRange = 4096;
+    this.#labels?.setEnabled(settings.data.showLabels);
+    if (this.worldRoute) {
+      this.restoreCameraRoute(this.worldRoute);
+    }
+    this.#updateFlyingFarPlane();
+    this.canvas.dispatchEvent(new Event("locationchange"));
+    this.invalidate("input");
+  }
+
+  private frameDungeon(): void {
+    this.#handleResize();
+    const camera = this.flyingCamera;
+    const points: Vector3[] = [];
+    for (const bounds of this.dungeonBounds) {
+      for (const x of [bounds.minimum[0], bounds.maximum[0]]) {
+        for (const y of [bounds.minimum[1], bounds.maximum[1]]) {
+          for (const z of [bounds.minimum[2], bounds.maximum[2]]) {
+            points.push(new Vector3(x, y, z));
+          }
+        }
+      }
+    }
+    camera.FitToPoints(points, this.dungeonCenter);
+    this.camera2D.Position = new Vector3(this.dungeonCenter.x, this.dungeonCenter.y, 1);
+    this.camera2D.DepthRange = Math.max(4096, Math.abs(this.dungeonCenter.z) + this.dungeonRadius + 2);
+    this.camera2D.Zoom = Math.min(this.canvas.width / this.dungeonExtents.x,
+      this.canvas.height / this.dungeonExtents.y) * settings.data.renderScale * 0.9;
+    this.restoreCameraRoute({ mode: "3d", position: camera.Position, yaw: camera.Yaw, pitch: camera.Pitch,
+      roll: 0 });
+    this.#updateFlyingFarPlane();
+  }
+
   canvas: HTMLCanvasElement;
   loader: Element;
   gl: WebGL2RenderingContext;
@@ -254,6 +383,14 @@ export class TerrainRenderer {
   }
 
   #resetCamera() {
+    if (this.dungeonSelection) {
+      const cameraMode = this.currentCameraMode;
+      this.frameDungeon();
+      if (cameraMode === CameraMode.Camera2D) {
+        this.restoreCameraRoute({ mode: "2d", position: this.camera2D.Position, zoom: this.camera2D.Zoom });
+      }
+      return;
+    }
     this.switchCamera(CameraMode.Camera2D, false);
     this.camera2D.Position = new Vector3(24162.252488664108, 29663.566666805677, 2.4964);
     this.invalidate("input");
@@ -354,8 +491,8 @@ export class TerrainRenderer {
       url.searchParams.delete("dataset");
       window.location.assign(url.toString());
     });
-    document.querySelector<HTMLButtonElement>("#switch-camera")!.addEventListener("click", () => this.switchCamera(this.currentCameraType === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D), { signal: this.shutdownSignal });
-    document.querySelector<HTMLButtonElement>("#reset-camera")!.addEventListener("click", () => this.#resetCamera(), { signal: this.shutdownSignal });
+    addActionButton("Reset Camera", () => this.#resetCamera());
+    document.querySelector<HTMLButtonElement>("#camera-toggle")!.addEventListener("click", () => this.switchCamera(this.currentCameraType === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D), { signal: this.shutdownSignal });
     settings.subscribe(() => {
       this.#applySettings();
       textureSelect.value = settings.data.textureProfile;
@@ -432,7 +569,45 @@ export class TerrainRenderer {
     this.#updateMoveSpeedControl?.();
   }
 
+  async navigateToLocation(target: LocationTarget): Promise<void> {
+    if (target.landblock !== undefined) {
+      const request = this.dungeonRequest + 1;
+      await this.showDungeon({ landblock: target.landblock, cellId: target.cellId });
+      if (request !== this.dungeonRequest || this.isShutdown) {
+        return;
+      }
+    } else {
+      this.showWorld();
+    }
+    const position = target.position;
+    if (!position) {
+      return;
+    }
+    if (target.zoom !== undefined) {
+      this.restoreCameraRoute({ mode: "2d", position: { ...position, z: 1 }, zoom: this.capCameraZoom(target.zoom) });
+      return;
+    }
+    if (target.landblock === undefined && target.type && !target.rotation) {
+      this.focusLocation(position.x, position.y, target.type);
+      return;
+    }
+    const camera = this.flyingCamera;
+    if (target.rotation) {
+      camera.Position = new Vector3(position.x, position.y, position.z);
+      camera.SetRotation(target.rotation.yaw, target.rotation.pitch, target.rotation.roll);
+    } else {
+      const focus = new Vector3(position.x, position.y, position.z + 1);
+      camera.Position = new Vector3(position.x, position.y + 3, position.z + 2);
+      camera.SetRotation(0, 0, 0);
+      camera.LookAt(focus);
+    }
+    this.restoreCameraRoute({ mode: "3d", position: camera.Position, yaw: camera.Yaw,
+      pitch: camera.Pitch, roll: camera.Roll });
+    this.canvas.dispatchEvent(new Event("locationchange"));
+  }
+
   focusLocation(x: number, y: number, type: "poi" | "npc" | "portal"): void {
+    this.showWorld();
     if (this.currentCameraMode !== CameraMode.Camera2D) this.switchCamera(CameraMode.Camera2D, false);
     this.camera2D.Zoom = this.capCameraZoom(type === "poi" ? 0.12 : 40);
     this.camera2D.CenterOnVec(new Vector3(x, y, 1));
@@ -461,22 +636,27 @@ export class TerrainRenderer {
       return;
     }
 
+    if (this.dungeonSelection) {
+      this.currentCameraMode = mode;
+      this.currentCamera = mode === CameraMode.Camera2D ? this.camera2D : this.flyingCamera;
+      this.currentCamera.ViewportSize.x = this.canvas.width;
+      this.currentCamera.ViewportSize.y = this.canvas.height;
+      this.#updateMobileControlsVisibility();
+      this.invalidate("input");
+      return;
+    }
+
     const camera = this.flyingCamera;
     camera.MapProjectionBlend = 0;
     if (mode === CameraMode.Camera2D) {
       this.camera2D.CenterOnVec(new Vector3(camera.Position.x, camera.Position.y, 1));
-      const height = Math.max(1, camera.Position.z - this.getTerrainClearanceHeightAt(
-        camera.Position.x,
-        camera.Position.y,
-      ));
+      const height = Math.max(1, camera.Position.z - this.cameraGroundHeightAt(camera.Position.x, camera.Position.y));
       this.camera2D.Zoom = this.capCameraZoom(this.zoomForFlyingHeight(height));
     } else {
       const position = this.camera2D.Position;
       camera.SetRotation(Math.PI, -(Math.PI / 2 - Math.PI / 18), 0);
-      const height = Math.min(
-        this.flyingHeightForZoom(this.camera2D.Zoom),
-        settings.data.distanceLandblocks * LAND_BLOCK_SIZE * 0.8,
-      );
+      const height = Math.min(this.flyingHeightForZoom(this.camera2D.Zoom),
+        settings.data.distanceLandblocks * LAND_BLOCK_SIZE * 0.8);
       camera.Position = new Vector3(
         position.x,
         position.y,
@@ -488,10 +668,7 @@ export class TerrainRenderer {
     }
 
     camera.MapProjectionZoom = this.camera2D.Zoom;
-    camera.MapProjectionHeight = Math.max(1, camera.Position.z - this.getTerrainClearanceHeightAt(
-      camera.Position.x,
-      camera.Position.y,
-    ));
+    camera.MapProjectionHeight = Math.max(1, camera.Position.z - this.cameraGroundHeightAt(camera.Position.x, camera.Position.y));
     this.cameraTransition = {
       mode,
       elapsed: 0,
@@ -562,7 +739,6 @@ export class TerrainRenderer {
     );
     this.#restoredFlyingCameraRoute = true;
     this.flyingCamera.SetRotation(route.yaw!, route.pitch!, route.roll!);
-    this.flyingCamera.FOV = route.fov!;
     this.currentCameraMode = CameraMode.Flying;
     this.currentCamera = this.flyingCamera;
     this.#updateMobileControlsVisibility();
@@ -600,6 +776,10 @@ export class TerrainRenderer {
       settings.data.minZoom,
       Math.min(settings.data.maxZoom, zoom),
     );
+  }
+
+  private cameraGroundHeightAt(x: number, y: number): number {
+    return this.dungeonSelection ? this.dungeonCenter.z : this.getTerrainClearanceHeightAt(x, y);
   }
 
   private flyingHeightForZoom(zoom: number) {
@@ -926,7 +1106,7 @@ export class TerrainRenderer {
           this.terrainHeightTable[this.terrainHeightTable.length - 1];
         this.terrainColorData = new Float32Array(catalog.colors.flat());
         this.camera2D.MapSize.z = this.maxTerrainHeight;
-        if (!this.#restoredFlyingCameraRoute) {
+        if (!this.#restoredFlyingCameraRoute && !this.dungeonSelection) {
           this.flyingCamera.Position.z = this.maxTerrainHeight + 500;
         }
         this.#terrainTextureArray = new TextureArray(
@@ -1142,6 +1322,9 @@ export class TerrainRenderer {
     } else {
       this.currentCamera.update(dt);
     }
+    if (this.dungeonSelection) {
+      this.#updateFlyingFarPlane();
+    }
     this.currentCamera.prepareFrame();
     this.sceneView = createSceneView(
       this.currentCamera,
@@ -1160,7 +1343,7 @@ export class TerrainRenderer {
           this.currentCameraMode === CameraMode.Flying
             ? settings.data.distanceLandblocks * LAND_BLOCK_SIZE
             : 0,
-        enabled: this.currentCameraMode === CameraMode.Flying,
+        enabled: !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying,
       },
       this.#getLighting(),
     );
@@ -1168,7 +1351,9 @@ export class TerrainRenderer {
     this.sceneRenderer?.resize(this.canvas.width, this.canvas.height);
 
     // Set uniforms based on camera type
-    this.#setUniforms();
+    if (!this.dungeonSelection) {
+      this.#setUniforms();
+    }
   }
 
   #getLighting() {
@@ -1447,6 +1632,16 @@ export class TerrainRenderer {
 
   draw(dt: number) {
     if (this.#isShutdown) return;
+    if (this.dungeonSelection) {
+      const submissions = this.#submissions;
+      submissions.length = 0;
+      this.#sceneGeometry.renderDungeon(this.currentCamera, this.currentCameraMode, submission => submissions.push(submission));
+      this.#serverGeometry?.renderDungeon(this.currentCamera, this.currentCameraMode, submission => submissions.push(submission));
+      this.sceneRenderer.render(this.sceneView, submissions);
+      this.#labels?.update(this.currentCamera);
+      this.#updateOverlay();
+      return;
+    }
     if (!this.#terrainReady) {
       this.#updateOverlay();
       return;
@@ -1636,6 +1831,11 @@ export class TerrainRenderer {
   }
 
   #updateFlyingFarPlane(): void {
+    if (this.dungeonSelection) {
+      this.flyingCamera.Far = Math.max(100,
+        this.flyingCamera.Position.clone().subtract(this.dungeonCenter).len() + this.dungeonRadius * 2 + 1);
+      return;
+    }
     this.flyingCamera.Far = Math.max(
       4096,
       settings.data.distanceLandblocks * LAND_BLOCK_SIZE +

@@ -150,15 +150,15 @@ canvas {
 #camera-hint { position: fixed; bottom: 16px; left: 16px; z-index: 1800; color: white; font: 12px/1.6 ui-monospace, monospace; pointer-events: none; user-select: none; text-shadow: 0 1px 2px #000, 1px 0 0 #000, -1px 0 0 #000, 0 -1px 0 #000; }
 @media (pointer: coarse) { #camera-hint { display: none; } }
 html.touch-device #camera-hint { display: none; }
-#settings-toggle { position: fixed; top: 8px; right: 8px; z-index: 1800; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: white; cursor: pointer; font-size: 22px; }
-#settings-toggle:hover { background: transparent; outline: none; }
-#settings-toggle:focus-visible { background: transparent; outline: 2px solid #74c9c2; outline-offset: 2px; }
+#camera-toggle, #settings-toggle { position: fixed; top: 8px; z-index: 1800; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: white; cursor: pointer; font-size: 22px; }
+#camera-toggle { right: 44px; }
+#settings-toggle { right: 8px; }
+#camera-toggle:hover, #settings-toggle:hover { background: transparent; outline: none; }
+#camera-toggle:focus-visible, #settings-toggle:focus-visible { background: transparent; outline: 2px solid #74c9c2; outline-offset: 2px; }
 #sidebar { position: fixed; top: 0; right: 0; z-index: 1900; width: min(360px,92vw); height: 100%; box-sizing: border-box; border-left: 1px solid rgba(255,255,255,.18); background: rgba(8,13,17,.96); color: rgba(255,255,255,.9); font: 13px/1.4 system-ui,sans-serif; transform: translateX(100%); transition: transform 180ms ease; pointer-events: none; }
 #sidebar.open { transform: translateX(0); pointer-events: auto; }
 .sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 18px; border-bottom: 1px solid rgba(255,255,255,.14); font-size: 16px; font-weight: 600; }
 #sidebar-close { border: 0; background: none; color: inherit; cursor: pointer; font-size: 24px; }
-.sidebar-camera-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 18px 0; }
-.sidebar-camera-controls button { min-width: 0; }
 .sidebar-content { height: calc(100% - 62px); overflow-y: auto; padding: 0 18px 24px; scrollbar-color: #42626c transparent; }
 .sidebar-section { padding: 18px 0; border-bottom: 1px solid rgba(255,255,255,.12); }
 .sidebar-section h2 { margin: 0 0 12px; color: #8ed3cc; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
@@ -166,6 +166,98 @@ html.touch-device #camera-hint { display: none; }
 .sidebar-section-content { margin-top: 12px; }
 .sidebar-section-content.collapsed { display: none; }
 .location-search { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.08); color: inherit; }
+.explore-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  background: rgba(0,0,0,.2);
+}
+.explore-modes button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #a6b7bb;
+  font: 600 13px system-ui, sans-serif;
+  cursor: pointer;
+}
+.explore-modes button:hover {
+  background: rgba(142,211,204,.08);
+  color: #e2f5f2;
+}
+.explore-modes button[aria-pressed=true] {
+  background: #284846;
+  color: #c2f1e9;
+  box-shadow: inset 0 0 0 1px rgba(142,211,204,.2);
+}
+#locations-content form {
+  margin-top: 16px;
+}
+.dungeon-search label {
+  display: block;
+  margin-bottom: 8px;
+  color: #d6e3e4;
+  font-weight: 500;
+}
+#locations-content .location-search {
+  min-height: 42px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+  font: inherit;
+}
+.location-search::placeholder {
+  color: #94a5ab;
+}
+.explore-help {
+  margin: 8px 0 0;
+  color: #94a5ab;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.dungeon-landblock {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(142,211,204,.25);
+  border-radius: 8px;
+  background: rgba(142,211,204,.1);
+  color: #c2f1e9;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dungeon-landblock:hover {
+  background: rgba(142,211,204,.2);
+}
+.explore-modes button:focus-visible,
+.dungeon-landblock:focus-visible,
+#locations-content .location-search:focus-visible {
+  outline: 2px solid #74c9c2;
+  outline-offset: 2px;
+}
+#locations-content [role=status]:not(:empty) {
+  margin-top: 12px;
+  color: #a9bfbe;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.dungeon-results .location-result {
+  justify-content: space-between;
+  padding: 11px 10px;
+  border-radius: 7px;
+}
+.dungeon-results .location-result > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dungeon-result-id {
+  flex-shrink: 0;
+  color: #94a5ab;
+  font: 11px ui-monospace, monospace;
+}
 .location-results { display: grid; gap: 3px; margin-top: 6px; max-height: 260px; overflow-y: auto; }
 .location-result { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 6px; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
 .location-result:hover, .location-result:focus-visible { background: rgba(92,178,176,.22); outline: none; }

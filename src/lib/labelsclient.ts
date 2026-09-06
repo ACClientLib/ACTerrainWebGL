@@ -12,6 +12,7 @@ export interface TerrainLabel {
   z: number;
   minZoom: number;
   insideEnvCell: boolean;
+  cellId?: number;
 }
 
 interface LabelTile { tileX: number; tileY: number; tileSize: number; labels: TerrainLabel[]; }
@@ -30,6 +31,8 @@ export class LabelsClient {
   private readonly lifecycleController = new AbortController();
   private lastCamera: BaseCamera | null = null;
   private maximum3DDistance = Number.POSITIVE_INFINITY;
+  private dungeonKey: string | null = null;
+  private dungeonCells = new Set<number>();
   private readonly cachePromise: Promise<Cache> | null;
 
   constructor(
@@ -45,7 +48,7 @@ export class LabelsClient {
           await Promise.all(entries.filter((entry) => {
             const url = new URL(entry.url);
             return url.origin === endpointUrl.origin &&
-              (url.pathname === endpointUrl.pathname || url.pathname === `${endpointUrl.pathname}/pois`) &&
+              (url.pathname === endpointUrl.pathname || url.pathname === `${endpointUrl.pathname}/pois` || url.pathname === `${endpointUrl.pathname}/dungeon`) &&
               url.searchParams.get("labelsRevision") !== this.revision;
           }).map((entry) => cache.delete(entry)));
           return cache;
@@ -55,6 +58,12 @@ export class LabelsClient {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) this.removeElements();
+  }
+
+  setDungeon(landblock?: number, cells = new Set<number>()): void {
+    this.dungeonKey = landblock === undefined ? null : `dungeon/${landblock}`;
+    this.dungeonCells = cells;
+    this.removeElements();
   }
 
   loadPois(): void {
@@ -85,6 +94,12 @@ export class LabelsClient {
   update(camera: BaseCamera, maximum3DDistance?: number): void {
     this.lastCamera = camera;
     this.maximum3DDistance = maximum3DDistance ?? Number.POSITIVE_INFINITY;
+    if (this.dungeonKey !== null) {
+      const key = this.dungeonKey;
+      this.loadUrl(key, `${this.endpoint}/dungeon?landblock=${key.split("/")[1]}`);
+      this.draw(camera);
+      return;
+    }
     const flyingCamera = camera instanceof CameraFlying ? camera : null;
     const is3D = flyingCamera !== null;
     const types = is3D
@@ -141,8 +156,12 @@ export class LabelsClient {
 
   private load(tileX: number, tileY: number, types: string): void {
     const key = `${tileX}/${tileY}/${types}`;
+    this.loadUrl(key, `${this.endpoint}?tileX=${tileX}&tileY=${tileY}&types=${encodeURIComponent(types)}`);
+  }
+
+  private loadUrl(key: string, url: string): void {
     if (this.loaded.has(key) || this.pending.has(key)) return;
-    const promise = this.read(key, tileX, tileY, types).catch((error) => {
+    const promise = this.read(key, url).catch((error) => {
       if (!this.lifecycleController.signal.aborted) {
         console.warn("Unable to load ACTerrain label tile", error);
       }
@@ -150,8 +169,8 @@ export class LabelsClient {
     this.pending.set(key, promise);
   }
 
-  private async read(key: string, tileX: number, tileY: number, types: string): Promise<void> {
-    const url = this.withRevision(`${this.endpoint}?tileX=${tileX}&tileY=${tileY}&types=${encodeURIComponent(types)}`);
+  private async read(key: string, sourceUrl: string): Promise<void> {
+    const url = this.withRevision(sourceUrl);
     const cache = await this.cachePromise;
     let response = cache ? await cache.match(url) : undefined;
     this.lifecycleController.signal.throwIfAborted();
@@ -183,8 +202,14 @@ export class LabelsClient {
     const visible: TerrainLabel[] = [];
     const mapBlend = flyingCamera ? flyingCamera.MapProjectionBlend : 1;
     const mapZoom = flyingCamera ? flyingCamera.MapProjectionZoom : (camera as Camera2D).Zoom;
-    for (const labels of this.loaded.values()) {
+    for (const [key, labels] of this.loaded) {
+      if (this.dungeonKey !== null ? key !== this.dungeonKey : key.startsWith("dungeon/")) {
+        continue;
+      }
       for (const label of labels) {
+        if (this.dungeonKey !== null && !this.dungeonCells.has(label.cellId!)) {
+          continue;
+        }
         if (mapBlend === 0 && label.type === "poi") continue;
         if (mapBlend === 1 && mapZoom < label.minZoom) continue;
         visible.push(label);
@@ -297,5 +322,6 @@ function normalizeLabel(value: Record<string, unknown>): TerrainLabel {
     z: Number(value.z ?? value.Z),
     minZoom: Number(value.minZoom ?? value.MinZoom),
     insideEnvCell: Boolean(value.insideEnvCell ?? value.InsideEnvCell),
+    cellId: value.cellId === undefined && value.CellId === undefined ? undefined : Number(value.cellId ?? value.CellId),
   };
 }

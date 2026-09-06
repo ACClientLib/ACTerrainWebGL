@@ -196,9 +196,19 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
 
   private evict(): void {
     while (this.encodedBytes > this.options.budgets.encodedBytes || this.decodedBytes > this.options.budgets.decodedBytes || this.gpuBytes > this.options.budgets.gpuBytes) {
-      const candidate = [...this.entries].filter(([, entry]) => entry.references === 0 && !entry.uploadPending).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-      if (!candidate) return;
-      this.removeEntry(candidate[0], candidate[1]);
+      let candidate: Entry<TCpu, TGpu> | undefined;
+      for (const entry of this.entries.values()) {
+        if (entry.references !== 0 || entry.uploadPending) {
+          continue;
+        }
+        if (!candidate || entry.lastUsed < candidate.lastUsed) {
+          candidate = entry;
+        }
+      }
+      if (!candidate) {
+        return;
+      }
+      this.removeEntry(candidate.generation.id, candidate);
     }
   }
 

@@ -61,7 +61,7 @@ export class LegacyMeshGpuOwner {
     const reservation = this.registry.reserveUpload(bytes);
     if (!reservation) throw new Error("Legacy mesh upload budget exceeded");
     try { this.allocate(cpu); } finally { reservation.release(); }
-    this.registry.publish(id, cpu, { encodedBytes: 0, decodedBytes: this.decodedBytes(source) }, target, target.gpuBytes);
+    this.registry.publish(id, cpu, { encodedBytes: 0, decodedBytes: bytes }, target, target.gpuBytes);
     this.leases.get(id)?.release();
     const lease = this.registry.acquire(id);
     if (lease) this.leases.set(id, lease);
@@ -215,11 +215,7 @@ export class GpuResourceOwner {
     const vertexCount = mesh.vertexData.byteLength / 24;
     const indexCount = mesh.indexData.byteLength / 4;
     const useShort = vertexCount <= 0xffff;
-    const indexData = useShort ? new Uint16Array(indexCount) : new Uint32Array(mesh.indexData.buffer, mesh.indexData.byteOffset, indexCount);
-    if (useShort) {
-      const source = new Uint32Array(mesh.indexData.buffer, mesh.indexData.byteOffset, indexCount);
-      for (let i = 0; i < source.length; i++) indexData[i] = source[i];
-    }
+    const indexData = this.createIndexData(mesh, useShort);
     const uploadBytes = mesh.vertexData.byteLength + indexData.byteLength;
     if (!this.registry.canUpload()) return false;
     const reservation = this.registry.reserveUpload(uploadBytes);
@@ -235,18 +231,7 @@ export class GpuResourceOwner {
       throw new Error("Unable to allocate v3 mesh GPU resources");
     }
     try {
-      this.gl.bindVertexArray(vao);
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
-      this.gl.bufferData(this.gl.ARRAY_BUFFER, mesh.vertexData, this.gl.STATIC_DRAW);
-      this.gl.enableVertexAttribArray(this.attributes.position);
-      this.gl.vertexAttribPointer(this.attributes.position, 3, this.gl.FLOAT, false, 24, 0);
-      this.gl.enableVertexAttribArray(this.attributes.normal);
-      this.gl.vertexAttribPointer(this.attributes.normal, 4, this.gl.SHORT, true, 24, 12);
-      this.gl.enableVertexAttribArray(this.attributes.uv);
-      this.gl.vertexAttribPointer(this.attributes.uv, 2, this.gl.HALF_FLOAT, false, 24, 20);
-      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-      this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indexData, this.gl.STATIC_DRAW);
-      this.gl.bindVertexArray(null);
+      this.uploadMeshBuffers(mesh, indexData, vertexBuffer, indexBuffer, vao);
       this.registry.publish(id, mesh, { encodedBytes, decodedBytes: mesh.vertexData.byteLength + mesh.indexData.byteLength }, { vertexBuffer, indexBuffer, vao, indexType: useShort ? this.gl.UNSIGNED_SHORT : this.gl.UNSIGNED_INT, indexCount, gpuBytes: uploadBytes }, uploadBytes);
       reservation.release();
       return true;
@@ -298,6 +283,36 @@ export class GpuResourceOwner {
     gl.samplerParameteri(this.samplers.repeat, gl.TEXTURE_WRAP_T, gl.REPEAT);
   }
 
+  private createIndexData(mesh: V3MeshView, useShort: boolean): Uint16Array | Uint32Array {
+    const indices = new Uint32Array(
+      mesh.indexData.buffer,
+      mesh.indexData.byteOffset,
+      mesh.indexData.byteLength / 4,
+    );
+    return useShort ? new Uint16Array(indices) : indices;
+  }
+
+  private uploadMeshBuffers(
+    mesh: V3MeshView,
+    indexData: Uint16Array | Uint32Array,
+    vertexBuffer: WebGLBuffer,
+    indexBuffer: WebGLBuffer,
+    vao: WebGLVertexArrayObject,
+  ): void {
+    this.gl.bindVertexArray(vao);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, mesh.vertexData, this.gl.STATIC_DRAW);
+    this.gl.enableVertexAttribArray(this.attributes.position);
+    this.gl.vertexAttribPointer(this.attributes.position, 3, this.gl.FLOAT, false, 24, 0);
+    this.gl.enableVertexAttribArray(this.attributes.normal);
+    this.gl.vertexAttribPointer(this.attributes.normal, 4, this.gl.SHORT, true, 24, 12);
+    this.gl.enableVertexAttribArray(this.attributes.uv);
+    this.gl.vertexAttribPointer(this.attributes.uv, 2, this.gl.HALF_FLOAT, false, 24, 20);
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indexData, this.gl.STATIC_DRAW);
+    this.gl.bindVertexArray(null);
+  }
+
   private destroyMesh(mesh: GpuMesh): void {
     this.gl.deleteVertexArray(mesh.vao);
     this.gl.deleteBuffer(mesh.vertexBuffer);
@@ -309,11 +324,7 @@ export class GpuResourceOwner {
     const vertexCount = mesh.vertexData.byteLength / 24;
     const indexCount = mesh.indexData.byteLength / 4;
     const useShort = vertexCount <= 0xffff;
-    const indexData = useShort ? new Uint16Array(indexCount) : new Uint32Array(mesh.indexData.buffer, mesh.indexData.byteOffset, indexCount);
-    if (useShort) {
-      const source = new Uint32Array(mesh.indexData.buffer, mesh.indexData.byteOffset, indexCount);
-      for (let i = 0; i < source.length; i++) indexData[i] = source[i];
-    }
+    const indexData = this.createIndexData(mesh, useShort);
     const uploadBytes = mesh.vertexData.byteLength + indexData.byteLength;
     const reservation = this.registry.reserveUpload(uploadBytes);
     if (!reservation) return;
@@ -328,18 +339,7 @@ export class GpuResourceOwner {
       return;
     }
     try {
-      this.gl.bindVertexArray(vao);
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
-      this.gl.bufferData(this.gl.ARRAY_BUFFER, mesh.vertexData, this.gl.STATIC_DRAW);
-      this.gl.enableVertexAttribArray(this.attributes.position);
-      this.gl.vertexAttribPointer(this.attributes.position, 3, this.gl.FLOAT, false, 24, 0);
-      this.gl.enableVertexAttribArray(this.attributes.normal);
-      this.gl.vertexAttribPointer(this.attributes.normal, 4, this.gl.SHORT, true, 24, 12);
-      this.gl.enableVertexAttribArray(this.attributes.uv);
-      this.gl.vertexAttribPointer(this.attributes.uv, 2, this.gl.HALF_FLOAT, false, 24, 20);
-      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-      this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indexData, this.gl.STATIC_DRAW);
-      this.gl.bindVertexArray(null);
+      this.uploadMeshBuffers(mesh, indexData, vertexBuffer, indexBuffer, vao);
       if (!this.registry.attachGpu(generation, { vertexBuffer, indexBuffer, vao, indexType: useShort ? this.gl.UNSIGNED_SHORT : this.gl.UNSIGNED_INT, indexCount, gpuBytes: uploadBytes }, uploadBytes)) this.destroyMesh({ vertexBuffer, indexBuffer, vao, indexType: 0, indexCount, gpuBytes: uploadBytes });
       reservation.release();
     } catch (error) {

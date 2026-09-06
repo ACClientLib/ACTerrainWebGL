@@ -123,8 +123,70 @@ const MAX_2D_STATIC_FOOTPRINT = 192;
 const INSTANCE_FLOATS = 10;
 const PARTICLE_INSTANCE_FLOATS = 19;
 const MAX_2D_PARTICLE_INSTANCES = 12000;
+// Dungeon DAT statics can sit only a few millimetres above the env-cell floor.
+// Give those floor pieces a little more separation in the 3D depth buffer;
+// world geometry keeps the existing bias.
+const DUNGEON_STATIC_Z_BIAS = 0.05;
 
 export class SceneGeometryRenderer {
+  private dungeonPlacements: IndexedPlacement[] = [];
+
+  async loadDungeon(cells: readonly import("./dungeons").DungeonCell[]): Promise<void> {
+    const modelIndexes = [...new Set(cells.flatMap(cell => cell.placements.map(p => p.modelIndex)))];
+    await this.dats.loadResources(this.dats.resourceIdsForModels(modelIndexes));
+
+    // Dungeon placements do not have exterior chunks, so their meshes cannot
+    // be discovered by the normal visible-chunk loader. Decode and upload
+    // them before publishing the dungeon state; otherwise the first dungeon
+    // frames contain no submissions while every model is still queued.
+    await Promise.all(modelIndexes.map(async (modelIndex) => {
+      const mesh = await this.dats.mesh(modelIndex);
+      this.meshes.set(modelIndex, this.uploadMesh(modelIndex, mesh));
+    }));
+  }
+
+  setDungeon(cells: readonly import("./dungeons").DungeonCell[]): void {
+    this.dungeonPlacements = cells.flatMap(cell => cell.placements);
+    this.cacheGeneration++;
+    this.decodeController.abort();
+    this.decodeController = new AbortController();
+    this.pendingMeshes.clear();
+    this.pendingBakedMeshes.clear();
+    this.evictOutside(new Set(), new Set(this.dungeonPlacements.map(p => p.modelIndex)));
+    this.twoDPreparedSubmissions = [];
+    this.twoDPreparedVisibleKey = "";
+    this.particleSimulations.clear();
+    this.particleFrozenData.clear();
+    this.particle2DFrozen = false;
+    this.particle2DVisibleKey = "";
+    this.pendingEviction = null;
+    this.lastResourceRequest = "";
+    this.twoDPreparedDirty = true;
+  }
+
+  getDungeonBounds(): Bounds3[] {
+    // Frame the room shell. Static and spawn bounds can include particle travel
+    // ranges thousands of units across, far beyond the visible dungeon walls.
+    return this.dungeonPlacements
+      .filter(placement => placement.category === ENV_CELLS)
+      .map(placement => this.placementBounds(placement, this.dats.model(placement.modelIndex)!.bounds));
+  }
+
+  renderDungeon(camera: BaseCamera, mode: CameraMode, submit: SceneSubmissionSink): void {
+    if (!this.program || !this.instanceBuffer) {
+      return;
+    }
+    this.meshOwner.beginFrame();
+    this.dats.beginFrame();
+    this.refreshMeshHandles();
+    this.fogDistance = 0;
+    this.diagnostics = this.emptyDiagnostics();
+    this.diagnostics.visiblePlacements = this.dungeonPlacements.length;
+    // Reuse instancing without exterior distance, zoom, or 2D category filters.
+    this.twoDPreparedDirty = true;
+    this.prepareCommonSubmissions(camera, mode, this.groupVisible3D(this.dungeonPlacements), [], submit, true);
+  }
+
   loadDistance = 8;
 
   private program: WebGLProgram | null;
@@ -658,6 +720,7 @@ export class SceneGeometryRenderer {
     groups: Map<string, SceneGroup>,
     visibleBlocks: [number, number][],
     submit: SceneSubmissionSink,
+    dungeonMode = false,
   ): void {
     const now = performance.now() * 0.001;
     const deltaTime = this.particleLastFrameTime === 0 ? 1 / 60 : Math.max(0, now - this.particleLastFrameTime);
@@ -721,7 +784,7 @@ export class SceneGeometryRenderer {
         let itemOffset = 0;
         for (const placements of group.placementSegments) {
           for (const placement of placements) {
-            this.writePlacementInstance(this.instanceUploadData, groupOffset + itemOffset * INSTANCE_FLOATS, placement);
+            this.writePlacementInstance(this.instanceUploadData, groupOffset + itemOffset * INSTANCE_FLOATS, placement, dungeonMode);
             itemOffset++;
           }
         }
@@ -1320,12 +1383,12 @@ export class SceneGeometryRenderer {
     if (mode !== CameraMode.Camera2D) {
       return this.frameFrustum
         ? intersectsFrustum(
-            this.placementBounds(placement, loaded, model.bounds),
+            this.placementBounds(placement, model.bounds),
             this.frameFrustum,
           )
         : true;
     }
-    const bounds = this.placementBounds(placement, loaded, model.bounds);
+    const bounds = this.placementBounds(placement, model.bounds);
     return this.camera2DVisibleBounds
       ? intersectsRectangle(
           bounds,
@@ -1383,10 +1446,18 @@ export class SceneGeometryRenderer {
     return data;
   }
 
-  private writePlacementInstance(target: Float32Array, base: number, placement: IndexedPlacement): void {
+  private writePlacementInstance(
+    target: Float32Array,
+    base: number,
+    placement: IndexedPlacement,
+    dungeonMode = false,
+  ): void {
     target[base] = placement.origin[0];
     target[base + 1] = placement.origin[1];
-    target[base + 2] = placement.origin[2] + OBJECT_Z_BIAS;
+    const dungeonStaticBias = dungeonMode && placement.category === STATICS
+      ? DUNGEON_STATIC_Z_BIAS
+      : 0;
+    target[base + 2] = placement.origin[2] + OBJECT_Z_BIAS + dungeonStaticBias;
     target[base + 3] = placement.rotation[0];
     target[base + 4] = placement.rotation[1];
     target[base + 5] = placement.rotation[2];
@@ -1407,7 +1478,7 @@ export class SceneGeometryRenderer {
       if (placement.category !== STATICS) continue;
       const model = this.dats.model(placement.modelIndex);
       if (!model) continue;
-      const bounds = this.placementBounds(placement, loaded, model.bounds);
+      const bounds = this.placementBounds(placement, model.bounds);
       if (
         bounds.maximum[0] - bounds.minimum[0] > MAX_2D_STATIC_FOOTPRINT ||
         bounds.maximum[1] - bounds.minimum[1] > MAX_2D_STATIC_FOOTPRINT
@@ -1583,7 +1654,6 @@ export class SceneGeometryRenderer {
 
   private placementBounds(
     placement: IndexedPlacement,
-    loaded: LoadedChunk,
     bounds: Bounds3,
   ): Bounds3 {
     const cached = this.placementBoundsCache.get(placement);
@@ -1648,8 +1718,7 @@ export class SceneGeometryRenderer {
     };
   }
 
-  private evictOutside(retained: Set<string>): void {
-    const retainedModels = new Set<number>();
+  private evictOutside(retained: Set<string>, retainedModels = new Set<number>()): void {
     const retainedBaked = new Set<number>();
     for (const key of retained) {
       const loaded = this.chunks.get(key);

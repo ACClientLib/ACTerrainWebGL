@@ -37,7 +37,6 @@ export class SceneRenderer {
   private currentCullState: "none" | "front" | "back" | null = null;
   private currentSampler: "clamp" | "repeat" | null = null;
   private readonly tierCQueue: DepthBucketQueue<number> = createDepthBucketQueue(16);
-  private readonly tierCSubmissionOrder: number[] = [];
   private readonly contextLostHandler = (event: Event) => {
     event.preventDefault();
     invalidateSceneDrawState(this.gl);
@@ -292,20 +291,17 @@ export class SceneRenderer {
     view: SceneView,
   ): void {
     this.tierCQueue.clear();
-    this.tierCSubmissionOrder.length = 0;
     for (let index = 0; index < submissions.length; index++) {
       const submission = submissions[index];
       if (submission.key.renderClass !== "sourceOver") continue;
-      const orderIndex = this.tierCSubmissionOrder.length;
-      this.tierCSubmissionOrder.push(index);
-      this.tierCQueue.add(submission.depthBucket ?? 0, orderIndex);
+      this.tierCQueue.add(submission.depthBucket ?? 0, index);
     }
     this.tierCQueue.finish();
     for (let bucket = this.tierCQueue.bucketCount - 1; bucket >= 0; bucket--) {
       const start = this.tierCQueue.offsets[bucket];
       const end = this.tierCQueue.offsets[bucket + 1];
       for (let offset = start; offset < end; offset++) {
-        const submission = submissions[this.tierCSubmissionOrder[this.tierCQueue.values[offset]]];
+        const submission = submissions[this.tierCQueue.values[offset]];
         this.applyCullState(submission.key.cullState);
         this.applySampler(submission.key.sampler === "repeat" ? "repeat" : "clamp");
         submission.draw(view, "fallback");
@@ -350,16 +346,16 @@ export class SceneRenderer {
   }
 
   private attachOpaque(targets: SceneTargets): void {
-    const gl = this.gl;
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targets.opaque, 0);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, null, 0);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, targets.depth);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    this.attachColorTarget(targets, targets.opaque);
   }
 
   private attachComposition(targets: SceneTargets): void {
+    this.attachColorTarget(targets, targets.composition);
+  }
+
+  private attachColorTarget(targets: SceneTargets, color: WebGLTexture): void {
     const gl = this.gl;
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targets.composition, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, null, 0);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, targets.depth);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);

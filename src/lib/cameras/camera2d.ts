@@ -9,6 +9,7 @@ function isTouchDevice() {
 }
 
 export class Camera2D extends BaseCamera {
+  public DepthRange = 4096;
   private _zoom = 0.08;
   private _didPinch = false;
   private lastDistance: number = 0;
@@ -51,8 +52,8 @@ export class Camera2D extends BaseCamera {
       top: 0,
       right: this.canvas.width,
       bottom: this.canvas.height,
-      near: -4096,
-      far: 4096,
+      near: -this.DepthRange,
+      far: this.DepthRange,
     });
   }
 

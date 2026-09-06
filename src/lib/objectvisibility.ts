@@ -41,12 +41,12 @@ export function transformBounds(
   bounds: Bounds3,
   transform: (point: Vector3) => Vector3,
 ): Bounds3 {
-  let minimum = new Vector3(
+  const minimum = new Vector3(
     Number.POSITIVE_INFINITY,
     Number.POSITIVE_INFINITY,
     Number.POSITIVE_INFINITY,
   );
-  let maximum = new Vector3(
+  const maximum = new Vector3(
     Number.NEGATIVE_INFINITY,
     Number.NEGATIVE_INFINITY,
     Number.NEGATIVE_INFINITY,
@@ -61,8 +61,8 @@ export function transformBounds(
             z === 0 ? bounds.minimum[2] : bounds.maximum[2],
           ),
         );
-        minimum = minimum.clone().min(point);
-        maximum = maximum.clone().max(point);
+        minimum.min(point);
+        maximum.max(point);
       }
     }
   }

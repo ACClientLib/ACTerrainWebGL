@@ -1,7 +1,6 @@
 import "./style.css";
 import { TerrainRenderer } from "./lib/terrainrenderer";
-import { updateCameraRoute, parseRoute } from "./lib/router";
-import { CameraMode } from "./lib/cameras/cameramode";
+import { updateCameraRoute, parseRoute, cancelCameraRouteUpdate } from "./lib/router";
 import {
   loadDatasetCatalog,
   populateDatasetSelector,
@@ -9,6 +8,7 @@ import {
 } from "./lib/datasetcatalog";
 import { worldToMapCoordinates } from "./lib/coordinates";
 import { setupLocationsPanel } from "./lib/locationspanel";
+import { loadDungeonNames } from "./lib/dungeons";
 
 const canvas: HTMLCanvasElement = document.querySelector("#canvas")!;
 const loader = document.querySelector("#loader")!;
@@ -38,17 +38,49 @@ async function start(): Promise<void> {
     selection.server?.labelVersion ?? selection.server?.version,
   );
   populateDatasetSelector(selector, catalog, selection, () => renderer.shutdown());
-  if (selection.server) {
-    setupLocationsPanel(new URL(`v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/locations`, apiRoot).toString(), renderer);
+  window.addEventListener("pagehide", () => renderer.shutdown(), { once: true });
+  const dungeonNamesEndpoint = selection.server ? new URL(
+    `v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/dungeon-names`, apiRoot,
+  ).toString() : undefined;
+  if (dungeonNamesEndpoint) {
+    await loadDungeonNames(`${dungeonNamesEndpoint}/all`);
   }
+  setupLocationsPanel(renderer, selection.server
+    ? new URL(`v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/locations`, apiRoot).toString()
+    : undefined);
 
-  const hash = (window.location.hash || "").replace("#", "");
-  if (hash.length > 0) {
-    const route = parseRoute(hash);
-    if (route) {
-      renderer.restoreCameraRoute(route);
+  let restoringRoute = false;
+  let routeRequest = 0;
+  async function restoreHash(): Promise<void> {
+    const request = ++routeRequest;
+    const route = parseRoute(window.location.hash);
+    if (!route) {
+      renderer.cancelDungeonLoad();
+      restoringRoute = false;
+      return;
+    }
+    cancelCameraRouteUpdate();
+    restoringRoute = true;
+    try {
+      if (route.dungeon) {
+        await renderer.showDungeon(route.dungeon, route);
+      } else {
+        renderer.showWorld();
+        renderer.restoreCameraRoute(route);
+      }
+    } catch (error) {
+      if (request === routeRequest) {
+        document.querySelector<HTMLElement>("#locations-content [role=status]")!.textContent =
+          error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (request === routeRequest) {
+        restoringRoute = false;
+      }
     }
   }
+  await restoreHash();
+  window.addEventListener("hashchange", () => void restoreHash(), { signal: renderer.shutdownSignal });
 
   let previousFrameTime: number | null = null;
 
@@ -64,37 +96,23 @@ async function start(): Promise<void> {
     renderer.draw(dt);
 
     const position = worldToMapCoordinates(renderer.currentCamera.Position);
-    coordinates.textContent = `${Math.abs(position.NS).toFixed(2)}${position.NS >= 0 ? "N" : "S"}, ${Math.abs(position.EW).toFixed(2)}${position.EW >= 0 ? "E" : "W"}`;
+    coordinates.textContent = renderer.dungeonSelection ? renderer.dungeonCoordinateText : `${Math.abs(position.NS).toFixed(2)}${position.NS >= 0 ? "N" : "S"}, ${Math.abs(position.EW).toFixed(2)}${position.EW >= 0 ? "E" : "W"}`;
 
-    const camera = renderer.currentCamera;
-    if (renderer.currentCameraMode === CameraMode.Camera2D) {
-      updateCameraRoute({
-        mode: "2d",
-        position: camera.Position,
-        zoom: renderer.camera2D.Zoom,
-      });
-    } else {
-      updateCameraRoute({
-        mode: "3d",
-        position: camera.Position,
-        yaw: renderer.flyingCamera.Yaw,
-        pitch: renderer.flyingCamera.Pitch,
-        roll: renderer.flyingCamera.Roll,
-        fov: renderer.flyingCamera.FOV,
-      });
+    if (!restoringRoute) {
+      updateCameraRoute(renderer.cameraRoute);
     }
 
     animationFrameId = window.requestAnimationFrame(draw);
   }
 
   renderer.shutdownSignal.addEventListener("abort", () => {
+    cancelCameraRouteUpdate();
     selector.disabled = true;
     if (animationFrameId !== null) {
       window.cancelAnimationFrame(animationFrameId);
       animationFrameId = null;
     }
   }, { once: true });
-  window.addEventListener("pagehide", () => renderer.shutdown(), { once: true });
   window.addEventListener("pageshow", (event) => {
     if (event.persisted && renderer.isShutdown) {
       window.location.reload();

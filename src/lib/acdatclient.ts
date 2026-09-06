@@ -255,6 +255,7 @@ export class AcDatClient {
     resourceIndexUrl: string;
     resourcesUrl: string;
     terrainDataUrl: string | null;
+    dungeonsUrl?: string;
     cacheFootprintBytes: Record<string, number>;
     placementElevationOrigin: number;
     placementElevationScale: number;
@@ -479,6 +480,15 @@ export class AcDatClient {
         });
     }
     return this.terrainDataPromise;
+  }
+
+  async dungeon(landblock: number): Promise<import("./dungeons").DungeonData> {
+    await this.ensureReady();
+    if (!this.descriptor.dungeonsUrl) {
+      throw new Error("This dataset needs to be repacked with dungeon support.");
+    }
+    const response = await this.request(this.descriptor.dungeonsUrl.replace("{landblock}", landblock.toString(16).padStart(4, "0")));
+    return response.json();
   }
 
   async initialize(): Promise<void> {

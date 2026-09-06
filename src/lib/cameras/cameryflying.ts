@@ -1,4 +1,4 @@
-import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
+import { Matrix4, Vector3, Vector4, Vector2 } from "@math.gl/core";
 import { BaseCamera } from "./basecamera";
 import * as settings from "../../settings";
 
@@ -421,9 +421,63 @@ export class CameraFlying extends BaseCamera {
     }
   }
 
+  FitToPoints(points: readonly Vector3[], center: Vector3): void {
+    if (points.length === 0 || points.some(point => !point.every(Number.isFinite))) {
+      throw new Error("The dungeon has no finite geometry bounds to frame.");
+    }
+    this.MapProjectionBlend = 0;
+    this.SetRotation(-3 * Math.PI / 4, -Math.PI / 4, 0);
+    const backward = this.GetForward().negate();
+    let radius = 1;
+    for (const point of points) {
+      radius = Math.max(radius, point.clone().subtract(center).len());
+    }
+
+    const placeCamera = (distance: number): void => {
+      this.Position = center.clone().add(backward.clone().scale(distance));
+      this.LookAt(center);
+      this.Far = distance + radius + this._near * 2;
+    };
+    const fits = (distance: number): boolean => {
+      placeCamera(distance);
+      const transform = this.Transform;
+      for (const point of points) {
+        const clip = new Vector4(point.x, point.y, point.z, 1).transform(transform);
+        // Use the same homogeneous clip coordinates as the vertex shader.
+        // Positive W and the Z checks reject points behind the camera or clipped in depth.
+        if (!(clip.w > 0 && Math.abs(clip.x) <= clip.w * 0.9 &&
+            Math.abs(clip.y) <= clip.w * 0.9 && clip.z >= -clip.w && clip.z <= clip.w)) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    let nearDistance = 0;
+    let farDistance = radius + this._near;
+    let attempts = 0;
+    while (!fits(farDistance)) {
+      if (++attempts > 32) {
+        throw new Error("Unable to frame dungeon geometry in the current viewport.");
+      }
+      farDistance *= 2;
+    }
+    // Find the closest camera position for which every geometry bound remains visible.
+    for (let iteration = 0; iteration < 32; iteration++) {
+      const distance = (nearDistance + farDistance) / 2;
+      if (fits(distance)) {
+        farDistance = distance;
+      } else {
+        nearDistance = distance;
+      }
+    }
+    placeCamera(farDistance);
+    this.prepareFrame();
+  }
+
   LookAt(target: Vector3) {
     const direction = target.clone().subtract(this.Position).normalize();
-    this._yaw = Math.atan2(direction.x, direction.y); // Y-forward
+    this._yaw = Math.atan2(-direction.x, direction.y); // Positive Z rotation turns +Y toward -X.
     this._pitch = Math.asin(direction.z); // Z-up; negative pitch looks down
     this.updateVectors();
   }
