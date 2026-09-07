@@ -1,7 +1,7 @@
 import type { V3SceneChunkView, V3SceneModelView } from "./v3types";
 
 const MAGIC = 0x49534341;
-const VERSION = 17;
+import { SUPPORTED_FORMAT_VERSION as VERSION } from "../lib/formatcontract";
 const HEADER_SIZE = 40;
 const MODEL_SIZE = 40;
 const CHUNK_SIZE = 44;

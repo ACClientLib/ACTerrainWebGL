@@ -23,6 +23,8 @@ export interface SettingsData {
   directionY: number;
   directionZ: number;
   lightIntensity: number;
+  skyTimeOfDay: number;
+  skyGroupIndex: number;
   dataset: string | null;
   readonly renderScale: number;
 }
@@ -63,6 +65,8 @@ const defaults = {
   directionY: -0.15,
   directionZ: -1,
   lightIntensity: 1,
+  skyTimeOfDay: 0.5,
+  skyGroupIndex: 0,
   dataset: null as string | null,
 };
 

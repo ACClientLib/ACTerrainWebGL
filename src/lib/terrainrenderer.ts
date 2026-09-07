@@ -1,5 +1,6 @@
 import { DatObjectCache } from "./datobjectcache";
 import type { IndexedPlacement } from "./acdatclient";
+import type { AcDatClient } from "./acdatclient";
 import * as glhelpers from "./glhelpers";
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
 
@@ -29,6 +30,7 @@ import {
   TERRAIN_DATA_SIDE,
 } from "./worldgeometry";
 import { SceneRenderer } from "./scenerenderer";
+import { SkyboxRenderer } from "./skyboxrenderer";
 import { createSceneView, type SceneLighting, type SceneView } from "./sceneview";
 import type { SceneSubmission } from "./scenesubmission";
 import { LabelsClient } from "./labelsclient";
@@ -226,7 +228,12 @@ export class TerrainRenderer {
   private terrainColorData = new Float32Array(32 * 3);
   private terrainHeightTable = new Float32Array(256);
   private maxTerrainHeight = 0;
+  // The DAT client preloads the initial group before the first camera frame;
+  // start logically active so the first 2D frame releases it immediately.
+  private skyRequested = false;
+  private sceneSky: ReturnType<AcDatClient["getRegionSky"]> = null;
   readonly sceneRenderer: SceneRenderer;
+  readonly skyboxRenderer: SkyboxRenderer;
   sceneView!: SceneView;
 
   #dataTexture!: TerrainDataClient;
@@ -255,6 +262,9 @@ export class TerrainRenderer {
   private serverPickGeneration = 0;
   #restoredFlyingCameraRoute = false;
   #updateMoveSpeedControl: (() => void) | null = null;
+  #updateSkyControls: (() => void) | null = null;
+  #skyControlsInitialized = false;
+  #skyGroupRequest: number | null = null;
   #isShutdown = false;
   private readonly lifecycleController = new AbortController();
 
@@ -312,6 +322,7 @@ export class TerrainRenderer {
       datDescriptorPath,
       "dat",
     );
+    this.skyboxRenderer = new SkyboxRenderer(this.gl, this.#sceneGeometry.datClient, this.#sceneGeometry.meshOwner);
     this.#serverGeometry = serverDescriptorPath
       ? new SceneGeometryRenderer(this.gl, serverDescriptorPath, "server", serverId)
       : undefined;
@@ -362,6 +373,7 @@ export class TerrainRenderer {
     }
     this.#invalidateCallback = null;
     this.#labels?.shutdown();
+    this.skyboxRenderer.destroy();
     this.#sceneGeometry.shutdown();
     this.#serverGeometry?.shutdown();
     this.#dataTexture.shutdown();
@@ -481,6 +493,79 @@ export class TerrainRenderer {
     mobileLookInvertY.classList.add("mobile-only-control");
     if (isTouchDevice()) document.documentElement.classList.add("touch-device");
     addRange("Field of View", () => settings.data.fov, (v) => { settings.data.fov = v; }, 30, 120, 1);
+    const skyTime = document.createElement("label");
+    skyTime.className = "control-row range-row";
+    skyTime.innerHTML = `<span>Sky Time</span><input type="range" min="0" max="1" step="0.001"><output></output>`;
+    const skyTimeInput = skyTime.querySelector<HTMLInputElement>("input")!;
+    const skyTimeOutput = skyTime.querySelector<HTMLOutputElement>("output")!;
+    const skyGroup = document.createElement("label");
+    skyGroup.className = "control-row";
+    skyGroup.innerHTML = "<span>Sky Group</span><select></select>";
+    const skyGroupSelect = skyGroup.querySelector<HTMLSelectElement>("select")!;
+    const updateSkyControls = () => {
+      const descriptor = this.#sceneGeometry.datClient.getRegionSkyDescriptor();
+      const available = descriptor !== null;
+      const landscape = available && !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying;
+      skyTime.hidden = !available;
+      skyGroup.hidden = !available;
+      skyTimeInput.disabled = !landscape;
+      skyGroupSelect.disabled = !landscape || this.#skyGroupRequest !== null;
+      if (!available) return;
+      if (skyGroupSelect.options.length !== descriptor.dayGroups.length) {
+        skyGroupSelect.replaceChildren(...descriptor.dayGroups.map((group, index) => {
+          const option = document.createElement("option");
+          option.value = String(index);
+          option.textContent = group.name || `Group ${index}`;
+          return option;
+        }));
+      }
+      if (!this.#skyControlsInitialized) {
+        this.#skyControlsInitialized = true;
+        const savedGroup = Number.isFinite(settings.data.skyGroupIndex) ? Math.trunc(settings.data.skyGroupIndex) : 0;
+        const requestedGroup = Math.max(0, Math.min(descriptor.dayGroups.length - 1, savedGroup));
+        const requestedTime = Number.isFinite(settings.data.skyTimeOfDay) ? settings.data.skyTimeOfDay : 0.5;
+        settings.data.skyGroupIndex = requestedGroup;
+        settings.data.skyTimeOfDay = ((requestedTime % 1) + 1) % 1;
+        this.#sceneGeometry.datClient.setSkyTime(settings.data.skyTimeOfDay);
+        if (requestedGroup !== this.#sceneGeometry.datClient.getSkyGroupIndex()) {
+          this.#skyGroupRequest = requestedGroup;
+          void this.#sceneGeometry.datClient.setSkyGroup(requestedGroup).then(() => {
+            if (this.#skyGroupRequest === requestedGroup) this.#skyGroupRequest = null;
+            this.invalidate("resource publication");
+          }).catch((error) => {
+            if (this.#skyGroupRequest === requestedGroup) this.#skyGroupRequest = null;
+            this.throwError(`Unable to select sky group: ${error}`);
+          });
+        }
+      }
+      skyTimeInput.value = String(this.#sceneGeometry.datClient.getSkyTime());
+      const activeTime = this.#sceneGeometry.datClient.getSkyTime();
+      const period = descriptor.timesOfDay.reduce((selected, candidate) => candidate.start <= activeTime ? candidate : selected, descriptor.timesOfDay[descriptor.timesOfDay.length - 1]);
+      skyTimeOutput.value = period ? `${period.name} (${Math.round(activeTime * 100)}%)` : `${Math.round(activeTime * 100)}%`;
+      if (this.#skyGroupRequest === null) skyGroupSelect.value = String(this.#sceneGeometry.datClient.getSkyGroupIndex());
+    };
+    this.#updateSkyControls = updateSkyControls;
+    skyTimeInput.addEventListener("input", () => {
+      const value = Number(skyTimeInput.value);
+      this.#sceneGeometry.datClient.setSkyTime(value);
+      settings.data.skyTimeOfDay = value;
+      updateSkyControls();
+      this.invalidate("input");
+    }, { signal: this.shutdownSignal });
+    skyGroupSelect.addEventListener("change", () => {
+      const groupIndex = Number(skyGroupSelect.value);
+      settings.data.skyGroupIndex = groupIndex;
+      this.#skyGroupRequest = groupIndex;
+      void this.#sceneGeometry.datClient.setSkyGroup(groupIndex).then(() => {
+        if (this.#skyGroupRequest === groupIndex) this.#skyGroupRequest = null;
+        this.invalidate("resource publication");
+      }).catch((error) => {
+        if (this.#skyGroupRequest === groupIndex) this.#skyGroupRequest = null;
+        this.throwError(`Unable to select sky group: ${error}`);
+      });
+    }, { signal: this.shutdownSignal });
+    this.#updateSkyControls();
+    section.append(skyTime, skyGroup);
     addActionButton("Clear Data Caches & Reload", async () => {
       this.shutdown(true);
       try {
@@ -511,6 +596,7 @@ export class TerrainRenderer {
       this.#applySettings();
       textureSelect.value = settings.data.textureProfile;
       this.#updateMoveSpeedControl?.();
+      this.#updateSkyControls?.();
       for (const update of updateControls) update();
     });
     const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
@@ -1426,6 +1512,19 @@ export class TerrainRenderer {
   update(dt: number) {
     if (this.#isShutdown) return;
     this.#invalidated = false;
+    const skyEnabled = !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying;
+    this.#updateSkyControls?.();
+    if (skyEnabled !== this.skyRequested || skyEnabled !== this.#sceneGeometry.datClient.isSkyActive) {
+      this.skyRequested = skyEnabled;
+      if (!skyEnabled) {
+        this.skyboxRenderer.clear();
+      }
+      void this.#sceneGeometry.datClient.setSkyActive(skyEnabled).then(() => {
+        if (!this.#isShutdown) this.invalidate("resource publication");
+      }).catch((error) => {
+        if (!this.#isShutdown) this.throwError(`Unable to activate sky: ${error}`);
+      });
+    }
 
     // Update current camera's viewport size
     this.currentCamera.ViewportSize.x = this.canvas.width;
@@ -1441,26 +1540,13 @@ export class TerrainRenderer {
       this.#updateFlyingFarPlane();
     }
     this.currentCamera.prepareFrame();
+    const sky = this.skyboxRenderer.select(skyEnabled ? this.#sceneGeometry.datClient.getRegionSky() : null);
+    this.sceneSky = sky;
     this.sceneView = createSceneView(
       this.currentCamera,
       this.currentCameraMode,
-      {
-        color: [29 / 255, 34 / 255, 60 / 255],
-        start:
-          this.currentCameraMode === CameraMode.Flying
-            ? Math.max(
-                0,
-                settings.data.distanceLandblocks * LAND_BLOCK_SIZE -
-                  LAND_BLOCK_SIZE,
-              )
-            : 0,
-        end:
-          this.currentCameraMode === CameraMode.Flying
-            ? settings.data.distanceLandblocks * LAND_BLOCK_SIZE
-            : 0,
-        enabled: !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying,
-      },
-      this.#getLighting(),
+      this.#getFog(sky),
+      this.#getLighting(sky),
     );
 
     this.sceneRenderer?.resize(this.canvas.width, this.canvas.height);
@@ -1471,7 +1557,7 @@ export class TerrainRenderer {
     }
   }
 
-  #getLighting() {
+  #getLighting(sky: ReturnType<AcDatClient["getRegionSky"]>): SceneLighting {
     const { directionX, directionY, directionZ, lightIntensity: intensity } =
       settings.data;
     const length = Math.hypot(directionX, directionY, directionZ);
@@ -1483,18 +1569,17 @@ export class TerrainRenderer {
             number,
           ])
         : ([0, 0, 1] as [number, number, number]);
-    let regionLighting: SceneLighting;
-    try {
-      regionLighting = this.#sceneGeometry.datClient.getRegionLighting();
-    } catch {
-      regionLighting = {
-        direction: [0, 0, 1] as [number, number, number],
-        sunlight: [1, 1, 1] as [number, number, number],
-        ambient: [0.25, 0.25, 0.25] as [number, number, number],
-      };
-    }
+    const regionLighting = sky?.lighting ?? {
+      direction: [0, 0, 1] as [number, number, number],
+      sunlight: [1, 1, 1] as [number, number, number],
+      ambient: [0.25, 0.25, 0.25] as [number, number, number],
+    };
     return {
-      direction,
+      // DAT supplies the vector toward the light; shaders consume the
+      // direction the light travels and negate it for the surface vector.
+      direction: sky
+        ? [-regionLighting.direction[0], regionLighting.direction[1], -regionLighting.direction[2]] as [number, number, number]
+        : direction,
       sunlight: regionLighting.sunlight.map((value) => value * intensity) as [
         number,
         number,
@@ -1502,6 +1587,24 @@ export class TerrainRenderer {
       ],
       ambient: regionLighting.ambient,
     };
+  }
+
+  #getFog(sky: ReturnType<AcDatClient["getRegionSky"]>) {
+    if (!this.dungeonSelection && this.currentCameraMode === CameraMode.Flying) {
+      const distanceEnd = settings.data.distanceLandblocks * LAND_BLOCK_SIZE;
+      const distanceStart = Math.max(0, distanceEnd - LAND_BLOCK_SIZE);
+      if (sky?.worldFog.enabled) {
+        const start = Math.min(distanceStart, sky.worldFog.min);
+        return {
+          color: sky.worldFog.color,
+          start,
+          end: Math.max(start + 0.001, Math.min(distanceEnd, sky.worldFog.max)),
+          enabled: true,
+        };
+      }
+      return { color: [29 / 255, 34 / 255, 60 / 255] as [number, number, number], start: distanceStart, end: distanceEnd, enabled: true };
+    }
+    return { color: [29 / 255, 34 / 255, 60 / 255] as [number, number, number], start: 0, end: 0, enabled: false };
   }
 
   #ensureTerrainInstanceCapacity(count: number) {
@@ -1644,9 +1747,6 @@ export class TerrainRenderer {
       );
       this.#hasTerrainTextureDirty = false;
     }
-    const fogEnabled = this.currentCameraMode === CameraMode.Flying;
-    const fogEnd = settings.data.distanceLandblocks * LAND_BLOCK_SIZE;
-    const fogStart = Math.max(0, fogEnd - LAND_BLOCK_SIZE);
     this.gl.uniform3f(
       this.gl.getUniformLocation(this.program!, "cameraPosition"),
       this.currentCamera.Position.x,
@@ -1655,21 +1755,19 @@ export class TerrainRenderer {
     );
     this.gl.uniform3f(
       this.gl.getUniformLocation(this.program!, "fogColor"),
-      29 / 255,
-      34 / 255,
-      60 / 255,
+      ...this.sceneView.fog.color,
     );
     this.gl.uniform1f(
       this.gl.getUniformLocation(this.program!, "fogStart"),
-      fogStart,
+      this.sceneView.fog.start,
     );
     this.gl.uniform1f(
       this.gl.getUniformLocation(this.program!, "fogEnd"),
-      fogEnd,
+      this.sceneView.fog.end,
     );
     this.gl.uniform1i(
       this.gl.getUniformLocation(this.program!, "fogEnabled"),
-      fogEnabled ? 1 : 0,
+      this.sceneView.fog.enabled ? 1 : 0,
     );
     this.gl.uniform3f(
       this.gl.getUniformLocation(this.program!, "lightDirection"),
@@ -1768,6 +1866,8 @@ export class TerrainRenderer {
 
     const submissions = this.#submissions;
     submissions.length = 0;
+    const sky = this.sceneSky;
+    if (sky && this.currentCameraMode === CameraMode.Flying) this.skyboxRenderer.submit(sky, submission => submissions.push(submission));
     this.#sceneGeometry.render(
       this.currentCamera,
       this.currentCameraMode,
@@ -1776,6 +1876,9 @@ export class TerrainRenderer {
         ? settings.data.distanceLandblocks
         : undefined,
       (submission) => submissions.push(submission),
+      sky && this.currentCameraMode === CameraMode.Flying
+        ? this.skyboxRenderer.particles(sky, [this.currentCamera.Position.x, this.currentCamera.Position.y, this.currentCamera.Position.z])
+        : [],
     );
     this.#serverGeometry?.render(
       this.currentCamera,

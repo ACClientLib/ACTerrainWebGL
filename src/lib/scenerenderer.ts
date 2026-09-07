@@ -153,7 +153,7 @@ export class SceneRenderer {
     if (!targets) return;
     const gl = this.gl;
     invalidateSceneDrawState(gl);
-    const ordered = [...submissions].sort((a, b) => this.compareKeys(a.key, b.key));
+    const ordered = submissions.filter(submission => !submission.skyPass).sort((a, b) => this.compareKeys(a.key, b.key));
     this.currentCullState = null;
     this.currentSampler = null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, targets.framebuffer);
@@ -164,6 +164,7 @@ export class SceneRenderer {
     gl.disable(gl.BLEND);
     gl.clearColor(view.fog.color[0], view.fog.color[1], view.fog.color[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    this.drawSky(submissions, "background", view);
     this.drawSubmissions(ordered, "opaque", view, "color");
     this.drawSubmissions(ordered, "masked", view, "color");
     // Foliage textures commonly contain opaque interiors with antialiased
@@ -179,6 +180,7 @@ export class SceneRenderer {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
     this.drawSubmissions(ordered, "additive", view, "additive");
+    this.drawSky(submissions, "foreground", view);
     gl.disable(gl.BLEND);
     gl.depthMask(true);
     this.present(targets);
@@ -202,6 +204,30 @@ export class SceneRenderer {
     this.repeatSampler = undefined;
   }
 
+  private drawSky(submissions: readonly SceneSubmission[], skyPass: "background" | "foreground", view: SceneView): void {
+    const gl = this.gl;
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    const sky = submissions.filter(submission => submission.skyPass === skyPass)
+      .sort((a, b) => (a.skyObjectIndex ?? 0) - (b.skyObjectIndex ?? 0));
+    for (const submission of sky) {
+      const additive = submission.key.renderClass === "additive";
+      gl.enable(gl.BLEND);
+      gl.blendFunc(additive && submission.key.programVariant === "particle" ? gl.ONE : gl.SRC_ALPHA,
+        additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+      this.applyCullState(submission.key.cullState);
+      this.applySampler(submission.key.sampler === "repeat" ? "repeat" : "clamp");
+      submission.draw(view, additive ? "additive" : "fallback");
+    }
+    invalidateSceneDrawState(gl);
+    this.currentCullState = null;
+    this.currentSampler = null;
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+  }
+
   private drawSubmissions(
     submissions: readonly SceneSubmission[],
     renderClass: SceneSubmission["key"]["renderClass"],
@@ -219,7 +245,7 @@ export class SceneRenderer {
   }
 
   private compareKeys(a: SceneSubmission["key"], b: SceneSubmission["key"]): number {
-    return (a.programVariant === "terrain" ? -1 : b.programVariant === "terrain" ? 1 : 0) ||
+    return (Number(b.programVariant === "terrain") - Number(a.programVariant === "terrain")) ||
       a.programVariant.localeCompare(b.programVariant) ||
       a.cullState.localeCompare(b.cullState) ||
       a.meshBatch - b.meshBatch ||

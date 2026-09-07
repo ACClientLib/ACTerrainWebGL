@@ -95,15 +95,15 @@ export function intersectsFrustum(
 
 export function intersectsRectangle(
   bounds: Bounds3,
-  minimum: Vector3,
-  maximum: Vector3,
+  minimum: ArrayLike<number>,
+  maximum: ArrayLike<number>,
 ): boolean {
   return (
-    bounds.maximum[0] >= minimum.x &&
-    bounds.minimum[0] <= maximum.x &&
-    bounds.maximum[1] >= minimum.y &&
-    bounds.minimum[1] <= maximum.y &&
-    bounds.maximum[2] >= minimum.z &&
-    bounds.minimum[2] <= maximum.z
+    bounds.maximum[0] >= minimum[0] &&
+    bounds.minimum[0] <= maximum[0] &&
+    bounds.maximum[1] >= minimum[1] &&
+    bounds.minimum[1] <= maximum[1] &&
+    bounds.maximum[2] >= minimum[2] &&
+    bounds.minimum[2] <= maximum[2]
   );
 }

@@ -1,4 +1,4 @@
-export const SUPPORTED_FORMAT_VERSION = 17;
+export const SUPPORTED_FORMAT_VERSION = 18;
 
 export const RESOURCE_KIND = {
   mesh: 1,

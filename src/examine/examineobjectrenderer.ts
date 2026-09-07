@@ -5,7 +5,7 @@ import {
 import { ExamineObjectLoader } from "./examineobjectloader";
 import { createExamineCamera, type ExamineCamera } from "./examinecamera";
 import { ExamineFragmentShader, ExamineVertexShader } from "./examineshaders";
-import type { ExamineWindowState } from "./examinepanel";
+import type { ExamineWindowState } from "./examinecreaturepanel";
 
 type RenderBatch = LoadedModelBatch & {
   vertexBuffer: WebGLBuffer;
@@ -346,3 +346,4 @@ export class ExamineObjectRenderer {
     ];
   }
 }
+

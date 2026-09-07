@@ -64,6 +64,19 @@ interface ParticleDrawGroup {
   material: ObjectMaterial;
   data: number[];
   offset: number;
+  skyPass?: "background" | "foreground";
+  skyObjectIndex?: number;
+}
+export interface SkyParticleInput {
+  emitting: boolean;
+  skyPass: "background" | "foreground";
+  objectIndex: number;
+  key: string;
+  material: ObjectMaterial;
+  particles: import("./acdatclient").ParticleEmitterDescriptor[];
+  origin: [number, number, number];
+  rotation: [number, number, number, number];
+  scale: [number, number, number];
 }
 interface LoadedChunk {
   x: number;
@@ -138,7 +151,7 @@ export class SceneGeometryRenderer {
     // frames contain no submissions while every model is still queued.
     await Promise.all(modelIndexes.map(async (modelIndex) => {
       const mesh = await this.dats.mesh(modelIndex);
-      this.meshes.set(modelIndex, this.uploadMesh(modelIndex, mesh));
+      this.meshes.set(modelIndex, this.uploadMesh(this.dats.model(modelIndex)!.meshResourceId, mesh));
     }));
   }
 
@@ -188,15 +201,15 @@ export class SceneGeometryRenderer {
 
   loadDistance = 8;
 
-  private program: WebGLProgram | null;
-  private instanceBuffer: WebGLBuffer | null;
-  private particleBuffer: WebGLBuffer | null;
-  private particleQuadBuffer: WebGLBuffer | null;
-  private particleVao: WebGLVertexArrayObject | null;
-  private particleProgram: WebGLProgram | null;
+  private program: WebGLProgram | null = null;
+  private instanceBuffer: WebGLBuffer | null = null;
+  private particleBuffer: WebGLBuffer | null = null;
+  private particleQuadBuffer: WebGLBuffer | null = null;
+  private particleVao: WebGLVertexArrayObject | null = null;
+  private particleProgram: WebGLProgram | null = null;
   private particleUploadData = new Float32Array(0);
   private instanceUploadData = new Float32Array(0);
-  private uniforms: {
+  private uniforms!: {
     xWorld: WebGLUniformLocation | null;
     acYOrigin: WebGLUniformLocation | null;
     cameraMode: WebGLUniformLocation | null;
@@ -216,7 +229,7 @@ export class SceneGeometryRenderer {
     sunlightColor: WebGLUniformLocation | null;
     ambientColor: WebGLUniformLocation | null;
   };
-  private particleUniforms: {
+  private particleUniforms!: {
     xWorld: WebGLUniformLocation | null;
     acYOrigin: WebGLUniformLocation | null;
     texture: WebGLUniformLocation | null;
@@ -261,7 +274,7 @@ export class SceneGeometryRenderer {
   private twoDPreparedVisibleKey = "";
   private twoDPreparedSubmissions: SceneSubmission[] = [];
   private twoDPreparedDirty = true;
-  private readonly meshOwner: LegacyMeshGpuOwner;
+  readonly meshOwner: LegacyMeshGpuOwner;
   private readonly commonGroups = new Map<string, { modelIndex: number; parity: boolean; instanceCount: number; offset: number }>();
   private readonly contextLostHandler = (event: Event) => {
     event.preventDefault();
@@ -295,133 +308,7 @@ export class SceneGeometryRenderer {
     serverId?: string,
   ) {
     this.meshOwner = new LegacyMeshGpuOwner(gl);
-    const vertex = glhelpers.createShader(
-      gl,
-      gl.VERTEX_SHADER,
-      Building3DVertSource,
-    );
-    const fragment = glhelpers.createShader(
-      gl,
-      gl.FRAGMENT_SHADER,
-      Building3DFragSource,
-    );
-    this.program =
-      vertex && fragment ? glhelpers.createProgram(gl, vertex, fragment) : null;
-    this.instanceBuffer = gl.createBuffer();
-    this.particleBuffer = gl.createBuffer();
-    const particleVertex = glhelpers.createShader(
-      gl,
-      gl.VERTEX_SHADER,
-      ParticleVertSource,
-    );
-    const particleFragment = glhelpers.createShader(
-      gl,
-      gl.FRAGMENT_SHADER,
-      ParticleFragSource,
-    );
-    this.particleProgram =
-      particleVertex && particleFragment
-        ? glhelpers.createProgram(gl, particleVertex, particleFragment)
-        : null;
-    this.particleVao = gl.createVertexArray();
-    this.particleQuadBuffer = gl.createBuffer();
-    if (this.particleQuadBuffer) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.particleQuadBuffer);
-      gl.bufferData(
-        gl.ARRAY_BUFFER,
-        new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]),
-        gl.STATIC_DRAW,
-      );
-    }
-    this.configureParticleVao();
-    this.particleUniforms = {
-      acYOrigin: this.particleProgram ? gl.getUniformLocation(this.particleProgram, "acYOrigin") : null,
-      xWorld: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "xWorld")
-        : null,
-      texture: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "particleTexture")
-        : null,
-      cameraRight: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "cameraRight")
-        : null,
-      cameraUp: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "cameraUp")
-        : null,
-      opacity: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "materialOpacity")
-        : null,
-      alphaMode: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "alphaMode")
-        : null,
-      alphaCutoff: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "alphaCutoff")
-        : null,
-      renderPass: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "renderPass")
-        : null,
-      cameraPosition: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "cameraPosition")
-        : null,
-      fogColor: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "fogColor")
-        : null,
-      fogStart: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "fogStart")
-        : null,
-      fogEnd: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "fogEnd")
-        : null,
-      fogEnabled: this.particleProgram
-        ? gl.getUniformLocation(this.particleProgram, "fogEnabled")
-        : null,
-    };
-    this.uniforms = {
-      acYOrigin: this.program ? gl.getUniformLocation(this.program, "acYOrigin") : null,
-      xWorld: this.program
-        ? gl.getUniformLocation(this.program, "xWorld")
-        : null,
-      cameraMode: this.program
-        ? gl.getUniformLocation(this.program, "cameraMode")
-        : null,
-      texture: this.program
-        ? gl.getUniformLocation(this.program, "buildingTexture")
-        : null,
-      diffuse: this.program
-        ? gl.getUniformLocation(this.program, "diffuseAmount")
-        : null,
-      luminosity: this.program
-        ? gl.getUniformLocation(this.program, "luminosity")
-        : null,
-      opacity: this.program
-        ? gl.getUniformLocation(this.program, "opacity")
-        : null,
-      alphaMode: this.program
-        ? gl.getUniformLocation(this.program, "alphaMode")
-        : null,
-      alphaCutoff: this.program ? gl.getUniformLocation(this.program, "alphaCutoff") : null,
-      renderPass: this.program
-        ? gl.getUniformLocation(this.program, "renderPass")
-        : null,
-      cameraPosition: this.program
-        ? gl.getUniformLocation(this.program, "cameraPosition")
-        : null,
-      fogColor: this.program
-        ? gl.getUniformLocation(this.program, "fogColor")
-        : null,
-      fogStart: this.program
-        ? gl.getUniformLocation(this.program, "fogStart")
-        : null,
-      fogEnd: this.program
-        ? gl.getUniformLocation(this.program, "fogEnd")
-        : null,
-      fogEnabled: this.program
-        ? gl.getUniformLocation(this.program, "fogEnabled")
-        : null,
-      lightDirection: this.program ? gl.getUniformLocation(this.program, "lightDirection") : null,
-      sunlightColor: this.program ? gl.getUniformLocation(this.program, "sunlightColor") : null,
-      ambientColor: this.program ? gl.getUniformLocation(this.program, "ambientColor") : null,
-    };
+    this.createProducerResources();
     this.dats = new AcDatClient(gl, undefined, descriptorPath, cacheNamespace, serverId);
     gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
     gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
@@ -739,6 +626,7 @@ export class SceneGeometryRenderer {
     minimumZoom: number,
     maximumDistanceLandblocks: number | undefined,
     submissions: SceneSubmissionSink,
+    skyParticles: readonly SkyParticleInput[] = [],
   ): void {
     this.meshOwner.beginFrame();
     this.dats.beginFrame();
@@ -785,7 +673,7 @@ export class SceneGeometryRenderer {
       if (!loaded) continue;
       if (
         mode !== CameraMode.Camera2D &&
-        !this.chunkVisible(loaded, camera, mode)
+        !this.chunkVisible(loaded, mode)
       )
         continue;
       this.diagnostics.visibleChunks++;
@@ -801,7 +689,7 @@ export class SceneGeometryRenderer {
       }
       const placements = this.dats.placementsForChunk(loaded.chunk);
       for (const placement of placements) {
-        if (!this.placementVisible(placement, loaded, camera, mode))
+        if (!this.placementVisible(placement, mode))
           continue;
         visible.push(placement);
         if (placement.category === BUILDINGS) visibleBuildings++;
@@ -833,7 +721,7 @@ export class SceneGeometryRenderer {
         total + (this.meshes.get(items)?.batches.length ?? 0),
       0,
     );
-    this.prepareCommonSubmissions(camera, mode, groups, visibleBlocks, submissions);
+    this.prepareCommonSubmissions(camera, mode, groups, visibleBlocks, submissions, skyParticles);
     const retainedKeys = [...visibleBlocks, ...preloadBlocks]
       .map(([x, y]) => `${x},${y}`)
       .sort();
@@ -900,6 +788,7 @@ export class SceneGeometryRenderer {
     groups: Map<string, SceneGroup>,
     visibleBlocks: [number, number][],
     submit: SceneSubmissionSink,
+    skyParticles: readonly SkyParticleInput[] = [],
   ): void {
     const now = performance.now() * 0.001;
     const deltaTime = this.particleLastFrameTime === 0 ? 1 / 60 : Math.max(0, now - this.particleLastFrameTime);
@@ -999,6 +888,12 @@ export class SceneGeometryRenderer {
     );
     requiredFloats = bakedResult.offset;
     particleInstancesRemaining = bakedResult.particleInstancesRemaining;
+    const skyGroups: ParticleDrawGroup[] = [];
+    for (const input of skyParticles) {
+      const group: ParticleDrawGroup = { material: input.material, data: [], offset: 0, skyPass: input.skyPass, skyObjectIndex: input.objectIndex };
+      skyGroups.push(group);
+      particleInstancesRemaining -= this.appendParticleInstances(group.data, input.particles, input.origin[0], this.acYOrigin - input.origin[1], input.origin[2], input.rotation, input.scale, input.key, particleInstancesRemaining, false, input.emitting);
+    }
     if (requiredFloats > 0) {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
       this.gl.bufferData(this.gl.ARRAY_BUFFER, this.instanceUploadData.subarray(0, requiredFloats), this.gl.DYNAMIC_DRAW);
@@ -1013,20 +908,28 @@ export class SceneGeometryRenderer {
       group.offset = particleFloats;
       particleFloats += group.data.length;
     }
+    for (const group of skyGroups) {
+      group.offset = particleFloats;
+      particleFloats += group.data.length;
+    }
+    const particleDrawGroups = [...this.particleGroups.values(), ...skyGroups];
     if (particleFloats > 0 && this.particleBuffer) {
       if (this.particleUploadData.length < particleFloats) {
         this.particleUploadData = new Float32Array(Math.max(particleFloats, this.particleUploadData.length * 2, PARTICLE_INSTANCE_FLOATS * 64));
       }
-      for (const group of this.particleGroups.values()) {
+      for (const group of particleDrawGroups) {
         this.particleUploadData.set(group.data, group.offset);
       }
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.particleBuffer);
       this.gl.bufferData(this.gl.ARRAY_BUFFER, this.particleUploadData.subarray(0, particleFloats), this.gl.DYNAMIC_DRAW);
     }
-    for (const [material, group] of this.particleGroups) {
+    for (const group of particleDrawGroups) {
+      const material = group.material;
       if (group.data.length === 0) continue;
       const renderClass = material.alphaMode === "additive" ? "additive" : material.alphaMode === "cutout" ? "masked" : material.alphaMode === "blended" ? "sourceOver" : "opaque";
       preparedSubmit({
+        skyPass: group.skyPass,
+        skyObjectIndex: group.skyObjectIndex,
         key: { renderClass, programVariant: "particle", cullState: "none", meshBatch: -1, material: material.indexedMaterialResourceId ?? -1, sampler: "clamp", parity: false },
         instanceCount: group.data.length / PARTICLE_INSTANCE_FLOATS,
         draw: (view, pass) => this.drawCommonParticle(view, group, pass),
@@ -1136,7 +1039,7 @@ export class SceneGeometryRenderer {
     const groups = new Map<number, { mesh: GpuMesh; items: { placement: IndexedPlacement; x: number; y: number }[]; offset: number }>();
     for (const [x, y] of visibleBlocks) {
       const loaded = this.chunks.get(`${x},${y}`);
-      if (!loaded || (mode !== CameraMode.Camera2D && !this.chunkVisible(loaded, camera, mode))) continue;
+      if (!loaded || (mode !== CameraMode.Camera2D && !this.chunkVisible(loaded, mode))) continue;
       for (const baked of loaded.chunk.bakedMeshes) {
         const mesh = this.bakedMeshes.get(baked.resourceId);
         if (mesh === undefined) { this.requestBakedMesh(baked.resourceId); continue; }
@@ -1226,6 +1129,9 @@ export class SceneGeometryRenderer {
   private drawCommonParticle(view: SceneView, group: ParticleDrawGroup, pass: ScenePass): void {
     if (!this.particleBuffer || !this.particleProgram || !this.particleVao || !this.particleQuadBuffer) return;
     const gl = this.gl;
+    if (group.skyPass) {
+      invalidateSceneDrawState(gl);
+    }
     const state = getSceneDrawState(gl);
     if (!state.valid || state.program !== this.particleProgram) {
       state.valid = true;
@@ -1246,7 +1152,7 @@ export class SceneGeometryRenderer {
       gl.uniform3f(this.particleUniforms.fogColor, ...view.fog.color);
       gl.uniform1f(this.particleUniforms.fogStart, view.fog.start);
       gl.uniform1f(this.particleUniforms.fogEnd, view.fog.end);
-      gl.uniform1i(this.particleUniforms.fogEnabled, view.fog.enabled ? 1 : 0);
+      gl.uniform1i(this.particleUniforms.fogEnabled, !group.skyPass && view.fog.enabled ? 1 : 0);
       gl.uniform1i(this.particleUniforms.texture, BUILDING_TEXTURE_UNIT);
       gl.uniform1i(this.particleUniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : 0);
       gl.activeTexture(gl.TEXTURE0 + BUILDING_TEXTURE_UNIT);
@@ -1343,7 +1249,7 @@ export class SceneGeometryRenderer {
         if (generation === this.cacheGeneration) {
           this.meshes.set(
             modelIndex,
-            this.uploadMesh(modelIndex, mesh),
+            this.uploadMesh(this.dats.model(modelIndex)!.meshResourceId, mesh),
           );
           this.twoDPreparedDirty = true;
         }
@@ -1380,7 +1286,7 @@ export class SceneGeometryRenderer {
         if (generation === this.cacheGeneration) {
           this.bakedMeshes.set(
             resourceId,
-            this.uploadMesh(0x40000000 | resourceId, mesh),
+            this.uploadMesh(resourceId, mesh),
           );
           this.twoDPreparedDirty = true;
         }
@@ -1463,6 +1369,7 @@ export class SceneGeometryRenderer {
     simulationKey: string,
     maxInstances: number,
     freeze: boolean,
+    emitting = true,
   ): number {
     if (maxInstances <= 0) return 0;
     let appended = 0;
@@ -1493,6 +1400,7 @@ export class SceneGeometryRenderer {
         rotation,
         scale,
         maxInstances - appended,
+        emitting,
       );
       const frozen = freeze ? [] : null;
       for (const instance of instances) {
@@ -1555,8 +1463,6 @@ export class SceneGeometryRenderer {
 
   private placementVisible(
     placement: IndexedPlacement,
-    loaded: LoadedChunk,
-    camera: BaseCamera,
     mode: CameraMode,
   ): boolean {
     const model = this.dats.model(placement.modelIndex);
@@ -1573,8 +1479,8 @@ export class SceneGeometryRenderer {
     return this.camera2DVisibleBounds
       ? intersectsRectangle(
           bounds,
-          new Vector3(...this.camera2DVisibleBounds.minimum),
-          new Vector3(...this.camera2DVisibleBounds.maximum),
+          this.camera2DVisibleBounds.minimum,
+          this.camera2DVisibleBounds.maximum,
         )
       : true;
   }
@@ -1762,7 +1668,18 @@ export class SceneGeometryRenderer {
     camera: BaseCamera,
   ): [number, number][] {
     if (visible.length === 0) return [];
-    const keys = new Set(visible.map(([x, y]) => `${x},${y}`));
+    const keys = new Set<number>();
+    let minX = MAX_LAND_BLOCK_INDEX;
+    let maxX = 0;
+    let minY = MAX_LAND_BLOCK_INDEX;
+    let maxY = 0;
+    for (const [x, y] of visible) {
+      keys.add(x * (MAX_LAND_BLOCK_INDEX + 1) + y);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
     const result: [number, number][] = [];
     const distance = 1;
     const position = camera.Position;
@@ -1771,19 +1688,13 @@ export class SceneGeometryRenderer {
       ? position.clone().subtract(previous)
       : new Vector3(0, 0, 0);
     this.previousCameraPosition = position.clone();
-    const minX = Math.max(0, Math.min(...visible.map(([x]) => x)) - distance);
-    const maxX = Math.min(
-      MAX_LAND_BLOCK_INDEX,
-      Math.max(...visible.map(([x]) => x)) + distance,
-    );
-    const minY = Math.max(0, Math.min(...visible.map(([, y]) => y)) - distance);
-    const maxY = Math.min(
-      MAX_LAND_BLOCK_INDEX,
-      Math.max(...visible.map(([, y]) => y)) + distance,
-    );
+    minX = Math.max(0, minX - distance);
+    maxX = Math.min(MAX_LAND_BLOCK_INDEX, maxX + distance);
+    minY = Math.max(0, minY - distance);
+    maxY = Math.min(MAX_LAND_BLOCK_INDEX, maxY + distance);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
-        if (!keys.has(`${x},${y}`)) {
+        if (!keys.has(x * (MAX_LAND_BLOCK_INDEX + 1) + y)) {
           result.push([x, y]);
         }
       }
@@ -1867,15 +1778,14 @@ export class SceneGeometryRenderer {
 
   private chunkVisible(
     loaded: LoadedChunk,
-    camera: BaseCamera,
     mode: CameraMode,
   ): boolean {
     if (mode === CameraMode.Camera2D) {
       return this.camera2DVisibleBounds
         ? intersectsRectangle(
             this.chunkBounds(loaded),
-            new Vector3(...this.camera2DVisibleBounds.minimum),
-            new Vector3(...this.camera2DVisibleBounds.maximum),
+            this.camera2DVisibleBounds.minimum,
+            this.camera2DVisibleBounds.maximum,
           )
         : true;
     }
@@ -1964,10 +1874,22 @@ export class SceneGeometryRenderer {
     const vertex = glhelpers.createShader(gl, gl.VERTEX_SHADER, Building3DVertSource);
     const fragment = glhelpers.createShader(gl, gl.FRAGMENT_SHADER, Building3DFragSource);
     this.program = vertex && fragment ? glhelpers.createProgram(gl, vertex, fragment) : null;
+    if (vertex) {
+      gl.deleteShader(vertex);
+    }
+    if (fragment) {
+      gl.deleteShader(fragment);
+    }
     this.instanceBuffer = gl.createBuffer();
     const particleVertex = glhelpers.createShader(gl, gl.VERTEX_SHADER, ParticleVertSource);
     const particleFragment = glhelpers.createShader(gl, gl.FRAGMENT_SHADER, ParticleFragSource);
     this.particleProgram = particleVertex && particleFragment ? glhelpers.createProgram(gl, particleVertex, particleFragment) : null;
+    if (particleVertex) {
+      gl.deleteShader(particleVertex);
+    }
+    if (particleFragment) {
+      gl.deleteShader(particleFragment);
+    }
     this.particleVao = gl.createVertexArray();
     this.particleBuffer = gl.createBuffer();
     this.particleQuadBuffer = gl.createBuffer();

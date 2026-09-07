@@ -1,3 +1,4 @@
+import { examineFrame, loadExamineMedia, setupExamineDragging } from "./examineframe";
 import { AcDatClient, type WorldObjectData } from "../lib/acdatclient";
 import { ExamineObjectRenderer } from "./examineobjectrenderer";
 
@@ -23,7 +24,7 @@ const style = `
 .ac-examine-state{position:absolute;left:0;top:145px;z-index:11;width:300px;color:#d6e7df;text-align:center;text-shadow:1px 1px #000;pointer-events:none}.ac-examine-info,.ac-examine-character-meta{position:absolute;left:4px;top:0;z-index:12;width:226px;height:60px;overflow:hidden}.ac-examine-info{padding:2px 6px;white-space:nowrap}.ac-examine-character-meta>div{position:absolute;left:6px;width:222px;height:18px;overflow:hidden;white-space:nowrap}.ac-examine-character-meta>div:nth-child(1){top:2px}.ac-examine-character-meta>div:nth-child(2){top:20px}.ac-examine-character-meta>div:nth-child(3){top:38px}
 .ac-examine-character-label,.ac-examine-level-label,.ac-examine-level{position:absolute;left:237px;z-index:12;width:56px;text-align:center;white-space:nowrap}.ac-examine-character-label{top:2px;height:14px;font-size:11px}.ac-examine-level-label{top:16px;height:14px;font-size:11px}.ac-examine-level{top:30px;height:28px;font-size:20px}.ac-examine-attributes{position:absolute;left:0;top:68px;z-index:12;width:300px;pointer-events:none}.ac-examine-row{position:relative;width:292px;height:20px}.ac-examine-label,.ac-examine-value{position:absolute;top:0;height:20px;color:#fff}.ac-examine-label{left:0;width:128px;padding-left:9px;text-align:left}.ac-examine-value{left:27px;width:256px;padding-right:9px;text-align:right}.ac-examine-allegiance{position:absolute;left:0;top:258px;z-index:12;width:292px;height:20px;text-align:center}.ac-examine-misc{position:absolute;left:0;top:278px;z-index:12;width:292px;height:87px;overflow:hidden}.ac-examine-misc .ac-examine-label{width:125px}.ac-examine-misc .ac-examine-value{left:128px;width:162px}.ac-examine-window[data-state="rendering"] .ac-examine-state{display:none}`;
 let styleInstalled = false;
-function installStyle(): void {
+export function installExamineStyle(): void {
   if (styleInstalled) return;
   const element = document.createElement("style");
   element.textContent = style;
@@ -33,8 +34,8 @@ function installStyle(): void {
 function text(element: HTMLElement, value: unknown): void {
   element.textContent = value == null || value === "" ? "???" : String(value);
 }
-function primaryValue(object: WorldObjectData, id: number): number | null {
-  const entry = object.attributes[String(id)] as
+function primaryValue(object: WorldObjectData, key: string): number | null {
+  const entry = object.attributes[key] as
     Record<string, number | null> | undefined;
   if (!entry) return null;
   return (
@@ -43,7 +44,7 @@ function primaryValue(object: WorldObjectData, id: number): number | null {
   );
 }
 
-export class ExamineWindow {
+export class ExamineCreaturePanel {
   private readonly root: HTMLElement;
   private readonly title: HTMLElement;
   private readonly info: HTMLElement;
@@ -53,7 +54,7 @@ export class ExamineWindow {
   private readonly attributes: HTMLElement;
   private readonly allegiance: HTMLElement;
   private readonly misc: HTMLElement;
-  private readonly datClient: AcDatClient;
+  readonly datClient: AcDatClient;
   private renderer: ExamineObjectRenderer;
   private readonly resizeObserver: ResizeObserver;
   private controller: AbortController | null = null;
@@ -61,12 +62,12 @@ export class ExamineWindow {
   private closed = false;
   private rendererDestroyed = false;
   constructor(private readonly options: ExamineWindowOptions) {
-    installStyle();
+    installExamineStyle();
     this.root = document.createElement("main");
     this.root.className = "ac-examine-window";
     this.root.setAttribute("aria-label", "AC creature examine window");
     this.root.hidden = true;
-    this.root.innerHTML = `<div class="ac-examine-title ac-examine-media" data-media="06004CC2"><span></span></div><button class="ac-examine-close" type="button" aria-label="Close"></button><section class="ac-examine-creature"><div class="ac-examine-media" data-media="06004CC2" style="inset:0"></div><div class="ac-examine-media" data-media="060012C6" style="left:230px;top:0;width:7px;height:60px"></div><div class="ac-examine-media" data-media="0600612C" style="left:0;top:60px;width:300px;height:5px"></div><div class="ac-examine-media" data-media="0600612C" style="left:0;top:250px;width:300px;height:5px"></div><canvas class="ac-examine-canvas"></canvas><div class="ac-examine-state" role="status"></div><div class="ac-examine-info"></div><div class="ac-examine-character-meta"><div></div><div></div><div></div></div><div class="ac-examine-character-label"></div><div class="ac-examine-level-label"></div><div class="ac-examine-level"></div><div class="ac-examine-attributes" role="list" aria-label="Attributes"></div><div class="ac-examine-allegiance"></div><div class="ac-examine-misc" role="list" aria-label="Miscellaneous information"></div></section><div class="ac-examine-media" data-media="0600612A" style="left:5px;top:25px;width:300px;height:5px"></div><div class="ac-examine-media" data-media="060074C3" style="left:0;top:0;width:5px;height:5px"></div><div class="ac-examine-media" data-media="060074BF" style="left:5px;top:0;width:300px;height:5px"></div><div class="ac-examine-media" data-media="060074C4" style="left:305px;top:0;width:5px;height:5px"></div><div class="ac-examine-media" data-media="060074C0" style="left:0;top:5px;width:5px;height:390px"></div><div class="ac-examine-media" data-media="060074C2" style="left:305px;top:5px;width:5px;height:390px"></div><div class="ac-examine-media" data-media="060074C5" style="left:0;top:395px;width:5px;height:5px"></div><div class="ac-examine-media" data-media="060074C1" style="left:5px;top:395px;width:300px;height:5px"></div><div class="ac-examine-media" data-media="060074C6" style="left:305px;top:395px;width:5px;height:5px"></div>`;
+    this.root.innerHTML = examineFrame(`<section class="ac-examine-creature"><div class="ac-examine-media" data-media="06004CC2" style="inset:0"></div><div class="ac-examine-media" data-media="060012C6" style="left:230px;top:0;width:7px;height:60px"></div><div class="ac-examine-media" data-media="0600612C" style="left:0;top:60px;width:300px;height:5px"></div><div class="ac-examine-media" data-media="0600612C" style="left:0;top:250px;width:300px;height:5px"></div><canvas class="ac-examine-canvas"></canvas><div class="ac-examine-state" role="status"></div><div class="ac-examine-info"></div><div class="ac-examine-character-meta"><div></div><div></div><div></div></div><div class="ac-examine-character-label"></div><div class="ac-examine-level-label"></div><div class="ac-examine-level"></div><div class="ac-examine-attributes" role="list" aria-label="Attributes"></div><div class="ac-examine-allegiance"></div><div class="ac-examine-misc" role="list" aria-label="Miscellaneous information"></div></section>`);
     (options.parent ?? document.body).append(this.root);
     this.title = this.root.querySelector<HTMLElement>(".ac-examine-title")!;
     this.info = this.root.querySelector<HTMLElement>(".ac-examine-info")!;
@@ -86,7 +87,7 @@ export class ExamineWindow {
     this.root
       .querySelector<HTMLButtonElement>(".ac-examine-close")!
       .addEventListener("click", () => this.close());
-    this.setupDragging();
+    setupExamineDragging(this.root, this.title);
     const gl = this.canvas.getContext("webgl2", { alpha: true });
     if (!gl) throw new Error("Examine rendering requires WebGL2");
     this.datClient = new AcDatClient(
@@ -97,7 +98,7 @@ export class ExamineWindow {
       options.serverId,
     );
     this.renderer = this.createRenderer();
-    void this.loadMediaBackgrounds();
+    void loadExamineMedia(this.root, this.datClient);
     const resize = () => {
       this.renderer.resize();
       this.renderer.render();
@@ -168,24 +169,8 @@ export class ExamineWindow {
       this.setState(phase),
     );
   }
-  private async loadMediaBackgrounds(): Promise<void> {
-    await Promise.all(
-      [...this.root.querySelectorAll<HTMLElement>("[data-media]")].map(
-        async (element) => {
-          const image = await this.datClient.image(
-            parseInt(element.dataset.media!, 16),
-          );
-          element.style.backgroundImage = `url("${image.src}")`;
-        },
-      ),
-    ).catch(() => undefined);
-    const close =
-      this.root.querySelector<HTMLButtonElement>(".ac-examine-close")!;
-    const image = await this.datClient.image(0x06006215).catch(() => null);
-    if (image) close.style.backgroundImage = `url("${image.src}")`;
-  }
   private updateObjectInfo(object: WorldObjectData): void {
-    const isCharacter = object.string["5"] != null || object.int["261"] != null;
+    const isCharacter = object.string.Template != null || object.int.CharacterTitleId != null;
     text(
       this.title.querySelector("span") as HTMLElement,
       object.name ?? "Object",
@@ -194,13 +179,13 @@ export class ExamineWindow {
     this.characterMeta.hidden = !isCharacter;
     this.info.textContent = object.name ?? "Object";
     const meta = this.characterMeta.children;
-    meta[0].textContent = Number(object.int["2"]) === 5 ? "Lugian" : "???";
+    meta[0].textContent = Number(object.int.CreatureType) === 5 ? "Lugian" : "???";
     meta[1].textContent =
-      object.string["5"] == null ? "" : String(object.string["5"]);
+      object.string.Template == null ? "" : String(object.string.Template);
     meta[2].textContent =
-      Number(object.int["134"]) & 4
+      Number(object.int.PlayerKillerStatus) & 4
         ? "Player Killer"
-        : Number(object.int["134"]) & 64
+        : Number(object.int.PlayerKillerStatus) & 64
           ? "Player Killer Lite"
           : "Non-Player Killer";
     (
@@ -210,28 +195,28 @@ export class ExamineWindow {
       this.root.querySelector(".ac-examine-level-label") as HTMLElement
     ).textContent = isCharacter ? "Level" : "";
     (this.root.querySelector(".ac-examine-level") as HTMLElement).textContent =
-      isCharacter && Number(object.int["25"]) > 0
-        ? String(object.int["25"])
+      isCharacter && Number(object.int.Level) > 0
+        ? String(object.int.Level)
         : "???";
     this.allegiance.textContent =
-      Number(object.int["30"]) > 0 && object.string["47"]
-        ? String(object.string["47"])
+      Number(object.int.AllegianceRank) > 0 && object.string.AllegianceName
+        ? String(object.string.AllegianceName)
         : "";
     this.attributes.replaceChildren();
     const values: [string, unknown][] = [
-      ["Strength", primaryValue(object, 1)],
-      ["Endurance", primaryValue(object, 2)],
-      ["Coordination", primaryValue(object, 4)],
-      ["Quickness", primaryValue(object, 3)],
-      ["Focus", primaryValue(object, 5)],
-      ["Self", primaryValue(object, 6)],
+      ["Strength", primaryValue(object, "Strength")],
+      ["Endurance", primaryValue(object, "Endurance")],
+      ["Coordination", primaryValue(object, "Coordination")],
+      ["Quickness", primaryValue(object, "Quickness")],
+      ["Focus", primaryValue(object, "Focus")],
+      ["Self", primaryValue(object, "Self")],
     ];
     for (const [label, id, primaryId, divisor] of [
-      ["Health", 1, 2, 2],
-      ["Stamina", 3, 2, 1],
-      ["Mana", 5, 6, 1],
+      ["Health", "MaxHealth", "Endurance", 2],
+      ["Stamina", "MaxStamina", "Endurance", 1],
+      ["Mana", "MaxMana", "Self", 1],
     ] as const) {
-      const entry = object.attributes2nd[String(id)];
+      const entry = object.attributes2nd[id];
       const current = entry?.current_Level ?? entry?.currentLevel;
       const primary = primaryValue(object, primaryId);
       const maximum =
@@ -244,7 +229,7 @@ export class ExamineWindow {
         label,
         current == null || maximum == null
           ? "???"
-          : `${current}/${maximum}${id === 1 ? ` (${maximum ? Math.round((100 * Number(current)) / maximum) : -1} %)` : ""}`,
+          : `${current}/${maximum}${id === "MaxHealth" ? ` (${maximum ? Math.round((100 * Number(current)) / maximum) : -1} %)` : ""}`,
       ]);
     }
     for (const [label, value] of values) {
@@ -267,31 +252,5 @@ export class ExamineWindow {
       this.misc.append(row);
     }
   }
-  private setupDragging(): void {
-    let offsetX = 0;
-    let offsetY = 0;
-    let dragging = false;
-    this.title.addEventListener("pointerdown", (event) => {
-      const bounds = this.root.getBoundingClientRect();
-      offsetX = event.clientX - bounds.left;
-      offsetY = event.clientY - bounds.top;
-      dragging = true;
-      this.title.setPointerCapture(event.pointerId);
-    });
-    this.title.addEventListener("pointermove", (event) => {
-      if (!dragging) return;
-      this.root.style.left = `${event.clientX - offsetX}px`;
-      this.root.style.top = `${event.clientY - offsetY}px`;
-    });
-    const end = () => {
-      dragging = false;
-    };
-    this.title.addEventListener("pointerup", end);
-    this.title.addEventListener("pointercancel", end);
-  }
 }
-export function setupExamineWindow(
-  options: ExamineWindowOptions,
-): ExamineWindow {
-  return new ExamineWindow(options);
-}
+

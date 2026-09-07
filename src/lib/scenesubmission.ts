@@ -25,6 +25,8 @@ export type ScenePass = "opaque" | "color" | "revealage" | "additive" | "fallbac
 
 /** A draw owned by a producer but ordered and state-managed by SceneRenderer. */
 export interface SceneSubmission {
+  readonly skyPass?: "background" | "foreground";
+  readonly skyObjectIndex?: number;
   readonly key: SceneRenderKey;
   readonly instanceCount: number;
   /** Optional far-to-near fallback bucket for one already-batched draw. */

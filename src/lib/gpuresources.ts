@@ -55,6 +55,16 @@ export class LegacyMeshGpuOwner {
   }
 
   upload(id: number, source: LegacyMeshSource, indexed: boolean): LegacyGpuMesh {
+    const current = this.current(id);
+    if (current) {
+      if (!this.leases.has(id)) {
+        const lease = this.registry.acquire(id);
+        if (lease) {
+          this.leases.set(id, lease);
+        }
+      }
+      return current;
+    }
     const target: LegacyGpuMesh = { batches: [], gpuBytes: 0 };
     const cpu = { source, target, indexed };
     const bytes = this.decodedBytes(source);
@@ -72,6 +82,25 @@ export class LegacyMeshGpuOwner {
     return this.registry.acquire(id);
   }
 
+  acquire(id: number, source: LegacyMeshSource): import("./resourceRegistry").ResourceLease<LegacyCpuMesh, LegacyGpuMesh> {
+    const existing = this.current(id);
+    if (!existing) {
+      this.upload(id, source, true);
+    }
+    const lease = this.registry.acquire(id)!;
+    if (!existing) {
+      this.leases.get(id)?.release();
+      this.leases.delete(id);
+    }
+    return {
+      value: lease.value,
+      release: () => {
+        lease.release();
+        this.registry.remove(id);
+      },
+    };
+  }
+
   current(id: number): LegacyGpuMesh | undefined {
     return this.registry.current(id)?.gpu;
   }
@@ -87,8 +116,12 @@ export class LegacyMeshGpuOwner {
   dispose(): void {
     this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
     this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
-    this.registry.replaceDataset();
+    for (const lease of this.leases.values()) {
+      lease.release();
+    }
     this.leases.clear();
+    this.registry.replaceDataset();
+    this.registry.beginFrame();
   }
 
   private allocate(cpu: LegacyCpuMesh): void {

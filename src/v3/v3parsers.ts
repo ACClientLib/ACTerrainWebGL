@@ -1,6 +1,6 @@
 import type { V3CullState, V3MaterialView, V3MeshBatchView, V3MeshView, V3PalettePatchView, V3ParticleBatchView, V3PlacementChunkView, V3PlacementGroupView, V3RenderClass, V3SamplerMode } from "./v3types";
 
-const VERSION = 17;
+import { SUPPORTED_FORMAT_VERSION as VERSION } from "../lib/formatcontract";
 const ALIGNMENT = 16;
 const enumValue = <T>(values: readonly T[], value: number, name: string): T => {
   const result = values[value];

@@ -17,11 +17,7 @@ import {
   selectTextureProfile,
   type TextureCapabilities,
 } from "./textureprofile";
-import {
-  interpolateRegionLighting,
-  parseRegionLighting,
-  type RegionLightingDescriptor,
-} from "./regionlighting";
+import { evaluateRegionSky, parseRegionSky, type EvaluatedRegionSky, type RegionSkyDescriptor } from "./regionsky";
 import { DatImageClient } from "./datimageclient";
 
 function readFloat16(view: DataView, offset: number): number {
@@ -64,6 +60,7 @@ export interface IndexedPlacement {
 
 export interface WorldObjectVector3 { x: number; y: number; z: number; }
 export interface WorldObjectQuaternion { x: number; y: number; z: number; w: number; }
+// Property map keys are Chorizite.Common enum names (PascalCase); unknown values use numeric strings.
 export type WorldObjectScalarProperties = Record<string, number | string | boolean | null>;
 export type WorldObjectInt64Properties = Record<string, number | string | null>;
 export type WorldObjectCompositeProperties = Record<string, Record<string, number | boolean | string | null>>;
@@ -329,7 +326,7 @@ export class AcDatClient {
     cacheFootprintBytes: Record<string, number>;
     placementElevationOrigin: number;
     placementElevationScale: number;
-    regionLighting: RegionLightingDescriptor;
+    regionSky?: RegionSkyDescriptor;
   };
   private resourceCatalog: ResourceCatalogEntry[] = [];
   private terrainDataPromise: Promise<ArrayBuffer> | null = null;
@@ -376,6 +373,14 @@ export class AcDatClient {
   private activeResourceBatches = 0;
   private resourceBatchSequence = 0;
   private resourceBatchWaiters: ResourceBatchWaiter[] = [];
+  private skyGroupLeases: ResourceLease<ResourceEntry, unknown>[] = [];
+  private skyGroupIndex = 0;
+  private skyTimeOfDay = 0.5;
+  private evaluatedSky: EvaluatedRegionSky | null = null;
+  private skyActivation = 0;
+  private skyActive = false;
+  private skyLoad: Promise<void> | null = null;
+  private requestedSkyGroup = 0;
   private pendingResources = new Map<number, Promise<void>>();
   private resourceCacheMisses = 0;
   private resourceCacheMissSeen = new Set<number>();
@@ -1043,11 +1048,15 @@ export class AcDatClient {
       return;
     }
     this.lifecycleController.abort();
+    await this.setSkyActive(false);
     this.visibleController?.abort();
     this.preloadController?.abort();
     await this.cache.clear();
     this.resources.clear();
     this.resourceBytes = 0;
+    for (const lease of this.skyGroupLeases) lease.release();
+    this.skyGroupLeases = [];
+    this.evaluatedSky = null;
     for (const material of this.materials.values()) material.lease?.release();
     for (const texture of this.textures.values()) texture.lease?.release();
     this.registry.replaceDataset();
@@ -1068,6 +1077,9 @@ export class AcDatClient {
   shutdown(): void {
     if (this.stopped) return;
     this.stopped = true;
+    ++this.skyActivation;
+    this.skyActive = false;
+    this.skyLoad = null;
     this.lifecycleController.abort();
     this.visibleController?.abort();
     this.preloadController?.abort();
@@ -1086,6 +1098,9 @@ export class AcDatClient {
     this.meshRegistry.replaceDataset();
     this.indexedTextures.shutdown();
     this.textureRegistry.beginFrame();
+    for (const lease of this.skyGroupLeases) lease.release();
+    this.skyGroupLeases = [];
+    this.evaluatedSky = null;
     this.resources.clear();
     this.resourceBytes = 0;
     this.pendingResources.clear();
@@ -1133,9 +1148,12 @@ export class AcDatClient {
       ] !== "number"
     )
       throw new Error("Invalid ACTerrain dataset descriptor");
-    const regionLighting = parseRegionLighting(descriptor.regionLighting);
+    const regionSky = descriptor.regionSky == null ? undefined : parseRegionSky(descriptor.regionSky);
+    if (descriptor.contentKind === "server" ? regionSky !== undefined : regionSky === undefined) {
+      throw new Error("Invalid ACTerrain dataset sky ownership");
+    }
     this.descriptor = descriptor;
-    this.descriptor.regionLighting = regionLighting;
+    this.descriptor.regionSky = regionSky;
     await this.cache.configure(
       SUPPORTED_FORMAT_VERSION,
       descriptor.version,
@@ -1156,10 +1174,115 @@ export class AcDatClient {
     if (descriptor.contentKind !== "server") await this.cache.removeLegacyCaches();
   }
 
-  getRegionLighting(timeOfDay = 0.5) {
-    if (!this.descriptor?.regionLighting)
-      throw new Error("ACTerrain region lighting is unavailable");
-    return interpolateRegionLighting(this.descriptor.regionLighting, timeOfDay);
+  getRegionLighting(timeOfDay = this.skyTimeOfDay) {
+    return this.setSkyTime(timeOfDay).lighting;
+  }
+
+  getRegionSky(): EvaluatedRegionSky | null {
+    return this.evaluatedSky;
+  }
+
+  getRegionSkyDescriptor(): RegionSkyDescriptor | null {
+    return this.descriptor?.regionSky ?? null;
+  }
+
+  getSkyTime(): number {
+    return this.skyTimeOfDay;
+  }
+
+  getSkyGroupIndex(): number {
+    return this.skyGroupIndex;
+  }
+
+  get isSkyActive(): boolean {
+    return this.skyActive;
+  }
+
+  async setSkyActive(active: boolean): Promise<void> {
+    if (active === this.skyActive && (!active || this.evaluatedSky || this.skyLoad)) {
+      await this.skyLoad;
+      return;
+    }
+    this.skyActive = active;
+    if (!active) {
+      ++this.skyActivation;
+      this.skyLoad = null;
+      for (const lease of this.skyGroupLeases) {
+        lease.release();
+      }
+      this.skyGroupLeases = [];
+      this.evaluatedSky = null;
+      return;
+    }
+    if (this.descriptor?.regionSky) {
+      await this.setSkyGroup(this.requestedSkyGroup);
+    }
+  }
+
+  async setSkyGroup(groupIndex: number, signal?: AbortSignal): Promise<void> {
+    if (!this.descriptor?.regionSky?.dayGroups[groupIndex]) {
+      throw new Error(`Unknown ACTerrain sky group ${groupIndex}`);
+    }
+    this.requestedSkyGroup = groupIndex;
+    if (!this.skyActive) {
+      this.skyGroupIndex = groupIndex;
+      return;
+    }
+    const request = ++this.skyActivation;
+    const loading = this.loadSkyGroup(groupIndex, signal ?? this.lifecycleController.signal, request);
+    this.skyLoad = loading;
+    try {
+      await loading;
+    } finally {
+      if (this.skyLoad === loading) {
+        this.skyLoad = null;
+      }
+    }
+  }
+
+  setSkyTime(timeOfDay: number): EvaluatedRegionSky {
+    if (!this.descriptor?.regionSky) throw new Error("ACTerrain region sky is unavailable");
+    if (!Number.isFinite(timeOfDay)) {
+      throw new Error("Sky time must be finite");
+    }
+    this.skyTimeOfDay = ((timeOfDay % 1) + 1) % 1;
+    if (this.evaluatedSky?.timeOfDay === this.skyTimeOfDay) {
+      return this.evaluatedSky;
+    }
+    const evaluated = evaluateRegionSky(this.descriptor.regionSky, this.skyGroupIndex, this.skyTimeOfDay);
+    if (this.evaluatedSky) {
+      this.evaluatedSky = evaluated;
+    }
+    return evaluated;
+  }
+
+  private async loadSkyGroup(groupIndex: number, signal: AbortSignal, request: number): Promise<void> {
+    if (!this.descriptor?.regionSky) throw new Error("ACTerrain region sky is unavailable");
+    const group = this.descriptor.regionSky.dayGroups[groupIndex];
+    if (!group) throw new Error(`Unknown ACTerrain sky group ${groupIndex}`);
+    await this.loadResourceIds([...group.resourceIds], 0, signal);
+    signal.throwIfAborted();
+    this.lifecycleController.signal.throwIfAborted();
+    if (request !== this.skyActivation || !this.skyActive) {
+      return;
+    }
+    const leases: ResourceLease<ResourceEntry, unknown>[] = [];
+    for (const id of group.resourceIds) {
+      const lease = this.registry.acquire(id);
+      if (!lease) {
+        for (const acquired of leases) {
+          acquired.release();
+        }
+        throw new Error(`Sky group ${groupIndex} is missing resource ${id}`);
+      }
+      leases.push(lease);
+    }
+    for (const lease of this.skyGroupLeases) {
+      lease.release();
+    }
+    this.skyGroupLeases = leases;
+    this.skyGroupIndex = groupIndex;
+    this.evaluatedSky = evaluateRegionSky(this.descriptor.regionSky, groupIndex, this.skyTimeOfDay);
   }
 
   private parseV3SceneDirectory(source: ArrayBuffer): void {

@@ -44,11 +44,12 @@ export class ParticleSimulation {
     placementRotation: [number, number, number, number],
     placementScale: [number, number, number],
     maxInstances = Number.POSITIVE_INFINITY,
+    emitting = true,
   ): ParticleSimulationInstance[] {
     const p = this.descriptor;
     const dt = Math.max(0, Math.min(deltaTime, 0.25));
     const persistent = p.totalParticles === 0 && p.totalSeconds === 0;
-    const persistentStill = persistent && p.particleType === 1;
+    const persistentStill = emitting && persistent && p.particleType === 1;
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const particle = this.particles[i];
@@ -64,7 +65,7 @@ export class ParticleSimulation {
     this.timeRunning += dt;
     const withinTime = p.totalSeconds === 0 || this.timeRunning < p.totalSeconds;
     const withinCount = p.totalParticles === 0 || this.totalEmitted < p.totalParticles;
-    const canEmit = withinTime && withinCount;
+    const canEmit = emitting && withinTime && withinCount;
 
     if (canEmit) {
       if (this.totalEmitted === 0 && p.initialParticles > 0) {
