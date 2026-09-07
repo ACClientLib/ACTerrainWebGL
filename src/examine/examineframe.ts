@@ -35,8 +35,11 @@ export function setupExamineDragging(root: HTMLElement, title: HTMLElement): voi
       root.style.left = `${event.clientX - offsetX}px`;
       root.style.top = `${event.clientY - offsetY}px`;
     });
-    const end = () => {
+    const end = (event: PointerEvent) => {
       dragging = false;
+      if (title.hasPointerCapture(event.pointerId)) {
+        title.releasePointerCapture(event.pointerId);
+      }
     };
     title.addEventListener("pointerup", end);
     title.addEventListener("pointercancel", end);
