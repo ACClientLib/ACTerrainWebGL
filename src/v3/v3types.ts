@@ -47,7 +47,7 @@ export interface V3PlacementGroupView {
   modelIndex: number;
   category: number;
   negativeDeterminant: boolean;
-  recordSize: 20 | 24;
+  recordSize: 20 | 28;
   records: Uint8Array[];
 }
 

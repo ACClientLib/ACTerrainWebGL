@@ -136,7 +136,7 @@ async function decodeMesh(resource: EncodedDatResource): Promise<Mesh> {
       vertexCountTotal += vertexCount;
       indexCountTotal += indexCount;
     } else if (batchKind === 1) {
-      throw new Error(`Legacy sampled particle resources are unsupported; repack resource ${resource.id} as v3.16`);
+      throw new Error(`Legacy sampled particle resources are unsupported; repack resource ${resource.id} as v3.17`);
     } else throw new Error(`Invalid ACTerrain mesh batch kind ${batchKind}`);
   }
   if (offset !== buffer.byteLength)

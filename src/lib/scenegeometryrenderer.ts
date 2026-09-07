@@ -292,6 +292,7 @@ export class SceneGeometryRenderer {
     private gl: WebGL2RenderingContext,
     descriptorPath = "v3/dataset",
     cacheNamespace: import("./opfsresourcecacheprotocol").CacheNamespace = "dat",
+    serverId?: string,
   ) {
     this.meshOwner = new LegacyMeshGpuOwner(gl);
     const vertex = glhelpers.createShader(
@@ -421,7 +422,7 @@ export class SceneGeometryRenderer {
       sunlightColor: this.program ? gl.getUniformLocation(this.program, "sunlightColor") : null,
       ambientColor: this.program ? gl.getUniformLocation(this.program, "ambientColor") : null,
     };
-    this.dats = new AcDatClient(gl, undefined, descriptorPath, cacheNamespace);
+    this.dats = new AcDatClient(gl, undefined, descriptorPath, cacheNamespace, serverId);
     gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
     gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
   }

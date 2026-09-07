@@ -36,6 +36,7 @@ async function start(): Promise<void> {
         ).toString()
       : undefined,
     selection.server?.labelVersion ?? selection.server?.version,
+    selection.server?.id,
   );
   populateDatasetSelector(selector, catalog, selection, () => renderer.shutdown());
   window.addEventListener("pagehide", () => renderer.shutdown(), { once: true });

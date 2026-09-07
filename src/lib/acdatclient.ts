@@ -59,6 +59,38 @@ export interface IndexedPlacement {
   origin: [number, number, number];
   rotation: [number, number, number, number];
   scale: [number, number, number];
+  objectGuid?: number;
+}
+
+export interface WorldObjectVector3 { x: number; y: number; z: number; }
+export interface WorldObjectQuaternion { x: number; y: number; z: number; w: number; }
+export type WorldObjectScalarProperties = Record<string, number | string | boolean | null>;
+export type WorldObjectInt64Properties = Record<string, number | string | null>;
+export type WorldObjectCompositeProperties = Record<string, Record<string, number | boolean | string | null>>;
+export interface WorldObjectData {
+  guid: number;
+  classId: number;
+  cellId: number;
+  position: WorldObjectVector3;
+  orientation: WorldObjectQuaternion;
+  setupId: number | null;
+  name: string | null;
+  iconId: number | null;
+  iconOverlayId: number | null;
+  iconUnderlayId: number | null;
+  int: WorldObjectScalarProperties;
+  int64: WorldObjectInt64Properties;
+  bool: WorldObjectScalarProperties;
+  float: WorldObjectScalarProperties;
+  string: WorldObjectScalarProperties;
+  instanceId: WorldObjectScalarProperties;
+  did: WorldObjectScalarProperties;
+  attributes: WorldObjectCompositeProperties;
+  attributes2nd: WorldObjectCompositeProperties;
+  spells: WorldObjectCompositeProperties;
+  createLists: WorldObjectCompositeProperties;
+  textureOverrides: WorldObjectCompositeProperties;
+  paletteOverrides: WorldObjectCompositeProperties;
 }
 
 export const SERVER_SPAWNS = 2;
@@ -332,6 +364,7 @@ export class AcDatClient {
       "https://terrainapi.utilitybelt.me/",
     private readonly descriptorPath = "v3/dataset",
     cacheNamespace: CacheNamespace = "dat",
+    private readonly serverId?: string,
   ) {
     this.baseUrl =
       baseUrl.endsWith("/") || baseUrl.length === 0 ? baseUrl : `${baseUrl}/`;
@@ -493,6 +526,16 @@ export class AcDatClient {
     }
     const response = await this.request(this.descriptor.dungeonsUrl.replace("{landblock}", landblock.toString(16).padStart(4, "0")));
     return response.json();
+  }
+
+  async getServerObject(guid: number | string, signal?: AbortSignal): Promise<WorldObjectData> {
+    await this.ensureReady();
+    if (!this.serverId) throw new Error("Server object lookup requires a server dataset");
+    const response = await this.request(
+      `v3/servers/${encodeURIComponent(this.serverId)}/${encodeURIComponent(this.descriptor.version)}/objects/${encodeURIComponent(String(guid))}`,
+      { signal },
+    );
+    return (await response.json()) as WorldObjectData;
   }
 
   async initialize(): Promise<void> {
@@ -763,7 +806,7 @@ export class AcDatClient {
     chunkId: number,
     category: number,
   ): IndexedPlacement {
-    if (record.byteLength !== 24)
+    if (record.byteLength !== 28)
       throw new Error("Invalid v3 ordinary placement record");
     const view = new DataView(
       record.buffer,
@@ -809,6 +852,7 @@ export class AcDatClient {
         readFloat16(view, 18),
         readFloat16(view, 20),
       ],
+      ...(view.getUint32(24, true) === 0 ? {} : { objectGuid: view.getUint32(24, true) }),
     };
   }
 
@@ -850,7 +894,7 @@ export class AcDatClient {
     if (parsed.chunkId !== chunkId)
       throw new Error("Placement resource does not match its scene chunk");
     const placements = parsed.groups.flatMap((group) =>
-      group.recordSize === 24
+      group.recordSize === 28
         ? group.records.map((record) =>
             this.decodeOrdinaryPlacement(
               record,

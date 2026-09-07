@@ -1,6 +1,6 @@
 import type { V3CullState, V3MaterialView, V3MeshBatchView, V3MeshView, V3PalettePatchView, V3ParticleBatchView, V3PlacementChunkView, V3PlacementGroupView, V3RenderClass, V3SamplerMode } from "./v3types";
 
-const VERSION = 16;
+const VERSION = 17;
 const ALIGNMENT = 16;
 const enumValue = <T>(values: readonly T[], value: number, name: string): T => {
   const result = values[value];
@@ -69,7 +69,7 @@ export function parseV3PlacementChunk(bytes: ArrayBuffer): V3PlacementChunkView 
   const groupCount = view.getUint32(16, true); if (groupCount > 0x7fffffff || 32 + groupCount * 16 > bytes.byteLength || view.getUint32(20, true) !== 0 || view.getUint32(24, true) !== 0 || view.getUint32(28, true) !== 0) throw new Error("Invalid v3 placement reserved fields");
   const groups: V3PlacementGroupView[] = []; let offset = 32; const counts: number[] = [];
   const sizes: number[] = [];
-  for (let i = 0; i < groupCount; i++) { const modelIndex = view.getUint32(offset, true); const category = view.getUint8(offset + 4); const parity = view.getUint8(offset + 5); const recordSize = view.getUint32(offset + 12, true); if (parity > 1 || view.getUint16(offset + 6, true) !== 0 || (recordSize !== 20 && recordSize !== 24)) throw new Error("Invalid v3 placement group"); counts.push(view.getUint32(offset + 8, true)); sizes.push(recordSize); groups.push({ modelIndex, category, negativeDeterminant: parity !== 0, recordSize: recordSize as 20 | 24, records: [] }); offset += 16; }
-  for (let i = 0; i < groups.length; i++) { const records: Uint8Array[] = []; for (let j = 0; j < counts[i]; j++) { if (offset > bytes.byteLength || sizes[i] > bytes.byteLength - offset) throw new Error("Truncated v3 placement record"); if (view.getUint16(offset + sizes[i] - 2, true) !== 0) throw new Error("Invalid v3 placement reserved bytes"); records.push(new Uint8Array(bytes, offset, sizes[i])); offset += sizes[i]; } groups[i].records = records; }
+  for (let i = 0; i < groupCount; i++) { const modelIndex = view.getUint32(offset, true); const category = view.getUint8(offset + 4); const parity = view.getUint8(offset + 5); const recordSize = view.getUint32(offset + 12, true); if (parity > 1 || view.getUint16(offset + 6, true) !== 0 || (recordSize !== 20 && recordSize !== 28)) throw new Error("Invalid v3 placement group"); counts.push(view.getUint32(offset + 8, true)); sizes.push(recordSize); groups.push({ modelIndex, category, negativeDeterminant: parity !== 0, recordSize: recordSize as 20 | 28, records: [] }); offset += 16; }
+  for (let i = 0; i < groups.length; i++) { const records: Uint8Array[] = []; for (let j = 0; j < counts[i]; j++) { if (offset > bytes.byteLength || sizes[i] > bytes.byteLength - offset) throw new Error("Truncated v3 placement record"); const reservedOffset = sizes[i] === 20 ? 18 : 22; if (view.getUint16(offset + reservedOffset, true) !== 0) throw new Error("Invalid v3 placement reserved bytes"); records.push(new Uint8Array(bytes, offset, sizes[i])); offset += sizes[i]; } groups[i].records = records; }
   if (offset !== bytes.byteLength) throw new Error("v3 placement has trailing bytes"); return { chunkId: view.getUint32(12, true), groups };
 }
