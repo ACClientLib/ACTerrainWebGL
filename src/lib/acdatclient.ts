@@ -22,6 +22,7 @@ import {
   parseRegionLighting,
   type RegionLightingDescriptor,
 } from "./regionlighting";
+import { DatImageClient } from "./datimageclient";
 
 function readFloat16(view: DataView, offset: number): number {
   const value = view.getUint16(offset, true);
@@ -255,6 +256,7 @@ export class AcDatClient {
     resourceIndexUrl: string;
     resourcesUrl: string;
     terrainDataUrl: string | null;
+    imagesUrl?: string | null;
     dungeonsUrl?: string;
     cacheFootprintBytes: Record<string, number>;
     placementElevationOrigin: number;
@@ -263,6 +265,7 @@ export class AcDatClient {
   };
   private resourceCatalog: ResourceCatalogEntry[] = [];
   private terrainDataPromise: Promise<ArrayBuffer> | null = null;
+  private readonly imageClient: DatImageClient;
   private chunks = new Map<number, IndexedChunk>();
   private placements: IndexedPlacement[] = [];
   private decodedPlacements = new Map<number, IndexedPlacement[]>();
@@ -332,6 +335,7 @@ export class AcDatClient {
   ) {
     this.baseUrl =
       baseUrl.endsWith("/") || baseUrl.length === 0 ? baseUrl : `${baseUrl}/`;
+    this.imageClient = new DatImageClient(this.baseUrl);
     this.cache = new DatObjectCache(cacheNamespace);
     this.indexedTextures = new IndexedTextureLoader(gl);
     this.textureCapabilities = selectTextureProfile(gl);
@@ -493,6 +497,14 @@ export class AcDatClient {
 
   async initialize(): Promise<void> {
     await this.ensureReady();
+  }
+
+  async image(
+    imageId: number | string,
+    layers: Parameters<DatImageClient["url"]>[2] = {},
+  ): Promise<HTMLImageElement> {
+    await this.ensureReady();
+    return this.imageClient.load(this.descriptor, imageId, layers);
   }
 
   async loadVisible(
