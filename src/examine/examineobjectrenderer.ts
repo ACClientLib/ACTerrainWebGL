@@ -1,0 +1,303 @@
+import {
+  type AcDatClient,
+  type LoadedModelBatch,
+} from "../lib/acdatclient";
+import { ExamineObjectLoader } from "./examineobjectloader";
+import { createExamineCamera, type ExamineCamera } from "./examinecamera";
+import { ExamineFragmentShader, ExamineVertexShader } from "./examineshaders";
+import type { ExamineWindowState } from "./examinepanel";
+
+type RenderBatch = LoadedModelBatch & {
+  vertexBuffer: WebGLBuffer;
+  indexBuffer: WebGLBuffer;
+  indexCount: number;
+  order: number;
+};
+
+function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error("Unable to create examine shader");
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader) ?? "unknown shader error";
+    gl.deleteShader(shader);
+    throw new Error(`Unable to compile examine shader: ${message}`);
+  }
+  return shader;
+}
+
+function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
+  const program = gl.createProgram();
+  if (!program) throw new Error("Unable to create examine program");
+  const vertex = compile(gl, gl.VERTEX_SHADER, ExamineVertexShader);
+  const fragment = compile(gl, gl.FRAGMENT_SHADER, ExamineFragmentShader);
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
+  gl.deleteShader(vertex);
+  gl.deleteShader(fragment);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const message = gl.getProgramInfoLog(program) ?? "unknown link error";
+    gl.deleteProgram(program);
+    throw new Error(`Unable to link examine program: ${message}`);
+  }
+  return program;
+}
+
+export class ExamineObjectRenderer {
+  private readonly gl: WebGL2RenderingContext;
+  private readonly loader: ExamineObjectLoader;
+  private readonly program: WebGLProgram;
+  private readonly vao: WebGLVertexArrayObject;
+  private readonly clampSampler: WebGLSampler;
+  private readonly repeatSampler: WebGLSampler;
+  private readonly projectionLocation: WebGLUniformLocation | null;
+  private readonly viewLocation: WebGLUniformLocation | null;
+  private readonly modelLocation: WebGLUniformLocation | null;
+  private readonly textureLocation: WebGLUniformLocation | null;
+  private readonly opacityLocation: WebGLUniformLocation | null;
+  private readonly luminosityLocation: WebGLUniformLocation | null;
+  private readonly diffuseLocation: WebGLUniformLocation | null;
+  private readonly alphaCutoffLocation: WebGLUniformLocation | null;
+  private readonly alphaModeLocation: WebGLUniformLocation | null;
+  private batches: RenderBatch[] = [];
+  private bounds: { minimum: [number, number, number]; maximum: [number, number, number] } | null = null;
+  private camera: ExamineCamera | null = null;
+  private modelScale = 1;
+  private modelMatrix = new Float32Array([
+    0.9063, 0, -0.4226, 0,
+    0, 1, 0, 0,
+    0.4226, 0, 0.9063, 0,
+    0, 0, 0, 1,
+  ]);
+  private loadController: AbortController | null = null;
+  private generation = 0;
+  private destroyed = false;
+  private error: Error | null = null;
+  private loaded: import("../lib/acdatclient").WorldObjectData | null = null;
+
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly datClient: AcDatClient,
+    private readonly onState?: (state: ExamineWindowState) => void,
+  ) {
+    const gl = canvas.getContext("webgl2", { alpha: true });
+    if (!gl) throw new Error("Examine rendering requires WebGL2");
+    this.gl = gl;
+    this.loader = new ExamineObjectLoader(datClient);
+    this.program = createProgram(gl);
+    const vao = gl.createVertexArray();
+    const clampSampler = gl.createSampler();
+    const repeatSampler = gl.createSampler();
+    if (!vao || !clampSampler || !repeatSampler) throw new Error("Unable to create examine GPU resources");
+    this.vao = vao;
+    this.clampSampler = clampSampler;
+    this.repeatSampler = repeatSampler;
+    for (const sampler of [clampSampler, repeatSampler]) {
+      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+    gl.samplerParameteri(clampSampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.samplerParameteri(clampSampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.samplerParameteri(repeatSampler, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.samplerParameteri(repeatSampler, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    this.projectionLocation = gl.getUniformLocation(this.program, "projection");
+    this.viewLocation = gl.getUniformLocation(this.program, "view");
+    this.modelLocation = gl.getUniformLocation(this.program, "model");
+    this.textureLocation = gl.getUniformLocation(this.program, "materialTexture");
+    this.opacityLocation = gl.getUniformLocation(this.program, "opacity");
+    this.luminosityLocation = gl.getUniformLocation(this.program, "luminosity");
+    this.diffuseLocation = gl.getUniformLocation(this.program, "diffuse");
+    this.alphaCutoffLocation = gl.getUniformLocation(this.program, "alphaCutoff");
+    this.alphaModeLocation = gl.getUniformLocation(this.program, "alphaMode");
+    this.resize();
+  }
+
+  get lastError(): Error | null { return this.error; }
+  get loadedObject(): import("../lib/acdatclient").WorldObjectData {
+    if (!this.loaded) throw new Error("No examine object is loaded");
+    return this.loaded;
+  }
+
+  async loadObject(guid: number | string, signal?: AbortSignal): Promise<void> {
+    if (this.destroyed) throw new Error("Examine renderer has been destroyed");
+    this.loadController?.abort();
+    this.releaseBatches();
+    this.bounds = null;
+    this.camera = null;
+    const controller = new AbortController();
+    this.loadController = controller;
+    const generation = ++this.generation;
+    const forwardAbort = () => controller.abort();
+    signal?.addEventListener("abort", forwardAbort, { once: true });
+    if (signal?.aborted) controller.abort();
+    this.error = null;
+    this.loaded = null;
+    try {
+      const loaded = await this.loader.load(guid, controller.signal, this.onState);
+      if (generation !== this.generation || this.destroyed) {
+        this.loader.release(loaded);
+        return;
+      }
+      this.releaseBatches();
+      this.modelScale = loaded.render.scale;
+      this.loaded = loaded.object;
+      this.bounds = loaded.mesh.bounds;
+      this.camera = createExamineCamera(loaded.mesh.bounds, this.canvas.width, this.canvas.height, this.modelScale);
+      this.updateModelMatrix();
+      try {
+        this.batches = loaded.batches.map((batch, order) => this.uploadBatch(batch, order));
+      } catch (cause) {
+        this.releaseBatches();
+        this.loader.release(loaded);
+        throw cause;
+      }
+    } catch (cause) {
+      if (generation !== this.generation || controller.signal.aborted) return;
+      this.releaseBatches();
+      this.bounds = null;
+      this.camera = null;
+      this.error = cause instanceof Error ? cause : new Error(String(cause));
+      throw this.error;
+    } finally {
+      signal?.removeEventListener("abort", forwardAbort);
+      if (this.loadController === controller) this.loadController = null;
+    }
+  }
+
+  clear(): void {
+    if (this.destroyed) return;
+    this.loadController?.abort();
+    this.generation++;
+    this.releaseBatches();
+    this.bounds = null;
+    this.camera = null;
+    this.loaded = null;
+    this.error = null;
+  }
+
+  resize(): void {
+    if (this.destroyed) return;
+    const width = Math.max(1, Math.floor(this.canvas.clientWidth * devicePixelRatio));
+    const height = Math.max(1, Math.floor(this.canvas.clientHeight * devicePixelRatio));
+    if (this.canvas.width !== width) this.canvas.width = width;
+    if (this.canvas.height !== height) this.canvas.height = height;
+    this.gl.viewport(0, 0, width, height);
+    if (this.bounds) this.camera = createExamineCamera(this.bounds, width, height, this.modelScale);
+  }
+
+  render(): void {
+    if (this.destroyed || !this.camera || this.batches.length === 0) return;
+    const gl = this.gl;
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.useProgram(this.program);
+    gl.bindVertexArray(this.vao);
+    gl.uniformMatrix4fv(this.projectionLocation, false, this.camera.projection);
+    gl.uniformMatrix4fv(this.viewLocation, false, this.camera.view);
+    gl.uniformMatrix4fv(this.modelLocation, false, this.modelMatrix);
+    gl.uniform1i(this.textureLocation, 0);
+    for (const mode of ["opaque", "cutout", "blended", "additive"] as const) {
+      for (const batch of this.batches) {
+        if (batch.material.alphaMode !== mode) continue;
+        this.drawBatch(batch);
+      }
+    }
+    gl.bindVertexArray(null);
+  }
+
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.loadController?.abort();
+    this.releaseBatches();
+    this.bounds = null;
+    this.gl.deleteSampler(this.clampSampler);
+    this.gl.deleteSampler(this.repeatSampler);
+    this.gl.deleteVertexArray(this.vao);
+    this.gl.deleteProgram(this.program);
+  }
+
+  private uploadBatch(batch: LoadedModelBatch, order: number): RenderBatch {
+    const vertices = batch.mesh.vertices;
+    const indices = batch.mesh.indices;
+    if (!vertices || !indices) throw new Error("Examine mesh batch has no indexed geometry");
+    const vertexBuffer = this.gl.createBuffer();
+    const indexBuffer = this.gl.createBuffer();
+    if (!vertexBuffer || !indexBuffer) throw new Error("Unable to create examine mesh buffers");
+    this.gl.bindVertexArray(this.vao);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.STATIC_DRAW);
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indices, this.gl.STATIC_DRAW);
+    this.gl.enableVertexAttribArray(0);
+    this.gl.enableVertexAttribArray(1);
+    this.gl.enableVertexAttribArray(2);
+    this.gl.vertexAttribPointer(0, 3, this.gl.FLOAT, false, 32, 0);
+    this.gl.vertexAttribPointer(1, 3, this.gl.FLOAT, false, 32, 12);
+    this.gl.vertexAttribPointer(2, 2, this.gl.FLOAT, false, 32, 24);
+    return { ...batch, vertexBuffer, indexBuffer, indexCount: indices.length, order };
+  }
+
+  private drawBatch(batch: RenderBatch): void {
+    const gl = this.gl;
+    const material = batch.material;
+    const cull = material.cullState;
+    if (cull === "none") gl.disable(gl.CULL_FACE);
+    else {
+      gl.enable(gl.CULL_FACE);
+      gl.cullFace(cull === "front" ? gl.FRONT : gl.BACK);
+    }
+    if (material.alphaMode === "blended" || material.alphaMode === "additive") {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(
+        material.alphaMode === "additive" ? gl.ONE : gl.SRC_ALPHA,
+        material.alphaMode === "additive" ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA,
+      );
+    } else gl.disable(gl.BLEND);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, material.texture);
+    gl.bindSampler(0, material.samplerMode === "repeat" ? this.repeatSampler : this.clampSampler);
+    gl.uniform1f(this.opacityLocation, material.opacity);
+    gl.uniform1f(this.luminosityLocation, material.luminosity);
+    gl.uniform1f(this.diffuseLocation, material.diffuse);
+    gl.uniform1f(this.alphaCutoffLocation, material.alphaCutoff);
+    gl.uniform1i(this.alphaModeLocation, material.alphaMode === "cutout" ? 1 : 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, batch.vertexBuffer);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, batch.indexBuffer);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 32, 12);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 32, 24);
+    gl.drawElements(gl.TRIANGLES, batch.indexCount, gl.UNSIGNED_INT, 0);
+  }
+
+  private releaseBatches(): void {
+    for (const batch of this.batches) {
+      this.gl.deleteBuffer(batch.vertexBuffer);
+      this.gl.deleteBuffer(batch.indexBuffer);
+      this.datClient.releaseMaterial(batch.mesh.materialResourceId);
+    }
+    this.batches = [];
+  }
+
+  private updateModelMatrix(): void {
+    if (!this.bounds) return;
+    const center = this.bounds.minimum.map((value, index) =>
+      (value + this.bounds!.maximum[index]) * 0.5,
+    );
+    const scale = this.modelScale;
+    const cosine = 0.9063;
+    const sine = 0.4226;
+    const tx = -scale * (cosine * center[0] - sine * center[2]);
+    const tz = -scale * (sine * center[0] + cosine * center[2]);
+    this.modelMatrix = new Float32Array([
+      scale * cosine, 0, -scale * sine, 0,
+      0, scale, 0, 0,
+      scale * sine, 0, scale * cosine, 0,
+      tx, -scale * center[1], tz, 1,
+    ]);
+  }
+}

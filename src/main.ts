@@ -9,6 +9,7 @@ import {
 import { worldToMapCoordinates } from "./lib/coordinates";
 import { setupLocationsPanel } from "./lib/locationspanel";
 import { loadDungeonNames } from "./lib/dungeons";
+import { setupExamineWindow } from "./examine";
 
 const canvas: HTMLCanvasElement = document.querySelector("#canvas")!;
 const loader = document.querySelector("#loader")!;
@@ -38,8 +39,19 @@ async function start(): Promise<void> {
     selection.server?.labelVersion ?? selection.server?.version,
     selection.server?.id,
   );
+  const examineWindow = selection.server ? setupExamineWindow({
+    apiBase: apiRoot,
+    serverDescriptorPath: `v3/servers/${encodeURIComponent(selection.server.id)}/dataset`,
+    serverId: selection.server.id,
+  }) : undefined;
+  const examineGuid = new URLSearchParams(window.location.search).get("examine");
+  if (examineWindow && examineGuid) examineWindow.open(examineGuid);
+  window.addEventListener("ac-examine-object", (event) => {
+    const guid = (event as CustomEvent<number | string>).detail;
+    if (examineWindow && (typeof guid === "number" || typeof guid === "string")) examineWindow.open(guid);
+  }, { signal: renderer.shutdownSignal });
   populateDatasetSelector(selector, catalog, selection, () => renderer.shutdown());
-  window.addEventListener("pagehide", () => renderer.shutdown(), { once: true });
+  window.addEventListener("pagehide", () => { examineWindow?.destroy(); renderer.shutdown(); }, { once: true });
   const dungeonNamesEndpoint = selection.server ? new URL(
     `v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/dungeon-names`, apiRoot,
   ).toString() : undefined;

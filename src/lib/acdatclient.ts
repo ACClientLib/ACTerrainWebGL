@@ -67,6 +67,27 @@ export interface WorldObjectQuaternion { x: number; y: number; z: number; w: num
 export type WorldObjectScalarProperties = Record<string, number | string | boolean | null>;
 export type WorldObjectInt64Properties = Record<string, number | string | null>;
 export type WorldObjectCompositeProperties = Record<string, Record<string, number | boolean | string | null>>;
+export interface ServerObjectRenderReady {
+  status: "ready";
+  sourceSetupId: number;
+  modelId: number;
+  modelIndex: number;
+  meshResourceId: number;
+  dependencyResourceIds: number[];
+  scale: number;
+}
+export interface ServerObjectRenderUnavailable {
+  status: "unavailable" | "unsupported";
+  sourceSetupId: number | null;
+  modelId: number | null;
+  modelIndex: number | null;
+  meshResourceId: number | null;
+  dependencyResourceIds: number[];
+  scale: number | null;
+}
+export type ServerObjectRenderData =
+  | ServerObjectRenderReady
+  | ServerObjectRenderUnavailable;
 export interface WorldObjectData {
   guid: number;
   classId: number;
@@ -91,6 +112,7 @@ export interface WorldObjectData {
   createLists: WorldObjectCompositeProperties;
   textureOverrides: WorldObjectCompositeProperties;
   paletteOverrides: WorldObjectCompositeProperties;
+  render: ServerObjectRenderData;
 }
 
 export const SERVER_SPAWNS = 2;
@@ -203,6 +225,20 @@ export interface Mesh {
   vertexCount: number;
   indexCount: number;
 }
+export interface LoadedModelBatch {
+  mesh: MeshBatch;
+  material: ObjectMaterial;
+}
+export interface LoadedServerObjectModel {
+  object: WorldObjectData;
+  render: ServerObjectRenderReady;
+  mesh: Mesh;
+  batches: LoadedModelBatch[];
+}
+
+export type ServerObjectModelLoadPhase =
+  | "loading object"
+  | "loading model resources";
 interface CachedMaterial {
   promise: Promise<ObjectMaterial>;
   references: number;
@@ -323,7 +359,7 @@ export class AcDatClient {
   private materialRegistry!: ResourceRegistry<ObjectMaterial, ObjectMaterial>;
   private textureRegistry!: ResourceRegistry<TextureCpu, WebGLTexture>;
   private meshRegistry!: ResourceRegistry<Mesh>;
-  private meshes = new Map<number, Promise<Mesh>>();
+  private meshesByResourceId = new Map<number, Promise<Mesh>>();
   private materials = new Map<number, CachedMaterial>();
   private pendingMaterials = new Set<Promise<ObjectMaterial>>();
   private textures = new Map<number, CachedTexture>();
@@ -538,6 +574,32 @@ export class AcDatClient {
     return (await response.json()) as WorldObjectData;
   }
 
+  async loadServerObjectModel(
+    guid: number | string,
+    signal?: AbortSignal,
+    onPhase?: (phase: ServerObjectModelLoadPhase) => void,
+  ): Promise<LoadedServerObjectModel> {
+    onPhase?.("loading object");
+    const object = await this.getServerObject(guid, signal);
+    if (object.render.status !== "ready")
+      throw new Error(`Server object render status is ${object.render.status}`);
+
+    const resourceIds = [
+      object.render.meshResourceId,
+      ...object.render.dependencyResourceIds,
+    ];
+    onPhase?.("loading model resources");
+    await this.loadResources([...new Set(resourceIds)], signal);
+    const mesh = await this.meshResource(object.render.meshResourceId, signal);
+    const batches = await Promise.all(
+      mesh.batches.map(async (batch) => ({
+        mesh: batch,
+        material: await this.material(batch.materialResourceId),
+      })),
+    );
+    return { object, render: object.render, mesh, batches };
+  }
+
   async initialize(): Promise<void> {
     await this.ensureReady();
   }
@@ -662,23 +724,26 @@ export class AcDatClient {
   }
 
   mesh(modelIndex: number, signal?: AbortSignal): Promise<Mesh> {
-    let promise = this.meshes.get(modelIndex);
+    const resourceId = this.models[modelIndex]?.meshResourceId;
+    if (resourceId === undefined)
+      return Promise.reject(new Error("Missing ACTerrain mesh"));
+    return this.meshResource(resourceId, signal);
+  }
+
+  meshResource(resourceId: number, signal?: AbortSignal): Promise<Mesh> {
+    let promise = this.meshesByResourceId.get(resourceId);
     if (!promise) {
       let created!: Promise<Mesh>;
-      created = this.decodeMesh(
-        this.models[modelIndex]?.meshResourceId,
-        1,
-        signal,
-      ).catch((error) => {
-        if (this.meshes.get(modelIndex) === created)
-          this.meshes.delete(modelIndex);
+      created = this.decodeMesh(resourceId, 1, signal).catch((error) => {
+        if (this.meshesByResourceId.get(resourceId) === created)
+          this.meshesByResourceId.delete(resourceId);
         throw error;
       });
       promise = created;
-      this.meshes.set(modelIndex, promise);
+      this.meshesByResourceId.set(resourceId, promise);
     } else {
-      this.meshes.delete(modelIndex);
-      this.meshes.set(modelIndex, promise);
+      this.meshesByResourceId.delete(resourceId);
+      this.meshesByResourceId.set(resourceId, promise);
     }
     this.trimMeshCache();
     return promise;
@@ -979,7 +1044,7 @@ export class AcDatClient {
     this.pendingResources.clear();
     this.decodedPlacements.clear();
     this.lifecycleController = new AbortController();
-    this.meshes.clear();
+    this.meshesByResourceId.clear();
     this.materials.clear();
     this.textures.clear();
   }
@@ -1010,7 +1075,7 @@ export class AcDatClient {
     this.resourceBytes = 0;
     this.pendingResources.clear();
     this.decodedPlacements.clear();
-    this.meshes.clear();
+    this.meshesByResourceId.clear();
     this.materials.clear();
     this.textures.clear();
   }
@@ -1785,11 +1850,10 @@ export class AcDatClient {
   }
 
   private trimMeshCache(): void {
-    while (this.meshes.size > MAX_DECODED_MESHES) {
-      const modelIndex = this.meshes.keys().next().value as number;
-      this.meshes.delete(modelIndex);
-      const resourceId = this.models[modelIndex]?.meshResourceId;
-      if (resourceId !== undefined) this.meshRegistry.remove(resourceId);
+    while (this.meshesByResourceId.size > MAX_DECODED_MESHES) {
+      const resourceId = this.meshesByResourceId.keys().next().value as number;
+      this.meshesByResourceId.delete(resourceId);
+      this.meshRegistry.remove(resourceId);
     }
   }
 
