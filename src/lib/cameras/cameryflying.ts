@@ -530,9 +530,10 @@ export class CameraFlying extends BaseCamera {
   }
 
   GetMapPosition(): Vector3 {
+    const rect = this.canvas.getBoundingClientRect();
     const ray = this.ScreenToWorldRay(
-      this.canvas.width / 2,
-      this.canvas.height / 2,
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
     );
     if (Math.abs(ray.direction.z) > 0.000001) {
       let groundHeight = this.renderer.getTerrainHeightAt(

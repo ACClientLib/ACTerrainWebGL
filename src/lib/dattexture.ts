@@ -187,12 +187,21 @@ class PaletteTextureMaterializer {
     const oldVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null;
     const oldBlend = gl.isEnabled(gl.BLEND);
     const oldDepthTest = gl.isEnabled(gl.DEPTH_TEST);
+    const oldCullFace = gl.isEnabled(gl.CULL_FACE);
     const oldActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
     const oldUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
     gl.activeTexture(gl.TEXTURE0); const oldTexture0 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
     gl.activeTexture(gl.TEXTURE1); const oldTexture1 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+    gl.activeTexture(gl.TEXTURE0);
+    const oldSampler0 = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
+    gl.activeTexture(gl.TEXTURE1);
+    const oldSampler1 = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
     gl.activeTexture(oldActive);
     try {
+      // Integer index planes require nearest filtering, supplied by the textures.
+      gl.bindSampler(0, null);
+      gl.bindSampler(1, null);
+      gl.disable(gl.CULL_FACE);
       const mipLevels = Math.floor(Math.log2(Math.max(image.width, image.height))) + 1;
       gl.bindTexture(gl.TEXTURE_2D, result); gl.texStorage2D(gl.TEXTURE_2D, mipLevels, gl.RGBA8, image.width, image.height);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, result, 0);
@@ -211,6 +220,11 @@ class PaletteTextureMaterializer {
       return result;
     } catch (error) { gl.deleteTexture(result); throw error; }
     finally {
+      gl.bindSampler(0, oldSampler0);
+      gl.bindSampler(1, oldSampler1);
+      if (oldCullFace) {
+        gl.enable(gl.CULL_FACE);
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, oldFramebuffer); gl.viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]); if (!oldProgram || gl.isProgram(oldProgram)) gl.useProgram(oldProgram); gl.bindVertexArray(oldVao); if (oldBlend) gl.enable(gl.BLEND); else gl.disable(gl.BLEND); if (oldDepthTest) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST); gl.pixelStorei(gl.UNPACK_ALIGNMENT, oldUnpack); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, oldTexture0); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, oldTexture1); gl.activeTexture(oldActive);
     }
   }
@@ -253,6 +267,7 @@ export class IndexedTextureLoader {
     this.restoreQueue.clear();
     this.materializer.clear();
     this.gpuRegistry.replaceDataset();
+    this.gpuRegistry.beginFrame();
   }
 
   shutdown(): void {

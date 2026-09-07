@@ -1,4 +1,5 @@
 import { DatObjectCache } from "./datobjectcache";
+import type { IndexedPlacement } from "./acdatclient";
 import * as glhelpers from "./glhelpers";
 import { Matrix4, Vector3, Vector2 } from "@math.gl/core";
 
@@ -250,6 +251,8 @@ export class TerrainRenderer {
     pitch: number;
     roll: number;
   } | null = null;
+  private selectedServerObjectValue: IndexedPlacement | null = null;
+  private serverPickGeneration = 0;
   #restoredFlyingCameraRoute = false;
   #updateMoveSpeedControl: (() => void) | null = null;
   #isShutdown = false;
@@ -257,6 +260,10 @@ export class TerrainRenderer {
 
   get shutdownSignal(): AbortSignal {
     return this.lifecycleController.signal;
+  }
+
+  get selectedServerObject(): IndexedPlacement | null {
+    return this.selectedServerObjectValue;
   }
 
   mousePos = new Vector2();
@@ -907,6 +914,42 @@ export class TerrainRenderer {
   #setupInputs() {
     this.mousePos = new Vector2(0, 0);
 
+    let pointerId: number | null = null;
+    let pointerStartX = 0;
+    let pointerStartY = 0;
+    const pickDistance = 8;
+    const cancelPick = () => { pointerId = null; };
+    this.canvas.addEventListener("pointerdown", (event) => {
+      console.log(`[ACTerrain pick] pointerdown ${JSON.stringify({ button: event.button, pointerId: event.pointerId, client: [event.clientX, event.clientY] })}`);
+      if (event.button !== 0) return;
+      pointerId = event.pointerId;
+      pointerStartX = event.clientX;
+      pointerStartY = event.clientY;
+    }, { signal: this.shutdownSignal });
+    this.canvas.addEventListener("pointermove", (event) => {
+      if (event.pointerId === pointerId &&
+        Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > pickDistance) {
+        cancelPick();
+      }
+    }, { signal: this.shutdownSignal });
+    this.canvas.addEventListener("pointerup", (event) => {
+      console.log(`[ACTerrain pick] pointerup ${JSON.stringify({ button: event.button, pointerId: event.pointerId, expectedPointerId: pointerId, client: [event.clientX, event.clientY] })}`);
+      if (event.pointerId !== pointerId) {
+        console.log("[ACTerrain pick] pointerup ignored: pointer id mismatch");
+        return;
+      }
+      pointerId = null;
+      const distance = Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY);
+      if (distance > pickDistance) {
+        console.log(`[ACTerrain pick] pointerup ignored: drag ${JSON.stringify({ distance, pickDistance })}`);
+        return;
+      }
+      void this.pickServerObject(event.clientX, event.clientY);
+    }, { signal: this.shutdownSignal });
+    this.canvas.addEventListener("pointercancel", cancelPick, { signal: this.shutdownSignal });
+    window.addEventListener("blur", cancelPick, { signal: this.shutdownSignal });
+    document.addEventListener("visibilitychange", cancelPick, { signal: this.shutdownSignal });
+
     this.canvas.addEventListener("pointerdown", () => {
       this.canvas.focus({ preventScroll: true });
     }, { signal: this.shutdownSignal });
@@ -949,6 +992,64 @@ export class TerrainRenderer {
     document.addEventListener("visibilitychange", () =>
       this.invalidate("visibility"), { signal: this.shutdownSignal },
     );
+  }
+
+  private async pickServerObject(clientX: number, clientY: number): Promise<void> {
+    const generation = ++this.serverPickGeneration;
+    if (!this.#serverGeometry || this.cameraTransition) {
+      console.log(`[ACTerrain pick] click ignored ${JSON.stringify({
+        hasServerGeometry: !!this.#serverGeometry,
+        cameraTransition: !!this.cameraTransition,
+      })}`);
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const ray = this.currentCameraMode === CameraMode.Camera2D
+      ? this.camera2D.ScreenToWorldRay(clientX, clientY)
+      : this.flyingCamera.ScreenToWorldRay(clientX, clientY);
+    const placement = this.currentCameraMode === CameraMode.Camera2D
+      ? await this.#serverGeometry.pickServerSpawn2D(ray)
+      : (await this.#serverGeometry.pickServerSpawn3D(ray))?.placement ?? null;
+    console.log(`[ACTerrain pick] click ${JSON.stringify({
+      mode: this.currentCameraMode,
+      client: [clientX, clientY],
+      local: [localX, localY],
+      canvas: [this.canvas.width, this.canvas.height],
+      css: [rect.width, rect.height],
+      camera: {
+        position: [this.flyingCamera.Position.x, this.flyingCamera.Position.y, this.flyingCamera.Position.z],
+        yaw: this.flyingCamera.Yaw,
+        pitch: this.flyingCamera.Pitch,
+        roll: this.flyingCamera.Roll,
+        fov: this.flyingCamera.FOV,
+      },
+      ray: ray ? {
+        origin: [ray.origin.x, ray.origin.y, ray.origin.z],
+        direction: [ray.direction.x, ray.direction.y, ray.direction.z],
+      } : undefined,
+      selected: placement ? {
+        guid: placement.objectGuid,
+        modelIndex: placement.modelIndex,
+        origin: placement.origin,
+      } : null,
+    })}`);
+    if (generation !== this.serverPickGeneration || this.shutdownSignal.aborted) {
+      return;
+    }
+    this.selectedServerObjectValue = placement;
+    if (placement?.objectGuid !== undefined) {
+      window.dispatchEvent(new CustomEvent("ac-examine-object", {
+        detail: {
+          guid: placement.objectGuid,
+          modelIndex: placement.modelIndex,
+          rotation: placement.rotation,
+          scale: placement.scale,
+        },
+      }));
+    }
+    this.invalidate("input");
   }
 
   #setupGL() {

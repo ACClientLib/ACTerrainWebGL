@@ -47,8 +47,13 @@ async function start(): Promise<void> {
   const examineGuid = new URLSearchParams(window.location.search).get("examine");
   if (examineWindow && examineGuid) examineWindow.open(examineGuid);
   window.addEventListener("ac-examine-object", (event) => {
-    const guid = (event as CustomEvent<number | string>).detail;
-    if (examineWindow && (typeof guid === "number" || typeof guid === "string")) examineWindow.open(guid);
+    const detail = (event as CustomEvent<number | string | { guid: number | string; modelIndex?: number; rotation?: [number, number, number, number]; scale?: [number, number, number] }>).detail;
+    const guid = typeof detail === "object" ? detail.guid : detail;
+    const modelIndex = typeof detail === "object" ? detail.modelIndex : undefined;
+    const transform = typeof detail === "object" && detail.rotation && detail.scale
+      ? { rotation: detail.rotation, scale: detail.scale }
+      : undefined;
+    if (examineWindow && (typeof guid === "number" || typeof guid === "string")) examineWindow.open(guid, modelIndex, transform);
   }, { signal: renderer.shutdownSignal });
   populateDatasetSelector(selector, catalog, selection, () => renderer.shutdown());
   window.addEventListener("pagehide", () => { examineWindow?.destroy(); renderer.shutdown(); }, { once: true });

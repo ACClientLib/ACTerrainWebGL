@@ -13,6 +13,7 @@ type RenderBatch = LoadedModelBatch & {
   indexCount: number;
   order: number;
 };
+type PlacementTransform = { rotation: [number, number, number, number]; scale: [number, number, number] };
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -64,7 +65,6 @@ export class ExamineObjectRenderer {
   private batches: RenderBatch[] = [];
   private bounds: { minimum: [number, number, number]; maximum: [number, number, number] } | null = null;
   private camera: ExamineCamera | null = null;
-  private modelScale = 1;
   private modelMatrix = new Float32Array([
     0.9063, 0, -0.4226, 0,
     0, 1, 0, 0,
@@ -120,7 +120,7 @@ export class ExamineObjectRenderer {
     return this.loaded;
   }
 
-  async loadObject(guid: number | string, signal?: AbortSignal): Promise<void> {
+  async loadObject(guid: number | string, signal?: AbortSignal, modelIndex?: number, _placement?: PlacementTransform): Promise<void> {
     if (this.destroyed) throw new Error("Examine renderer has been destroyed");
     this.loadController?.abort();
     this.releaseBatches();
@@ -135,22 +135,28 @@ export class ExamineObjectRenderer {
     this.error = null;
     this.loaded = null;
     try {
-      const loaded = await this.loader.load(guid, controller.signal, this.onState);
-      if (generation !== this.generation || this.destroyed) {
+      const loaded = await this.loader.load(guid, controller.signal, (phase) => {
+        if (generation === this.generation && !controller.signal.aborted && !this.destroyed) {
+          this.onState?.(phase);
+        }
+      }, modelIndex);
+      if (generation !== this.generation || controller.signal.aborted || this.destroyed) {
         this.loader.release(loaded);
         return;
       }
       this.releaseBatches();
-      this.modelScale = loaded.render.scale;
       this.loaded = loaded.object;
       this.bounds = loaded.mesh.bounds;
-      this.camera = createExamineCamera(loaded.mesh.bounds, this.canvas.width, this.canvas.height, this.modelScale);
+      this.camera = createExamineCamera(loaded.mesh.bounds, this.canvas.width, this.canvas.height, 1);
       this.updateModelMatrix();
       try {
-        this.batches = loaded.batches.map((batch, order) => this.uploadBatch(batch, order));
+        for (const [order, batch] of loaded.batches.entries()) {
+          this.batches.push(this.uploadBatch(batch, order));
+        }
       } catch (cause) {
+        const uploadedCount = this.batches.length;
         this.releaseBatches();
-        this.loader.release(loaded);
+        this.loader.release({ ...loaded, batches: loaded.batches.slice(uploadedCount) });
         throw cause;
       }
     } catch (cause) {
@@ -184,11 +190,13 @@ export class ExamineObjectRenderer {
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
     this.gl.viewport(0, 0, width, height);
-    if (this.bounds) this.camera = createExamineCamera(this.bounds, width, height, this.modelScale);
+    if (this.bounds) this.camera = createExamineCamera(this.bounds, width, height, 1);
   }
 
   render(): void {
-    if (this.destroyed || !this.camera || this.batches.length === 0) return;
+    if (this.destroyed) return;
+    this.datClient.beginFrame();
+    if (!this.camera || this.batches.length === 0) return;
     const gl = this.gl;
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -215,6 +223,8 @@ export class ExamineObjectRenderer {
     this.loadController?.abort();
     this.releaseBatches();
     this.bounds = null;
+    this.camera = null;
+    this.loaded = null;
     this.gl.deleteSampler(this.clampSampler);
     this.gl.deleteSampler(this.repeatSampler);
     this.gl.deleteVertexArray(this.vao);
@@ -227,7 +237,11 @@ export class ExamineObjectRenderer {
     if (!vertices || !indices) throw new Error("Examine mesh batch has no indexed geometry");
     const vertexBuffer = this.gl.createBuffer();
     const indexBuffer = this.gl.createBuffer();
-    if (!vertexBuffer || !indexBuffer) throw new Error("Unable to create examine mesh buffers");
+    if (!vertexBuffer || !indexBuffer) {
+      this.gl.deleteBuffer(vertexBuffer);
+      this.gl.deleteBuffer(indexBuffer);
+      throw new Error("Unable to create examine mesh buffers");
+    }
     this.gl.bindVertexArray(this.vao);
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.STATIC_DRAW);
@@ -275,12 +289,17 @@ export class ExamineObjectRenderer {
   }
 
   private releaseBatches(): void {
+    const releases: Promise<void>[] = [];
     for (const batch of this.batches) {
       this.gl.deleteBuffer(batch.vertexBuffer);
       this.gl.deleteBuffer(batch.indexBuffer);
-      this.datClient.releaseMaterial(batch.mesh.materialResourceId);
+      releases.push(this.datClient.releaseMaterial(batch.mesh.materialResourceId));
     }
     this.batches = [];
+    // Flush this client's deferred texture deletions after material releases finish.
+    void Promise.all(releases).then(() => this.datClient.beginFrame());
+    this.gl.clearColor(0, 0, 0, 0);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
   }
 
   private updateModelMatrix(): void {
@@ -288,16 +307,42 @@ export class ExamineObjectRenderer {
     const center = this.bounds.minimum.map((value, index) =>
       (value + this.bounds!.maximum[index]) * 0.5,
     );
-    const scale = this.modelScale;
-    const cosine = 0.9063;
-    const sine = 0.4226;
-    const tx = -scale * (cosine * center[0] - sine * center[2]);
-    const tz = -scale * (sine * center[0] + cosine * center[2]);
+    const display = [0, 1, 0, 0] as [number, number, number, number];
+    // ACTerrain meshes use Z-up. The examine camera uses Y-up, so convert
+    // AC (X, Y, Z) into examine (X, Z, -Y) before applying display rotation.
+    const acToExamine = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2] as [number, number, number, number];
+    // Examine objects use scale 1 and the mesh's baked/final setup orientation,
+    // ignoring server render scale and placement transforms.
+    const q = this.multiplyQuaternion(display, acToExamine);
+    const rotation = this.quaternionMatrix(q);
+    const [cx, cy, cz] = center;
+    const tx = -(rotation[0] * cx + rotation[4] * cy + rotation[8] * cz);
+    const ty = -(rotation[1] * cx + rotation[5] * cy + rotation[9] * cz);
+    const tz = -(rotation[2] * cx + rotation[6] * cy + rotation[10] * cz);
     this.modelMatrix = new Float32Array([
-      scale * cosine, 0, -scale * sine, 0,
-      0, scale, 0, 0,
-      scale * sine, 0, scale * cosine, 0,
-      tx, -scale * center[1], tz, 1,
+      rotation[0], rotation[1], rotation[2], 0,
+      rotation[4], rotation[5], rotation[6], 0,
+      rotation[8], rotation[9], rotation[10], 0,
+      tx, ty, tz, 1,
     ]);
+  }
+
+  private multiplyQuaternion(a: [number, number, number, number], b: [number, number, number, number]): [number, number, number, number] {
+    return [
+      a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+      a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+      a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+      a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ];
+  }
+
+  private quaternionMatrix(q: [number, number, number, number]): number[] {
+    const [x, y, z, w] = q;
+    return [
+      1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0,
+      2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0,
+      2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0,
+      0, 0, 0, 1,
+    ];
   }
 }

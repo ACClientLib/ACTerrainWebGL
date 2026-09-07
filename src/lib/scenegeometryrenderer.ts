@@ -557,6 +557,182 @@ export class SceneGeometryRenderer {
     return this.resourceLoadError;
   }
 
+  async pickServerSpawn2D(ray: { origin: Vector3; direction: Vector3 }): Promise<IndexedPlacement | null> {
+    return (await this.pickServerSpawn(ray, CameraMode.Camera2D))?.placement ?? null;
+  }
+
+  async pickServerSpawn3D(ray: { origin: Vector3; direction: Vector3 }): Promise<{ placement: IndexedPlacement; distance: number } | null> {
+    return this.pickServerSpawn(ray, CameraMode.Flying);
+  }
+
+  private async pickServerSpawn(
+    ray: { origin: Vector3; direction: Vector3 },
+    mode: CameraMode,
+  ): Promise<{ placement: IndexedPlacement; distance: number } | null> {
+    const hits: { placement: IndexedPlacement; distance: number; bounds: Bounds3 }[] = [];
+    let frustumSkipped = 0;
+    for (const placement of this.serverSpawnPlacements()) {
+      // Outdoor 2D submissions exclude indoor spawns; they must not intercept clicks.
+      if (mode === CameraMode.Camera2D && this.dungeonPlacements.length === 0 &&
+        placement.category === CELL_SERVER_SPAWNS) {
+        continue;
+      }
+      const model = this.dats.model(placement.modelIndex);
+      if (!model) continue;
+      const bounds = this.placementBounds(placement, model.bounds);
+      if (mode === CameraMode.Flying && this.frameFrustum && !intersectsFrustum(bounds, this.frameFrustum)) {
+        frustumSkipped++;
+        continue;
+      }
+      const distance = this.rayBoundsDistance(ray.origin, ray.direction, bounds);
+      if (distance === null) continue;
+      hits.push({ placement, distance, bounds });
+    }
+    const exactHits = (await Promise.all(hits.map(async hit => {
+      try {
+        const mesh = await this.dats.mesh(hit.placement.modelIndex);
+        let distance: number | null = null;
+        for (const batch of mesh.batches) {
+          if (!batch.vertices || !batch.indices) continue;
+          for (let index = 0; index + 2 < batch.indices.length; index += 3) {
+            const a = this.placementVertex(hit.placement, batch.vertices, batch.indices[index]);
+            const b = this.placementVertex(hit.placement, batch.vertices, batch.indices[index + 1]);
+            const c = this.placementVertex(hit.placement, batch.vertices, batch.indices[index + 2]);
+            const triangleDistance = this.rayTriangleDistance(ray, a, b, c);
+            if (triangleDistance !== null && (distance === null || triangleDistance < distance)) distance = triangleDistance;
+          }
+        }
+        return distance === null ? null : { ...hit, distance };
+      } catch {
+        return null;
+      }
+    }))).filter((hit): hit is { placement: IndexedPlacement; distance: number; bounds: Bounds3 } => hit !== null);
+    let best: { placement: IndexedPlacement; distance: number; bounds: Bounds3 } | null = null;
+    for (const hit of exactHits) {
+      if (!best || hit.distance < best.distance ||
+        hit.distance === best.distance && this.comparePlacement(hit.placement, best.placement) < 0) best = hit;
+    }
+    console.log(`[ACTerrain pick] candidates ${JSON.stringify({
+      mode,
+      ray: {
+        origin: [ray.origin.x, ray.origin.y, ray.origin.z],
+        direction: [ray.direction.x, ray.direction.y, ray.direction.z],
+      },
+      frustumSkipped,
+      hitCount: hits.length,
+      exactHitCount: exactHits.length,
+      hits: hits.slice(0, 10).map(hit => ({
+        distance: hit.distance,
+        guid: hit.placement.objectGuid,
+        modelIndex: hit.placement.modelIndex,
+        origin: hit.placement.origin,
+        bounds: hit.bounds,
+      })),
+      selected: best ? { guid: best.placement.objectGuid, distance: best.distance, modelIndex: best.placement.modelIndex, origin: best.placement.origin, bounds: best.bounds } : null,
+    })}`);
+    return best;
+  }
+
+  private placementVertex(placement: IndexedPlacement, vertices: Float32Array, index: number): Vector3 {
+    const offset = index * 8;
+    const value = new Vector3(
+      vertices[offset] * placement.scale[0],
+      vertices[offset + 1] * placement.scale[1],
+      vertices[offset + 2] * placement.scale[2],
+    );
+    const q = placement.rotation;
+    const cross = new Vector3(
+      q[1] * value.z - q[2] * value.y,
+      q[2] * value.x - q[0] * value.z,
+      q[0] * value.y - q[1] * value.x,
+    );
+    const rotated = value.clone().add(cross.clone().scale(2 * q[3]));
+    rotated.add(new Vector3(
+      q[1] * cross.z - q[2] * cross.y,
+      q[2] * cross.x - q[0] * cross.z,
+      q[0] * cross.y - q[1] * cross.x,
+    ).scale(2));
+    return new Vector3(
+      placement.origin[0] + rotated.x,
+      this.acYOrigin - placement.origin[1] - rotated.y,
+      placement.origin[2] + rotated.z,
+    );
+  }
+
+  private rayTriangleDistance(
+    ray: { origin: Vector3; direction: Vector3 },
+    a: Vector3,
+    b: Vector3,
+    c: Vector3,
+  ): number | null {
+    const edge1 = b.clone().subtract(a);
+    const edge2 = c.clone().subtract(a);
+    const p = new Vector3(
+      ray.direction.y * edge2.z - ray.direction.z * edge2.y,
+      ray.direction.z * edge2.x - ray.direction.x * edge2.z,
+      ray.direction.x * edge2.y - ray.direction.y * edge2.x,
+    );
+    const determinant = edge1.x * p.x + edge1.y * p.y + edge1.z * p.z;
+    if (Math.abs(determinant) < 0.000001) return null;
+    const inverse = 1 / determinant;
+    const offset = ray.origin.clone().subtract(a);
+    const u = inverse * (offset.x * p.x + offset.y * p.y + offset.z * p.z);
+    if (u < 0 || u > 1) return null;
+    const q = new Vector3(
+      offset.y * edge1.z - offset.z * edge1.y,
+      offset.z * edge1.x - offset.x * edge1.z,
+      offset.x * edge1.y - offset.y * edge1.x,
+    );
+    const v = inverse * (ray.direction.x * q.x + ray.direction.y * q.y + ray.direction.z * q.z);
+    if (v < 0 || u + v > 1) return null;
+    const distance = inverse * (edge2.x * q.x + edge2.y * q.y + edge2.z * q.z);
+    return distance >= 0 ? distance : null;
+  }
+
+  private serverSpawnPlacements(): Iterable<IndexedPlacement> {
+    if (this.dungeonPlacements.length > 0) {
+      return this.dungeonPlacements.filter(placement =>
+        placement.category === SERVER_SPAWNS || placement.category === CELL_SERVER_SPAWNS,
+      );
+    }
+    return [...this.chunks.values()].flatMap(loaded => loaded
+      ? this.dats.placementsForChunk(loaded.chunk).filter(placement =>
+        placement.category === SERVER_SPAWNS || placement.category === CELL_SERVER_SPAWNS,
+      )
+      : []);
+  }
+
+  private comparePlacement(a: IndexedPlacement, b: IndexedPlacement): number {
+    const aGuid = a.objectGuid ?? Number.POSITIVE_INFINITY;
+    const bGuid = b.objectGuid ?? Number.POSITIVE_INFINITY;
+    return aGuid - bGuid || a.modelIndex - b.modelIndex ||
+      a.origin[0] - b.origin[0] || a.origin[1] - b.origin[1] || a.origin[2] - b.origin[2];
+  }
+
+  private rayBoundsDistance(origin: Vector3, direction: Vector3, bounds: Bounds3): number | null {
+    const originValues = [origin.x, origin.y, origin.z];
+    const directionValues = [direction.x, direction.y, direction.z];
+    let near = 0;
+    let far = Number.POSITIVE_INFINITY;
+    for (let axis = 0; axis < 3; axis++) {
+      const component = directionValues[axis];
+      const start = originValues[axis];
+      const minimum = bounds.minimum[axis];
+      const maximum = bounds.maximum[axis];
+      if (Math.abs(component) < 0.000001) {
+        if (start < minimum || start > maximum) return null;
+        continue;
+      }
+      let a = (minimum - start) / component;
+      let b = (maximum - start) / component;
+      if (a > b) [a, b] = [b, a];
+      near = Math.max(near, a);
+      far = Math.min(far, b);
+      if (near > far) return null;
+    }
+    return far >= 0 ? near : null;
+  }
+
   render(
     camera: BaseCamera,
     mode: CameraMode,

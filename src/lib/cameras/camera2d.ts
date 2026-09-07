@@ -290,6 +290,14 @@ export class Camera2D extends BaseCamera {
     return screenPosition.transform(this.TranslationMatrix.clone().invert());
   }
 
+  ScreenToWorldRay(screenX: number, screenY: number): { origin: Vector3; direction: Vector3 } {
+    const clip = this.getClipSpaceMousePosition(screenX, screenY);
+    const inverse = this.FrameInverseTransform;
+    const origin = new Vector3(clip.x, clip.y, -1).transform(inverse);
+    const far = new Vector3(clip.x, clip.y, 1).transform(inverse);
+    return { origin, direction: far.subtract(origin).normalize() };
+  }
+
   CoordsToScreen(coords: Coordinates) {
     let offset = new Vector3(
       coords.LBX() * LAND_BLOCK_SIZE + coords.LocalX,

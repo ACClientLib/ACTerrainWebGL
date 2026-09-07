@@ -90,8 +90,8 @@ export abstract class BaseCamera {
     const cssX = x - rect.left;
     const cssY = y - rect.top;
 
-    const normalizedX = cssX / this.canvas.clientWidth;
-    const normalizedY = cssY / this.canvas.clientHeight;
+    const normalizedX = cssX / rect.width;
+    const normalizedY = cssY / rect.height;
 
     const clipX = normalizedX * 2 - 1;
     const clipY = normalizedY * -2 + 1;

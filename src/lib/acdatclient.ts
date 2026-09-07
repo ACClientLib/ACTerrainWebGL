@@ -591,13 +591,27 @@ export class AcDatClient {
     onPhase?.("loading model resources");
     await this.loadResources([...new Set(resourceIds)], signal);
     const mesh = await this.meshResource(object.render.meshResourceId, signal);
-    const batches = await Promise.all(
-      mesh.batches.map(async (batch) => ({
-        mesh: batch,
-        material: await this.material(batch.materialResourceId),
-      })),
-    );
+    const batches = await this.loadModelBatches(mesh, signal);
     return { object, render: object.render, mesh, batches };
+  }
+
+  async loadModelBatches(mesh: Mesh, signal?: AbortSignal): Promise<LoadedModelBatch[]> {
+    const batches: LoadedModelBatch[] = [];
+    try {
+      for (const batch of mesh.batches) {
+        signal?.throwIfAborted();
+        const material = await this.material(batch.materialResourceId);
+        batches.push({ mesh: batch, material });
+      }
+      signal?.throwIfAborted();
+      return batches;
+    } catch (error) {
+      await Promise.all(batches.map((batch) =>
+        this.releaseMaterial(batch.mesh.materialResourceId),
+      ));
+      this.beginFrame();
+      throw error;
+    }
   }
 
   async initialize(): Promise<void> {
@@ -1009,10 +1023,10 @@ export class AcDatClient {
     return entry.promise;
   }
 
-  releaseMaterial(id: number): void {
+  releaseMaterial(id: number): Promise<void> {
     const cached = this.materials.get(id);
-    if (!cached || --cached.references > 0) return;
-    void cached.promise
+    if (!cached || --cached.references > 0) return Promise.resolve();
+    return cached.promise
       .then((material) => {
         if (cached.references !== 0 || this.materials.get(id) !== cached)
           return;
@@ -1071,6 +1085,7 @@ export class AcDatClient {
     this.textureRegistry.replaceDataset();
     this.meshRegistry.replaceDataset();
     this.indexedTextures.shutdown();
+    this.textureRegistry.beginFrame();
     this.resources.clear();
     this.resourceBytes = 0;
     this.pendingResources.clear();

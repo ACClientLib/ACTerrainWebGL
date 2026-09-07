@@ -23,7 +23,7 @@ export function createExamineCamera(
     Math.abs(value - bounds.minimum[index]) * scale * 0.5,
   );
   const radius = Math.max(Math.hypot(extent[0], extent[1], extent[2]), 0.01);
-  const distance = radius * 1.25 / Math.sin((35 * Math.PI) / 360);
+  const distance = radius * 0.9 / Math.sin((35 * Math.PI) / 360);
   const near = Math.max(0.01, distance - radius * 2);
   const far = distance + radius * 2;
   const view = new Float32Array([
