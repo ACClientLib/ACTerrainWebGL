@@ -38,6 +38,9 @@ async function start(): Promise<void> {
       : undefined,
     selection.server?.labelVersion ?? selection.server?.version,
     selection.server?.id,
+    selection.server
+      ? new URL(`v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/objects`, apiRoot).toString()
+      : undefined,
   );
   const examineWindow = selection.server ? setupExamineWindow({
     apiBase: apiRoot,

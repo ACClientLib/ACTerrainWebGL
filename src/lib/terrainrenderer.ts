@@ -35,8 +35,9 @@ import { createSceneView, type SceneLighting, type SceneView } from "./sceneview
 import type { SceneSubmission } from "./scenesubmission";
 import { LabelsClient } from "./labelsclient";
 import { dungeonCoordinates, dungeonName, type DungeonCell, type DungeonSelection } from "./dungeons";
-import type { LocationTarget } from "./locationsearch";
+import { rotation, type LocationTarget } from "./locationsearch";
 import { isTextEditingTarget } from "./keyboard";
+import { pushCameraRoute } from "./router";
 
 const CAMERA_TRANSITION_DURATION_MS = 200;
 
@@ -285,6 +286,7 @@ export class TerrainRenderer {
   #monitorFrameCount = 0;
   #monitorFrameStarted = performance.now();
   #labels?: LabelsClient;
+  private readonly portalDestinationPath?: string;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -295,11 +297,13 @@ export class TerrainRenderer {
     labelsPath?: string,
     labelsRevision?: string,
     serverId?: string,
+    portalDestinationPath?: string,
   ) {
     this.canvas = canvas;
     this.loader = loader;
     this.gl = canvas.getContext("webgl2")!;
     this.quality = quality;
+    this.portalDestinationPath = portalDestinationPath;
 
     // Initialize both cameras
     this.camera2D = new Camera2D(this.canvas, this);
@@ -322,7 +326,12 @@ export class TerrainRenderer {
       datDescriptorPath,
       "dat",
     );
-    this.skyboxRenderer = new SkyboxRenderer(this.gl, this.#sceneGeometry.datClient, this.#sceneGeometry.meshOwner);
+    this.skyboxRenderer = new SkyboxRenderer(
+      this.gl,
+      this.#sceneGeometry.datClient,
+      this.#sceneGeometry.meshOwner,
+      () => this.invalidate("resource publication"),
+    );
     this.#serverGeometry = serverDescriptorPath
       ? new SceneGeometryRenderer(this.gl, serverDescriptorPath, "server", serverId)
       : undefined;
@@ -1003,8 +1012,13 @@ export class TerrainRenderer {
     let pointerId: number | null = null;
     let pointerStartX = 0;
     let pointerStartY = 0;
+    let pickTimer: number | undefined;
     const pickDistance = 8;
-    const cancelPick = () => { pointerId = null; };
+    const cancelPick = () => {
+      pointerId = null;
+      window.clearTimeout(pickTimer);
+      pickTimer = undefined;
+    };
     this.canvas.addEventListener("pointerdown", (event) => {
       console.log(`[ACTerrain pick] pointerdown ${JSON.stringify({ button: event.button, pointerId: event.pointerId, client: [event.clientX, event.clientY] })}`);
       if (event.button !== 0) return;
@@ -1030,7 +1044,17 @@ export class TerrainRenderer {
         console.log(`[ACTerrain pick] pointerup ignored: drag ${JSON.stringify({ distance, pickDistance })}`);
         return;
       }
-      void this.pickServerObject(event.clientX, event.clientY);
+      window.clearTimeout(pickTimer);
+      pickTimer = window.setTimeout(() => {
+        pickTimer = undefined;
+        void this.pickServerObject(event.clientX, event.clientY);
+      }, 250);
+    }, { signal: this.shutdownSignal });
+    this.canvas.addEventListener("dblclick", (event) => {
+      if (!this.portalDestinationPath) return;
+      window.clearTimeout(pickTimer);
+      pickTimer = undefined;
+      void this.navigateToPortal(event.clientX, event.clientY);
     }, { signal: this.shutdownSignal });
     this.canvas.addEventListener("pointercancel", cancelPick, { signal: this.shutdownSignal });
     window.addEventListener("blur", cancelPick, { signal: this.shutdownSignal });
@@ -1080,14 +1104,14 @@ export class TerrainRenderer {
     );
   }
 
-  private async pickServerObject(clientX: number, clientY: number): Promise<void> {
+  private async pickServerObject(clientX: number, clientY: number, examine = true): Promise<IndexedPlacement | null> {
     const generation = ++this.serverPickGeneration;
     if (!this.#serverGeometry || this.cameraTransition) {
       console.log(`[ACTerrain pick] click ignored ${JSON.stringify({
         hasServerGeometry: !!this.#serverGeometry,
         cameraTransition: !!this.cameraTransition,
       })}`);
-      return;
+      return null;
     }
     const rect = this.canvas.getBoundingClientRect();
     const localX = clientX - rect.left;
@@ -1122,10 +1146,10 @@ export class TerrainRenderer {
       } : null,
     })}`);
     if (generation !== this.serverPickGeneration || this.shutdownSignal.aborted) {
-      return;
+      return null;
     }
     this.selectedServerObjectValue = placement;
-    if (placement?.objectGuid !== undefined) {
+    if (examine && placement?.objectGuid !== undefined) {
       window.dispatchEvent(new CustomEvent("ac-examine-object", {
         detail: {
           guid: placement.objectGuid,
@@ -1136,6 +1160,41 @@ export class TerrainRenderer {
       }));
     }
     this.invalidate("input");
+    return placement;
+  }
+
+  private async navigateToPortal(clientX: number, clientY: number): Promise<void> {
+    try {
+      const placement = await this.pickServerObject(clientX, clientY, false);
+      if (placement?.objectGuid === undefined || !this.portalDestinationPath || this.shutdownSignal.aborted) return;
+      const response = await fetch(`${this.portalDestinationPath}/${placement.objectGuid}/destination`, {
+        signal: this.shutdownSignal,
+      });
+      if (!response.ok || this.shutdownSignal.aborted) return;
+      const destination = await response.json() as {
+        cellId: number; x: number; y: number; z: number;
+        w: number; rotationX: number; rotationY: number; rotationZ: number;
+      };
+      const cellId = Number(destination.cellId);
+      const position = { x: Number(destination.x), y: Number(destination.y), z: Number(destination.z) };
+      const quaternion = [destination.w, destination.rotationX, destination.rotationY, destination.rotationZ].map(Number);
+      if (!Number.isFinite(cellId) || !Object.values(position).every(Number.isFinite) ||
+          !quaternion.every(Number.isFinite) || Math.hypot(...quaternion) === 0) return;
+      const interior = (cellId & 0xffff) >= 0x100 && (cellId & 0xffff) < 0xfffe;
+      await this.navigateToLocation({
+        text: "Portal destination",
+        landblock: interior ? cellId >>> 16 : undefined,
+        cellId: interior ? cellId : undefined,
+        position: interior
+          ? { x: position.x, y: -position.y, z: position.z + 1.6 }
+          : { x: (cellId >>> 24) * LAND_BLOCK_SIZE + position.x,
+              y: MAP_SIZE - ((cellId >>> 16 & 0xff) * LAND_BLOCK_SIZE + position.y), z: position.z + 1.6 },
+        rotation: rotation(quaternion),
+      });
+      pushCameraRoute(this.cameraRoute);
+    } catch (error) {
+      if (!this.shutdownSignal.aborted) console.warn("Unable to navigate to portal destination", error);
+    }
   }
 
   #setupGL() {
@@ -1594,11 +1653,10 @@ export class TerrainRenderer {
       const distanceEnd = settings.data.distanceLandblocks * LAND_BLOCK_SIZE;
       const distanceStart = Math.max(0, distanceEnd - LAND_BLOCK_SIZE);
       if (sky?.worldFog.enabled) {
-        const start = Math.min(distanceStart, sky.worldFog.min);
         return {
           color: sky.worldFog.color,
-          start,
-          end: Math.max(start + 0.001, Math.min(distanceEnd, sky.worldFog.max)),
+          start: distanceStart,
+          end: distanceEnd,
           enabled: true,
         };
       }

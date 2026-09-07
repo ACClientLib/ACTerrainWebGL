@@ -22,7 +22,7 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
   const help = document.createElement("p");
   help.id = "location-search-help";
   help.className = "explore-help";
-  help.textContent = `${endpoint ? "Dungeons, NPCs, POIs. " : "Name search requires a server dataset. "}Enter a hex landblock, 12.3N,5.54E, or a cell ID [x y z] with optional W X Y Z quaternion.`;
+  help.textContent = `${endpoint ? "Dungeons, NPCs, POIs, portals. " : "Name search requires a server dataset. "}Enter a hex landblock, 12.3N,5.54E, or a cell ID [x y z] with optional W X Y Z quaternion.`;
   const results = document.createElement("div");
   results.className = "location-results dungeon-results";
   const status = document.createElement("div");

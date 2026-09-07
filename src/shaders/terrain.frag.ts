@@ -505,7 +505,8 @@ void main() {
     }
 
     if (fogEnabled != 0) {
-        float fogFactor = clamp((length(wpos - cameraPosition) - fogStart) /
+        float fogDistance = length(wpos - cameraPosition);
+        float fogFactor = clamp((fogDistance - fogStart) /
             max(fogEnd - fogStart, 0.0001), 0.0, 1.0);
         finalColor.rgb = mix(finalColor.rgb, fogColor, fogFactor);
     }

@@ -23,6 +23,7 @@ export function setupExamineDragging(root: HTMLElement, title: HTMLElement): voi
     let offsetY = 0;
     let dragging = false;
     title.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
       const bounds = root.getBoundingClientRect();
       offsetX = event.clientX - bounds.left;
       offsetY = event.clientY - bounds.top;

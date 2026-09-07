@@ -153,7 +153,9 @@ export function evaluateRegionSky(descriptor: RegionSkyDescriptor, groupIndex: n
   const objects = group.objects.map((object) => {
     const before = first.replacementByObject.get(object.objectIndex);
     const after = second.replacementByObject.get(object.objectIndex);
-    const inWindow = object.beginTime === object.endTime || (t > object.beginTime && t < object.endTime);
+    const inWindow = object.beginTime === object.endTime || (object.beginTime < object.endTime
+      ? t > object.beginTime && t < object.endTime
+      : t > object.beginTime || t < object.endTime);
     const meshResourceId = before?.meshResourceId ?? (inWindow ? object.defaultMeshResourceId : null);
     const modulation = (field: "luminosity" | "maxBright" | "transparent") => {
       const a = before?.[field] ?? -1;
@@ -161,11 +163,15 @@ export function evaluateRegionSky(descriptor: RegionSkyDescriptor, groupIndex: n
       const valid = field === "transparent" ? a >= 0 && b >= 0 : a > 0 && b > 0;
       return valid ? lerp(a, b, amount) : -1;
     };
+    const angleAmount = object.beginTime === object.endTime ? 0 : object.beginTime < object.endTime
+      ? (t - object.beginTime) / (object.endTime - object.beginTime)
+      : (t >= object.beginTime ? t - object.beginTime : t + 1 - object.beginTime) /
+        (1 - object.beginTime + object.endTime);
     return {
       object,
       meshResourceId,
       angle: object.beginTime === object.endTime ? object.beginAngle :
-        object.beginAngle + (object.endAngle - object.beginAngle) * (t - object.beginTime) / (object.endTime - object.beginTime),
+        object.beginAngle + (object.endAngle - object.beginAngle) * angleAmount,
       heading: before?.rotate ?? 0,
       luminosity: modulation("luminosity"),
       maxBright: modulation("maxBright"),

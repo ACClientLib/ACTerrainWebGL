@@ -69,6 +69,14 @@ export function updateCameraRoute(route: CameraRoute) {
   }
 }
 
+export function pushCameraRoute(route: CameraRoute) {
+  const newRoute = makeRoute(route);
+  if (currentRoute == newRoute) return;
+  updateHash.cancel();
+  currentRoute = newRoute;
+  history.pushState(null, "", `${location.pathname}${location.search}#${newRoute}`);
+}
+
 export function cancelCameraRouteUpdate(): void {
   updateHash.cancel();
   currentRoute = "";

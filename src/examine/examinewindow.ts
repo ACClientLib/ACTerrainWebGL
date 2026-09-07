@@ -33,7 +33,7 @@ export class ExamineWindow {
       if (creature) {
         this.item.close();
         this.creature ??= new ExamineCreaturePanel(this.options);
-        this.creature.open(guid, modelIndex, placement);
+        this.creature.open(object, guid, modelIndex, placement);
       } else {
         this.item.open(object);
       }

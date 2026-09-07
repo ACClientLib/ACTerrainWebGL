@@ -1199,6 +1199,9 @@ export class AcDatClient {
   }
 
   async setSkyActive(active: boolean): Promise<void> {
+    if (active) {
+      await this.ensureReady();
+    }
     if (active === this.skyActive && (!active || this.evaluatedSky || this.skyLoad)) {
       await this.skyLoad;
       return;

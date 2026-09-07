@@ -24,13 +24,20 @@ vec3 rotate(vec3 value) {
   return value + 2.0 * cross(skyRotation.xyz, cross(skyRotation.xyz, value) + skyRotation.w * value);
 }
 void main() {
-  vec3 p = rotate(localPosition) + skyOrigin;
+  // AC places sky objects on a 500-unit camera-relative sphere before
+  // applying the object's sky rotation.
+  vec3 p = rotate(localPosition + vec3(0.0, 0.0, -500.0)) + skyOrigin;
   normal = normalize(rotate(localNormal));
   p.y = -p.y;
   normal.y = -normal.y;
   uv = textureUv + uvOffset;
   fragmentWorldPosition = p;
-  gl_Position = xWorld * vec4(p, 1.0);
+  // Sky geometry is rendered without depth testing and must not be clipped by
+  // the world camera's far plane. Keep its projected X/Y, but place it at the
+  // clip far plane so changing world render distance cannot move the skybox
+  // horizon.
+  vec4 clip = xWorld * vec4(p, 1.0);
+  gl_Position = vec4(clip.xy, clip.w, clip.w);
 }`;
 
 interface SkyBatch {
@@ -71,7 +78,12 @@ export class SkyboxRenderer {
     this.createProgram();
   };
 
-  constructor(private readonly gl: WebGL2RenderingContext, private readonly dats: AcDatClient, private readonly meshOwner: LegacyMeshGpuOwner) {
+  constructor(
+    private readonly gl: WebGL2RenderingContext,
+    private readonly dats: AcDatClient,
+    private readonly meshOwner: LegacyMeshGpuOwner,
+    private readonly onReady?: () => void,
+  ) {
     this.createProgram();
     gl.canvas.addEventListener("webglcontextlost", this.onContextLost);
     gl.canvas.addEventListener("webglcontextrestored", this.onContextRestored);
@@ -172,10 +184,8 @@ export class SkyboxRenderer {
         const batches = this.particleBatches.get(item.meshResourceId) ?? [];
         for (let index = 0; index < batches.length; index++) {
           const batch = batches[index];
-          const origin: [number, number, number] = [...cameraOrigin];
-          if ((item.object.properties & 4) !== 0 && (item.object.properties & 8) === 0) {
-            origin[2] = -120;
-          }
+          const offset = this.rotate([0, 0, -500], this.rotation(item));
+          const origin: [number, number, number] = [cameraOrigin[0] + offset[0], cameraOrigin[1] + offset[1], cameraOrigin[2] + offset[2]];
           result.push({
             key: `sky:${this.groupIndex}:${item.object.objectIndex}:setup:${item.meshResourceId}:${index}`,
             material: batch.material, particles: batch.particles, origin,
@@ -197,10 +207,8 @@ export class SkyboxRenderer {
           if (particles.length === 0) {
             continue;
           }
-          const origin: [number, number, number] = [...cameraOrigin];
-          if ((item.object.properties & 4) !== 0 && (item.object.properties & 8) === 0) {
-            origin[2] = -120;
-          }
+          const offset = this.rotate([0, 0, -500], this.rotation(item));
+          const origin: [number, number, number] = [cameraOrigin[0] + offset[0], cameraOrigin[1] + offset[1], cameraOrigin[2] + offset[2]];
           result.push({
             key: `sky:${this.groupIndex}:${active.invocation}:${index}`,
             material: batch.material, particles, origin, rotation: this.rotation(item), scale: [1, 1, 1],
@@ -295,7 +303,10 @@ export class SkyboxRenderer {
           const material = {
             ...materials[index],
             cullState: source.cullState ?? materials[index].cullState,
-            samplerMode: "repeat" as const,
+            // Preserve the batch's UV addressing mode. Non-tiled cube faces
+            // need edge clamping, while clouds and other sky effects may use
+            // tiled/out-of-range UVs.
+            samplerMode: source.samplerMode ?? (source.hasWrappingUVs === true ? "repeat" : "clamp"),
           };
           if (source.particles) {
             loadedParticles.get(id)!.push({ material, particles: source.particles });
@@ -340,6 +351,7 @@ export class SkyboxRenderer {
       this.effects.setGroup(sky.groupIndex, group.objects);
       this.lastFrameTime = performance.now();
       this.ready = true;
+      this.onReady?.();
     } catch (error) {
       if (generation === this.generation && !this.destroyed) {
         console.error("Unable to prepare sky group", error);
@@ -373,6 +385,13 @@ export class SkyboxRenderer {
     ];
   }
 
+  private rotate(value: [number, number, number], quaternion: [number, number, number, number]): [number, number, number] {
+    const [x, y, z, w] = quaternion;
+    const cross1: [number, number, number] = [y * value[2] - z * value[1], z * value[0] - x * value[2], x * value[1] - y * value[0]];
+    const cross2: [number, number, number] = [y * cross1[2] - z * cross1[1], z * cross1[0] - x * cross1[2], x * cross1[1] - y * cross1[0]];
+    return [value[0] + 2 * (w * cross1[0] + cross2[0]), value[1] + 2 * (w * cross1[1] + cross2[1]), value[2] + 2 * (w * cross1[2] + cross2[2])];
+  }
+
   private draw(view: SceneView, item: EvaluatedSkyObject, batch: SkyBatch, pass: ScenePass): void {
     const gl = this.gl;
     const uniform = (name: string) => this.uniforms.get(name) ?? null;
@@ -382,11 +401,9 @@ export class SkyboxRenderer {
     // Keep the camera's projection, mirrored axes and rotation intact. Composing
     // its position cancels view translation without editing a projected matrix.
     const matrix = view.viewProjection.clone().translate([...view.cameraPosition]);
-    const z = (item.object.properties & 4) !== 0 && (item.object.properties & 8) === 0
-      ? -120 - view.cameraPosition[2] : 0;
     gl.uniformMatrix4fv(uniform("xWorld"), false, matrix);
     gl.uniform3f(uniform("cameraPosition"), 0, 0, 0);
-    gl.uniform3f(uniform("skyOrigin"), 0, 0, z);
+    gl.uniform3f(uniform("skyOrigin"), 0, 0, 0);
     gl.uniform4f(uniform("skyRotation"), ...this.rotation(item));
     const u = item.object.texVelocity[0] * this.effectSeconds;
     const v = item.object.texVelocity[1] * this.effectSeconds;
@@ -396,8 +413,11 @@ export class SkyboxRenderer {
     gl.uniform3f(uniform("sunlightColor"), ...view.lighting.sunlight);
     gl.uniform3f(uniform("ambientColor"), ...view.lighting.ambient);
     gl.uniform1i(uniform("buildingTexture"), 3);
-    gl.uniform1f(uniform("diffuseAmount"), item.maxBright >= 0 ? item.maxBright * 0.01 : batch.material.diffuse);
-    gl.uniform1f(uniform("luminosity"), item.luminosity >= 0 ? item.luminosity * 0.01 : batch.material.luminosity);
+    // Sky faces should have continuous brightness across their shared edges.
+    // The regular building shader derives lighting from the face normal, which
+    // makes the cube's directional-light discontinuities visible as seams.
+    gl.uniform1f(uniform("diffuseAmount"), 0);
+    gl.uniform1f(uniform("luminosity"), 1);
     gl.uniform1f(uniform("opacity"), batch.material.opacity * (item.transparent >= 0 ? 1 - item.transparent * 0.01 : 1));
     gl.uniform1f(uniform("alphaCutoff"), batch.material.alphaCutoff);
     gl.uniform1i(uniform("alphaMode"), batch.material.alphaMode === "cutout" ? 1 : batch.material.alphaMode === "blended" ? 2 : batch.material.alphaMode === "additive" ? 3 : 0);

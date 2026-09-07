@@ -23,7 +23,7 @@ export interface LocationTarget {
 }
 
 // AC quaternions are W/X/Y/Z; the renderer reflects AC's north axis.
-function rotation(values: number[]): LocationTarget["rotation"] {
+export function rotation(values: number[]): LocationTarget["rotation"] {
   const length = Math.hypot(...values);
   const [w, x, y, z] = values.map(value => value / length);
   return {

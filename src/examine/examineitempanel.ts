@@ -23,7 +23,7 @@ export class ExamineItemPanel {
     if (!styleInstalled) {
       const style = document.createElement("style");
       style.textContent = `
-        .ac-examine-item{position:absolute;left:5px;top:30px;width:300px;height:365px}
+        .ac-examine-item{position:absolute;left:5px;top:30px;width:300px;height:365px;isolation:isolate}
         .ac-examine-item-text{position:absolute;left:4px;top:0;width:280px;height:286px;margin:0;overflow-y:auto;overflow-x:hidden;white-space:pre-wrap;overflow-wrap:break-word;line-height:16px;scrollbar-width:none;color:#fff}
         .ac-examine-item-inscription{position:absolute;left:4px;top:291px;width:276px;height:57px;overflow-y:auto;overflow-x:hidden;white-space:pre-wrap;overflow-wrap:break-word;scrollbar-width:none;color:#000;line-height:16px}
         .ac-examine-item-signature{position:absolute;left:4px;top:348px;width:292px;height:17px;overflow:hidden;white-space:nowrap;text-align:right;color:#000}
@@ -42,6 +42,7 @@ export class ExamineItemPanel {
     this.root.hidden = true;
     // LayoutDesc 0x2100006B, item subpanel 0x1000012E.
     this.root.innerHTML = examineFrame(`<section class="ac-examine-item">
+      <div class="ac-examine-media" data-media="06004CC2" style="inset:0"></div>
       <div class="ac-examine-media ac-examine-inscription-media" data-media="0600612C" style="left:0;top:286px;width:300px;height:5px"></div>
       <div class="ac-examine-media ac-examine-inscription-media" data-media="0600126F" style="left:0;top:291px;width:300px;height:74px"></div>
       <div class="ac-examine-item-text" tabindex="0" aria-label="Item appraisal"></div>
