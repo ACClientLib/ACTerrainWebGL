@@ -92,6 +92,7 @@ export function populateDatasetSelector(
     const option = document.createElement("option");
     option.value = `server:${server.id}`;
     option.textContent = server.name;
+    option.title = "Packed world snapshot, including generator spawns and encounters.";
     servers.append(option);
   }
   element.replaceChildren(dats, servers);

@@ -188,6 +188,7 @@ export class SceneGeometryRenderer {
     if (!this.program || !this.instanceBuffer) {
       return;
     }
+    this.frameFrustum = mode === CameraMode.Flying ? camera.FrameFrustum : null;
     this.meshOwner.beginFrame();
     this.dats.beginFrame();
     this.refreshMeshHandles();

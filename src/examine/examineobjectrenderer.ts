@@ -146,8 +146,8 @@ export class ExamineObjectRenderer {
       }
       this.releaseBatches();
       this.loaded = loaded.object;
-      this.bounds = loaded.mesh.bounds;
-      this.camera = createExamineCamera(loaded.mesh.bounds, this.canvas.width, this.canvas.height, 1);
+      this.bounds = this.renderedBounds(loaded.batches, loaded.mesh.bounds);
+      this.camera = createExamineCamera(this.bounds, this.canvas.width, this.canvas.height, 1);
       this.updateModelMatrix();
       try {
         for (const [order, batch] of loaded.batches.entries()) {
@@ -311,8 +311,6 @@ export class ExamineObjectRenderer {
     // ACTerrain meshes use Z-up. The examine camera uses Y-up, so convert
     // AC (X, Y, Z) into examine (X, Z, -Y) before applying display rotation.
     const acToExamine = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2] as [number, number, number, number];
-    // Examine objects use scale 1 and the mesh's baked/final setup orientation,
-    // ignoring server render scale and placement transforms.
     const q = this.multiplyQuaternion(display, acToExamine);
     const rotation = this.quaternionMatrix(q);
     const [cx, cy, cz] = center;
@@ -325,6 +323,27 @@ export class ExamineObjectRenderer {
       rotation[8], rotation[9], rotation[10], 0,
       tx, ty, tz, 1,
     ]);
+  }
+
+  private renderedBounds(
+    batches: LoadedModelBatch[],
+    fallback: { minimum: [number, number, number]; maximum: [number, number, number] },
+  ): { minimum: [number, number, number]; maximum: [number, number, number] } {
+    const minimum: [number, number, number] = [Infinity, Infinity, Infinity];
+    const maximum: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    let vertexCount = 0;
+    for (const batch of batches) {
+      const vertices = batch.mesh.vertices;
+      if (!vertices) continue;
+      vertexCount += vertices.length / 8;
+      for (let offset = 0; offset < vertices.length; offset += 8) {
+        for (let axis = 0; axis < 3; axis++) {
+          minimum[axis] = Math.min(minimum[axis], vertices[offset + axis]);
+          maximum[axis] = Math.max(maximum[axis], vertices[offset + axis]);
+        }
+      }
+    }
+    return vertexCount > 0 ? { minimum, maximum } : fallback;
   }
 
   private multiplyQuaternion(a: [number, number, number, number], b: [number, number, number, number]): [number, number, number, number] {
