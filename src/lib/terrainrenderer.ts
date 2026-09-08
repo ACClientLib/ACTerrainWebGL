@@ -222,6 +222,7 @@ export class TerrainRenderer {
   #terrainVao: WebGLVertexArrayObject | null = null;
   #terrainInstanceBuffer: WebGLBuffer | null = null;
   #terrainInstanceCapacity = 0;
+  #terrainInstanceData = new Float32Array(0);
   #submissions: SceneSubmission[] = [];
   #sceneGeometry!: SceneGeometryRenderer;
   #serverGeometry?: SceneGeometryRenderer;
@@ -285,6 +286,7 @@ export class TerrainRenderer {
   #loadingDetails = document.querySelector<HTMLElement>("#loading-details");
   #monitorFrameCount = 0;
   #monitorFrameStarted = performance.now();
+  #lastOverlayKey = "";
   #labels?: LabelsClient;
   private readonly portalDestinationPath?: string;
 
@@ -1658,10 +1660,11 @@ export class TerrainRenderer {
   #ensureTerrainInstanceCapacity(count: number) {
     if (count <= this.#terrainInstanceCapacity) return;
 
+    this.#terrainInstanceData = new Float32Array(count * 2);
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.#terrainInstanceBuffer);
     this.gl.bufferData(
       this.gl.ARRAY_BUFFER,
-      new Float32Array(count * 2),
+      this.#terrainInstanceData,
       this.gl.DYNAMIC_DRAW,
     );
     this.#terrainInstanceCapacity = count;
@@ -1740,7 +1743,10 @@ export class TerrainRenderer {
       const centerY = mapYToLandBlock(this.flyingCamera.Position.y);
       const radius = settings.data.distanceLandblocks;
       const frustum = this.currentCamera.FrameFrustum;
-      const instances: number[] = [];
+      const instanceCountLimit = (Math.min(254, centerX + radius) - Math.max(0, centerX - radius) + 1) *
+        (Math.min(254, centerY + radius) - Math.max(0, centerY - radius) + 1);
+      this.#ensureTerrainInstanceCapacity(instanceCountLimit);
+      let instanceFloatCount = 0;
       for (
         let y = Math.max(0, centerY - radius);
         y <= Math.min(254, centerY + radius);
@@ -1768,16 +1774,16 @@ export class TerrainRenderer {
           ) {
             continue;
           }
-          instances.push(x, y);
+          this.#terrainInstanceData[instanceFloatCount++] = x;
+          this.#terrainInstanceData[instanceFloatCount++] = y;
         }
       }
-      this.#visibleLandblockCount = instances.length / 2;
-      this.#ensureTerrainInstanceCapacity(this.#visibleLandblockCount);
+      this.#visibleLandblockCount = instanceFloatCount / 2;
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.#terrainInstanceBuffer);
       this.gl.bufferSubData(
         this.gl.ARRAY_BUFFER,
         0,
-        new Float32Array(instances),
+        this.#terrainInstanceData.subarray(0, instanceFloatCount),
       );
       this.gl.uniform4f(
         this.#renderViewLoc!,
@@ -1796,37 +1802,37 @@ export class TerrainRenderer {
       this.#hasTerrainTextureDirty = false;
     }
     this.gl.uniform3f(
-      this.gl.getUniformLocation(this.program!, "cameraPosition"),
+      this.#cameraPositionLoc,
       this.currentCamera.Position.x,
       this.currentCamera.Position.y,
       this.currentCamera.Position.z,
     );
     this.gl.uniform3f(
-      this.gl.getUniformLocation(this.program!, "fogColor"),
+      this.#fogColorLoc,
       ...this.sceneView.fog.color,
     );
     this.gl.uniform1f(
-      this.gl.getUniformLocation(this.program!, "fogStart"),
+      this.#fogStartLoc,
       this.sceneView.fog.start,
     );
     this.gl.uniform1f(
-      this.gl.getUniformLocation(this.program!, "fogEnd"),
+      this.#fogEndLoc,
       this.sceneView.fog.end,
     );
     this.gl.uniform1i(
-      this.gl.getUniformLocation(this.program!, "fogEnabled"),
+      this.#fogEnabledLoc,
       this.sceneView.fog.enabled ? 1 : 0,
     );
     this.gl.uniform3f(
-      this.gl.getUniformLocation(this.program!, "lightDirection"),
+      this.#lightDirectionLoc,
       ...this.sceneView.lighting.direction,
     );
     this.gl.uniform3f(
-      this.gl.getUniformLocation(this.program!, "sunlightColor"),
+      this.#sunlightColorLoc,
       ...this.sceneView.lighting.sunlight,
     );
     this.gl.uniform3f(
-      this.gl.getUniformLocation(this.program!, "ambientColor"),
+      this.#ambientColorLoc,
       ...this.sceneView.lighting.ambient,
     );
   }
@@ -1838,13 +1844,26 @@ export class TerrainRenderer {
         geometry.pendingApiRequestCount > 0 ||
         geometry.pendingGpuUploadCount > 0,
     );
-    this.#loadingSpinner?.classList.toggle("visible", isLoading);
-    this.#updateLoadingDetails(geometries);
-    if (this.#sceneGeometry.sceneLoadState === "error") {
-      this.loader.textContent = `Unable to load terrain: ${this.#sceneGeometry.sceneLoadError}`;
-    }
-    if (this.#serverGeometry?.sceneLoadState === "error") {
-      this.loader.textContent = `Unable to load server overlay: ${this.#serverGeometry.sceneLoadError}`;
+    const overlayKey = [
+      isLoading,
+      ...geometries.flatMap((geometry) => [
+        geometry.pendingApiRequestCount,
+        geometry.pendingGpuUploadCount,
+        geometry.sceneLoadState,
+        geometry.sceneLoadError,
+        ...Object.values(geometry.loadDiagnostics),
+      ]),
+    ].join("|");
+    if (overlayKey !== this.#lastOverlayKey) {
+      this.#lastOverlayKey = overlayKey;
+      this.#loadingSpinner?.classList.toggle("visible", isLoading);
+      this.#updateLoadingDetails(geometries);
+      if (this.#sceneGeometry.sceneLoadState === "error") {
+        this.loader.textContent = `Unable to load terrain: ${this.#sceneGeometry.sceneLoadError}`;
+      }
+      if (this.#serverGeometry?.sceneLoadState === "error") {
+        this.loader.textContent = `Unable to load server overlay: ${this.#serverGeometry.sceneLoadError}`;
+      }
     }
     this.#monitorFrameCount++;
     const now = performance.now();

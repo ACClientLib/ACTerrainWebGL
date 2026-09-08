@@ -88,6 +88,13 @@ export class ParticleSimulation {
     return this.instances(placementOrigin, placementRotation, placementScale, maxInstances);
   }
 
+  currentInstances(maxInstances = Number.POSITIVE_INFINITY): ParticleSimulationInstance[] {
+    if (this.instanceResults.length > maxInstances) {
+      this.instanceResults.length = maxInstances;
+    }
+    return this.instanceResults;
+  }
+
   private emit(
     placementOrigin: [number, number, number],
     placementRotation: [number, number, number, number],
@@ -219,28 +226,59 @@ export class ParticleSimulation {
 
   private calculatePosition(particle: ParticleState, parentOrigin: [number, number, number]): [number, number, number] {
     const t = particle.lifetime;
-    const base = this.add(parentOrigin, particle.worldOffset);
+    const baseX = parentOrigin[0] + particle.worldOffset[0];
+    const baseY = parentOrigin[1] + particle.worldOffset[1];
+    const baseZ = parentOrigin[2] + particle.worldOffset[2];
     switch (this.descriptor.particleType) {
-      case 1: return base;
+      case 1: return [baseX, baseY, baseZ];
       case 2:
-      case 12: return this.add(base, this.mul(particle.worldA, t));
+      case 12: return [
+        baseX + particle.worldA[0] * t,
+        baseY + particle.worldA[1] * t,
+        baseZ + particle.worldA[2] * t,
+      ];
       case 3:
       case 4:
       case 8:
       case 9:
       case 10:
-      case 11: return this.add(base, this.add(this.mul(particle.worldA, t), this.mul(particle.worldB, 0.5 * t * t)));
+      case 11: {
+        const acceleration = 0.5 * t * t;
+        return [
+          baseX + particle.worldA[0] * t + particle.worldB[0] * acceleration,
+          baseY + particle.worldA[1] * t + particle.worldB[1] * acceleration,
+          baseZ + particle.worldA[2] * t + particle.worldB[2] * acceleration,
+        ];
+      }
       case 5: {
-        const swarm = this.add(base, this.mul(particle.worldA, t));
-        return [Math.cos(t * this.descriptor.b[0]) * particle.worldC[0] + swarm[0], Math.sin(t * this.descriptor.b[1]) * particle.worldC[1] + swarm[1], Math.cos(t * this.descriptor.b[2]) * particle.worldC[2] + swarm[2]];
+        const swarmX = baseX + particle.worldA[0] * t;
+        const swarmY = baseY + particle.worldA[1] * t;
+        const swarmZ = baseZ + particle.worldA[2] * t;
+        return [
+          Math.cos(t * this.descriptor.b[0]) * particle.worldC[0] + swarmX,
+          Math.sin(t * this.descriptor.b[1]) * particle.worldC[1] + swarmY,
+          Math.cos(t * this.descriptor.b[2]) * particle.worldC[2] + swarmZ,
+        ];
       }
       case 6: return [
-        (t * particle.worldB[0] + particle.worldC[0] * particle.worldA[0]) * t + base[0],
-        (t * particle.worldB[1] + particle.worldC[1] * particle.worldA[0]) * t + base[1],
-        (t * particle.worldB[2] + particle.worldC[2] * particle.worldA[0] + particle.worldA[2]) * t + base[2],
+        (t * particle.worldB[0] + particle.worldC[0] * particle.worldA[0]) * t + baseX,
+        (t * particle.worldB[1] + particle.worldC[1] * particle.worldA[0]) * t + baseY,
+        (t * particle.worldB[2] + particle.worldC[2] * particle.worldA[0] + particle.worldA[2]) * t + baseZ,
       ];
-      case 7: return this.add(this.add(base, this.mul(particle.worldC, Math.cos(particle.worldA[0] * t))), this.mul(particle.worldB, t * t));
-      default: return this.add(base, this.mul(particle.worldA, t));
+      case 7: {
+        const orbit = Math.cos(particle.worldA[0] * t);
+        const drift = t * t;
+        return [
+          baseX + particle.worldC[0] * orbit + particle.worldB[0] * drift,
+          baseY + particle.worldC[1] * orbit + particle.worldB[1] * drift,
+          baseZ + particle.worldC[2] * orbit + particle.worldB[2] * drift,
+        ];
+      }
+      default: return [
+        baseX + particle.worldA[0] * t,
+        baseY + particle.worldA[1] * t,
+        baseZ + particle.worldA[2] * t,
+      ];
     }
   }
 

@@ -355,6 +355,7 @@ export class SceneRenderer {
   private drawComposite(targets: SceneTargets): void {
     const gl = this.gl;
     if (!this.compositeProgram || !this.compositeVao || !targets.accumulation || !targets.revealage) return;
+    invalidateSceneDrawState(gl);
     gl.useProgram(this.compositeProgram);
     gl.bindVertexArray(this.compositeVao);
     gl.activeTexture(gl.TEXTURE0);

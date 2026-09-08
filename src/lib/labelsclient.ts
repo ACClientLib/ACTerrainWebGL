@@ -34,6 +34,8 @@ export class LabelsClient {
   private maximum3DDistance = Number.POSITIVE_INFINITY;
   private dungeonKey: string | null = null;
   private dungeonCells = new Set<number>();
+  private layoutRevision = 0;
+  private lastDrawKey = "";
   private readonly cachePromise: Promise<Cache> | null;
 
   constructor(
@@ -58,12 +60,16 @@ export class LabelsClient {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+    this.layoutRevision++;
+    this.lastDrawKey = "";
     if (!enabled) this.removeElements();
   }
 
   setDungeon(landblock?: number, cells = new Set<number>()): void {
     this.dungeonKey = landblock === undefined ? null : `dungeon/${landblock}`;
     this.dungeonCells = cells;
+    this.layoutRevision++;
+    this.lastDrawKey = "";
     this.removeElements();
   }
 
@@ -81,6 +87,8 @@ export class LabelsClient {
     this.enabled = false;
     this.lastCamera = null;
     this.loaded.clear();
+    this.layoutRevision++;
+    this.lastDrawKey = "";
     this.removeElements();
   }
 
@@ -89,6 +97,8 @@ export class LabelsClient {
     this.loaded.clear();
     for (const element of this.elements.values()) element.remove();
     this.elements.clear();
+    this.layoutRevision++;
+    this.lastDrawKey = "";
     if (typeof caches !== "undefined") await Promise.all([CACHE_NAME, ...LEGACY_CACHE_NAMES].map((name) => caches.delete(name)));
   }
 
@@ -152,6 +162,8 @@ export class LabelsClient {
     const body = (await response.json()) as LabelTile & { Labels?: TerrainLabel[] };
     this.lifecycleController.signal.throwIfAborted();
     this.loaded.set("all-poi", (body.labels ?? body.Labels ?? []).map((value) => normalizeLabel(value as unknown as Record<string, unknown>)));
+    this.layoutRevision++;
+    this.lastDrawKey = "";
     if (this.lastCamera) this.draw(this.lastCamera);
   }
 
@@ -184,6 +196,8 @@ export class LabelsClient {
     const body = (await response.json()) as LabelTile & { Labels?: TerrainLabel[] };
     this.lifecycleController.signal.throwIfAborted();
     this.loaded.set(key, (body.labels ?? body.Labels ?? []).map((value) => normalizeLabel(value as unknown as Record<string, unknown>)));
+    this.layoutRevision++;
+    this.lastDrawKey = "";
     if (this.lastCamera) this.draw(this.lastCamera);
   }
 
@@ -200,9 +214,27 @@ export class LabelsClient {
     }
     const flyingCamera = camera instanceof CameraFlying ? camera : null;
     const is3D = flyingCamera !== null;
-    const visible: TerrainLabel[] = [];
     const mapBlend = flyingCamera ? flyingCamera.MapProjectionBlend : 1;
     const mapZoom = flyingCamera ? flyingCamera.MapProjectionZoom : (camera as Camera2D).Zoom;
+    const drawKey = [
+      this.layoutRevision,
+      this.dungeonKey,
+      is3D,
+      camera.Position.x,
+      camera.Position.y,
+      camera.Position.z,
+      camera.ViewportSize.x,
+      camera.ViewportSize.y,
+      flyingCamera?.Yaw,
+      flyingCamera?.Pitch,
+      flyingCamera?.Roll,
+      mapBlend,
+      mapZoom,
+      this.maximum3DDistance,
+    ].join("|");
+    if (drawKey === this.lastDrawKey) return;
+    this.lastDrawKey = drawKey;
+    const visible: TerrainLabel[] = [];
     for (const [key, labels] of this.loaded) {
       if (this.dungeonKey !== null ? key !== this.dungeonKey : key.startsWith("dungeon/")) {
         continue;

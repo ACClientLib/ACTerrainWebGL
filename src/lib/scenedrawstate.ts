@@ -1,12 +1,12 @@
 import type { ScenePass } from "./scenesubmission";
+import type { ObjectMaterial } from "./acdatclient";
 
 export interface SceneDrawState {
   valid: boolean;
   program: WebGLProgram | null;
   meshPass: ScenePass | null;
   meshBatch: object | null;
-  meshMaterial: object | null;
-  meshInstanceOffset: number;
+  meshMaterial: ObjectMaterial | null;
   particlePass: ScenePass | null;
   particleMaterial: object | null;
   particleOffset: number;
@@ -21,7 +21,6 @@ function createState(): SceneDrawState {
     meshPass: null,
     meshBatch: null,
     meshMaterial: null,
-    meshInstanceOffset: -1,
     particlePass: null,
     particleMaterial: null,
     particleOffset: -1,
@@ -44,7 +43,6 @@ export function invalidateSceneDrawState(gl: WebGL2RenderingContext): void {
   state.meshPass = null;
   state.meshBatch = null;
   state.meshMaterial = null;
-  state.meshInstanceOffset = -1;
   state.particlePass = null;
   state.particleMaterial = null;
   state.particleOffset = -1;

@@ -62,7 +62,8 @@ interface GpuMesh {
 }
 interface ParticleDrawGroup {
   material: ObjectMaterial;
-  data: number[];
+  data: Float32Array;
+  count: number;
   offset: number;
   skyPass?: "background" | "foreground";
   skyObjectIndex?: number;
@@ -136,6 +137,10 @@ const MAX_2D_STATIC_FOOTPRINT = 192;
 const INSTANCE_FLOATS = 10;
 const PARTICLE_INSTANCE_FLOATS = 19;
 const MAX_2D_PARTICLE_INSTANCES = 12000;
+const MAX_3D_PARTICLE_INSTANCES = 24000;
+const PARTICLE_LOD_NEAR_CAMERA_DISTANCE = LAND_BLOCK_SIZE;
+const PARTICLE_LOD_FAR_CAMERA_DISTANCE = LAND_BLOCK_SIZE * 4;
+const PARTICLE_LOD_MIN_SCALE = 0.01;
 
 export class SceneGeometryRenderer {
   private dungeonPlacements: IndexedPlacement[] = [];
@@ -168,6 +173,7 @@ export class SceneGeometryRenderer {
     this.twoDPreparedSubmissions = [];
     this.twoDPreparedVisibleKey = "";
     this.particleSimulations.clear();
+    this.particleSimulationElapsed.clear();
     this.particleFrozenData.clear();
     this.particle2DFrozen = false;
     this.particle2DVisibleKey = "";
@@ -189,6 +195,9 @@ export class SceneGeometryRenderer {
       return;
     }
     this.frameFrustum = mode === CameraMode.Flying ? camera.FrameFrustum : null;
+    this.lastParticleCameraPosition = mode === CameraMode.Flying
+      ? [camera.Position.x, camera.Position.y, camera.Position.z]
+      : null;
     this.meshOwner.beginFrame();
     this.dats.beginFrame();
     this.refreshMeshHandles();
@@ -263,6 +272,7 @@ export class SceneGeometryRenderer {
   private resourceLoadError = "";
   private nextResourceRetry = 0;
   private fogDistance = 0;
+  private lastParticleCameraPosition: [number, number, number] | null = null;
   private lastEvictionKey = "";
   private pendingEviction: Set<string> | null = null;
   private camera2DVisibleBounds: Bounds3 | null = null;
@@ -350,6 +360,7 @@ export class SceneGeometryRenderer {
     this.pendingBakedMeshes.clear();
     this.chunks.clear();
     this.particleSimulations.clear();
+    this.particleSimulationElapsed.clear();
     this.particleFrozenData.clear();
     this.particle2DFrozen = false;
     this.particle2DVisibleKey = "";
@@ -386,6 +397,7 @@ export class SceneGeometryRenderer {
     this.pendingBakedMeshes.clear();
     this.chunks.clear();
     this.particleSimulations.clear();
+    this.particleSimulationElapsed.clear();
     this.particleFrozenData.clear();
     this.particleGroups.clear();
     this.commonGroups.clear();
@@ -796,8 +808,9 @@ export class SceneGeometryRenderer {
     }
     this.particle2DVisibleKey = mode === CameraMode.Camera2D ? visibleKey : "";
     this.particleSimulationSeen.clear();
+    this.particleFrameNumber++;
     this.commonGroups.clear();
-    for (const group of this.particleGroups.values()) group.data.length = 0;
+    for (const group of this.particleGroups.values()) group.count = 0;
     const preparedSubmissions: SceneSubmission[] = [];
     const preparedSubmit: SceneSubmissionSink = (submission) => {
       preparedSubmissions.push(submission);
@@ -805,7 +818,7 @@ export class SceneGeometryRenderer {
     };
     let particleInstancesRemaining = mode === CameraMode.Camera2D
       ? MAX_2D_PARTICLE_INSTANCES
-      : Number.POSITIVE_INFINITY;
+      : MAX_3D_PARTICLE_INSTANCES;
     const drawableGroups: { key: string; group: SceneGroup; mesh: GpuMesh }[] = [];
     let requiredFloats = 0;
     for (const [key, group] of groups) {
@@ -873,9 +886,9 @@ export class SceneGeometryRenderer {
     particleInstancesRemaining = bakedResult.particleInstancesRemaining;
     const skyGroups: ParticleDrawGroup[] = [];
     for (const input of skyParticles) {
-      const group: ParticleDrawGroup = { material: input.material, data: [], offset: 0, skyPass: input.skyPass, skyObjectIndex: input.objectIndex };
+      const group: ParticleDrawGroup = { material: input.material, data: new Float32Array(0), count: 0, offset: 0, skyPass: input.skyPass, skyObjectIndex: input.objectIndex };
       skyGroups.push(group);
-      particleInstancesRemaining -= this.appendParticleInstances(group.data, input.particles, input.origin[0], this.acYOrigin - input.origin[1], input.origin[2], input.rotation, input.scale, input.key, particleInstancesRemaining, false, input.emitting);
+      particleInstancesRemaining -= this.appendParticleInstances(group, input.particles, input.origin[0], this.acYOrigin - input.origin[1], input.origin[2], input.rotation, input.scale, input.key, particleInstancesRemaining, false, input.emitting);
     }
     if (requiredFloats > 0) {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
@@ -884,16 +897,16 @@ export class SceneGeometryRenderer {
     }
     let particleFloats = 0;
     for (const [material, group] of this.particleGroups) {
-      if (group.data.length === 0) {
+      if (group.count === 0) {
         this.particleGroups.delete(material);
         continue;
       }
       group.offset = particleFloats;
-      particleFloats += group.data.length;
+      particleFloats += group.count * PARTICLE_INSTANCE_FLOATS;
     }
     for (const group of skyGroups) {
       group.offset = particleFloats;
-      particleFloats += group.data.length;
+      particleFloats += group.count * PARTICLE_INSTANCE_FLOATS;
     }
     const particleDrawGroups = [...this.particleGroups.values(), ...skyGroups];
     if (particleFloats > 0 && this.particleBuffer) {
@@ -901,26 +914,30 @@ export class SceneGeometryRenderer {
         this.particleUploadData = new Float32Array(Math.max(particleFloats, this.particleUploadData.length * 2, PARTICLE_INSTANCE_FLOATS * 64));
       }
       for (const group of particleDrawGroups) {
-        this.particleUploadData.set(group.data, group.offset);
+        this.particleUploadData.set(
+          group.data.subarray(0, group.count * PARTICLE_INSTANCE_FLOATS),
+          group.offset,
+        );
       }
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.particleBuffer);
       this.gl.bufferData(this.gl.ARRAY_BUFFER, this.particleUploadData.subarray(0, particleFloats), this.gl.DYNAMIC_DRAW);
     }
     for (const group of particleDrawGroups) {
       const material = group.material;
-      if (group.data.length === 0) continue;
+      if (group.count === 0) continue;
       const renderClass = material.alphaMode === "additive" ? "additive" : material.alphaMode === "cutout" ? "masked" : material.alphaMode === "blended" ? "sourceOver" : "opaque";
       preparedSubmit({
         skyPass: group.skyPass,
         skyObjectIndex: group.skyObjectIndex,
         key: { renderClass, programVariant: "particle", cullState: "none", meshBatch: -1, material: material.indexedMaterialResourceId ?? -1, sampler: "clamp", parity: false },
-        instanceCount: group.data.length / PARTICLE_INSTANCE_FLOATS,
+        instanceCount: group.count,
         draw: (view, pass) => this.drawCommonParticle(view, group, pass),
       });
     }
     for (const key of this.particleSimulations.keys()) {
       if (!this.particleSimulationSeen.has(key)) {
         this.particleSimulations.delete(key);
+        this.particleSimulationElapsed.delete(key);
         this.particleFrozenData.delete(key);
       }
     }
@@ -959,7 +976,6 @@ export class SceneGeometryRenderer {
       state.meshPass = null;
       state.meshBatch = null;
       state.meshMaterial = null;
-      state.meshInstanceOffset = -1;
       state.particlePass = null;
       state.particleMaterial = null;
       state.particleOffset = -1;
@@ -976,31 +992,41 @@ export class SceneGeometryRenderer {
       gl.uniform3f(this.uniforms.sunlightColor, ...view.lighting.sunlight);
       gl.uniform3f(this.uniforms.ambientColor, ...view.lighting.ambient);
       gl.uniform1i(this.uniforms.texture, BUILDING_TEXTURE_UNIT);
-      gl.uniform1i(this.uniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : pass === "opaque" ? 4 : 0);
       gl.activeTexture(gl.TEXTURE0 + BUILDING_TEXTURE_UNIT);
     }
     if (state.meshPass !== pass) {
       state.meshPass = pass;
-      state.meshBatch = null;
-      state.meshMaterial = null;
       gl.uniform1i(this.uniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : pass === "opaque" ? 4 : 0);
     }
     if (state.meshMaterial !== batch.material) {
+      const previous = state.meshMaterial;
       state.meshMaterial = batch.material;
-      gl.bindTexture(gl.TEXTURE_2D, batch.material.texture);
-      gl.uniform1f(this.uniforms.diffuse, batch.material.diffuse);
-      gl.uniform1f(this.uniforms.luminosity, batch.material.luminosity);
-      gl.uniform1f(this.uniforms.opacity, batch.material.opacity);
-      gl.uniform1f(this.uniforms.alphaCutoff, batch.material.alphaCutoff);
-      gl.uniform1i(this.uniforms.alphaMode, batch.material.alphaMode === "cutout" ? 1 : batch.material.alphaMode === "blended" ? 2 : batch.material.alphaMode === "additive" ? 3 : 0);
+      if (!previous || previous.texture !== batch.material.texture) {
+        gl.bindTexture(gl.TEXTURE_2D, batch.material.texture);
+      }
+      if (!previous || previous.diffuse !== batch.material.diffuse) {
+        gl.uniform1f(this.uniforms.diffuse, batch.material.diffuse);
+      }
+      if (!previous || previous.luminosity !== batch.material.luminosity) {
+        gl.uniform1f(this.uniforms.luminosity, batch.material.luminosity);
+      }
+      if (!previous || previous.opacity !== batch.material.opacity) {
+        gl.uniform1f(this.uniforms.opacity, batch.material.opacity);
+      }
+      if (!previous || previous.alphaCutoff !== batch.material.alphaCutoff) {
+        gl.uniform1f(this.uniforms.alphaCutoff, batch.material.alphaCutoff);
+      }
+      if (!previous || previous.alphaMode !== batch.material.alphaMode) {
+        gl.uniform1i(this.uniforms.alphaMode, batch.material.alphaMode === "cutout" ? 1 : batch.material.alphaMode === "blended" ? 2 : batch.material.alphaMode === "additive" ? 3 : 0);
+      }
     }
     if (state.meshBatch !== batch) {
       state.meshBatch = batch;
-      state.meshInstanceOffset = -1;
       gl.bindVertexArray(batch.vao);
     }
-    if (state.meshInstanceOffset !== group.offset) {
-      state.meshInstanceOffset = group.offset;
+    // Attribute offsets belong to the VAO and survive batch and pass switches.
+    if (batch.instanceOffset !== group.offset) {
+      batch.instanceOffset = group.offset;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
       const byteOffset = group.offset * Float32Array.BYTES_PER_ELEMENT;
       gl.vertexAttribPointer(3, 3, gl.FLOAT, false, INSTANCE_FLOATS * 4, byteOffset);
@@ -1035,10 +1061,10 @@ export class SceneGeometryRenderer {
         for (let batchIndex = 0; batchIndex < mesh.batches.length; batchIndex++) {
           const batch = mesh.batches[batchIndex];
           if (!batch.particles || !batch.material) continue;
-          const particleGroup: ParticleDrawGroup = this.particleGroups.get(batch.material) ?? { material: batch.material, data: [], offset: 0 };
+          const particleGroup: ParticleDrawGroup = this.particleGroups.get(batch.material) ?? { material: batch.material, data: new Float32Array(0), count: 0, offset: 0 };
           this.particleGroups.set(batch.material, particleGroup);
           particleInstancesRemaining -= this.appendParticleInstances(
-            particleGroup.data,
+            particleGroup,
             batch.particles,
             // Baked particle descriptors already contain absolute world
             // coordinates after BakedChunkBuilder transforms them.
@@ -1087,14 +1113,16 @@ export class SceneGeometryRenderer {
     freeze: boolean,
   ): number {
     if (!batch.particles || !batch.material || maxInstances <= 0) return 0;
-    const group: ParticleDrawGroup = this.particleGroups.get(batch.material) ?? { material: batch.material, data: [], offset: 0 };
+    const group: ParticleDrawGroup = this.particleGroups.get(batch.material) ?? { material: batch.material, data: new Float32Array(0), count: 0, offset: 0 };
     this.particleGroups.set(batch.material, group);
     let appended = 0;
     for (let itemIndex = 0; itemIndex < placements.length; itemIndex++) {
       if (appended >= maxInstances) break;
       const placement = placements[itemIndex];
-      appended += this.appendParticleInstances(
-        group.data,
+      const lodScale = this.particleLodScale(placement);
+      const updateStride = this.particleUpdateStride(lodScale);
+      appended += this.appendSharedParticleInstances(
+        group,
         batch.particles,
         placement.origin[0],
         placement.origin[1],
@@ -1102,8 +1130,9 @@ export class SceneGeometryRenderer {
         placement.rotation,
         placement.scale,
         `${groupKey}:${itemIndex}`,
-        maxInstances - appended,
+        Math.max(1, Math.floor((maxInstances - appended) * lodScale)),
         freeze,
+        updateStride,
       );
     }
     return appended;
@@ -1159,8 +1188,73 @@ export class SceneGeometryRenderer {
       gl.uniform1f(this.particleUniforms.alphaCutoff, group.material.alphaCutoff);
       gl.uniform1i(this.particleUniforms.alphaMode, group.material.alphaMode === "cutout" ? 1 : group.material.alphaMode === "blended" ? 2 : group.material.alphaMode === "additive" ? 3 : 0);
     }
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, group.data.length / PARTICLE_INSTANCE_FLOATS);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, group.count);
     this.diagnostics.drawCalls++;
+  }
+
+  private appendSharedParticleInstances(
+    group: ParticleDrawGroup,
+    particles: import("./acdatclient").ParticleEmitterDescriptor[],
+    originX: number,
+    originY: number,
+    originZ: number,
+    rotation: [number, number, number, number],
+    scale: [number, number, number],
+    simulationKey: string,
+    maxInstances: number,
+    freeze: boolean,
+    updateStride: number,
+  ): number {
+    if (maxInstances <= 0) return 0;
+    let appended = 0;
+    for (let descriptorIndex = 0; descriptorIndex < particles.length; descriptorIndex++) {
+      if (appended >= maxInstances) break;
+      const descriptor = particles[descriptorIndex];
+      let simulation = this.sharedParticleSimulations.get(descriptor);
+      if (!simulation) {
+        simulation = new ParticleSimulation(descriptor);
+        this.sharedParticleSimulations.set(descriptor, simulation);
+      }
+      const lastFrame = this.sharedParticleFrame.get(descriptor);
+      let elapsed = this.sharedParticleElapsed.get(descriptor) ?? 0;
+      if (lastFrame !== this.particleFrameNumber) {
+        elapsed += this.particleFrameDeltaTime;
+        this.sharedParticleFrame.set(descriptor, this.particleFrameNumber);
+      }
+      const shouldUpdate = !this.sharedParticleInitialized.has(descriptor) ||
+        (!freeze && lastFrame !== this.particleFrameNumber && this.particleFrameNumber % updateStride === 0);
+      if (shouldUpdate) {
+        simulation.update(
+          elapsed,
+          [0, 0, 0],
+          [0, 0, 0, 1],
+          [1, 1, 1],
+          descriptor.maxParticles > 0 ? descriptor.maxParticles : Number.POSITIVE_INFINITY,
+          true,
+        );
+        this.sharedParticleInitialized.add(descriptor);
+        this.sharedParticleElapsed.set(descriptor, 0);
+      } else {
+        this.sharedParticleElapsed.set(descriptor, elapsed);
+      }
+      const instances = simulation.currentInstances(maxInstances - appended);
+      for (const instance of instances) {
+        this.ensureParticleCapacity(group, 1);
+        this.writeParticleInstance(
+          group.data,
+          group.count * PARTICLE_INSTANCE_FLOATS,
+          instance,
+          originX,
+          originY,
+          originZ,
+          rotation,
+          scale,
+        );
+        group.count++;
+      }
+      appended += instances.length;
+    }
+    return appended;
   }
 
   private requestChunks(
@@ -1337,12 +1431,18 @@ export class SceneGeometryRenderer {
   private particleSimulationSeen = new Set<string>();
   private particleLastFrameTime = 0;
   private particleFrameDeltaTime = 1 / 60;
+  private particleFrameNumber = 0;
+  private particleSimulationElapsed = new Map<string, number>();
+  private sharedParticleSimulations = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, ParticleSimulation>();
+  private sharedParticleElapsed = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, number>();
+  private sharedParticleFrame = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, number>();
+  private sharedParticleInitialized = new WeakSet<import("./acdatclient").ParticleEmitterDescriptor>();
   private particle2DFrozen = false;
   private particle2DVisibleKey = "";
   private particleFrozenData = new Map<string, number[]>();
 
   private appendParticleInstances(
-    data: number[],
+    group: ParticleDrawGroup,
     particles: import("./acdatclient").ParticleEmitterDescriptor[],
     originX: number,
     originY: number,
@@ -1353,6 +1453,7 @@ export class SceneGeometryRenderer {
     maxInstances: number,
     freeze: boolean,
     emitting = true,
+    updateStride = 1,
   ): number {
     if (maxInstances <= 0) return 0;
     let appended = 0;
@@ -1373,22 +1474,37 @@ export class SceneGeometryRenderer {
           cached.length,
           (maxInstances - appended) * PARTICLE_INSTANCE_FLOATS,
         );
-        for (let index = 0; index < count; index++) data.push(cached[index]);
+        this.ensureParticleCapacity(group, count / PARTICLE_INSTANCE_FLOATS);
+        for (let index = 0; index < count; index++) {
+          group.data[group.count * PARTICLE_INSTANCE_FLOATS + index] = cached[index];
+        }
+        group.count += count / PARTICLE_INSTANCE_FLOATS;
         appended += count / PARTICLE_INSTANCE_FLOATS;
         continue;
       }
-      const instances = simulation.update(
-        this.particleFrameDeltaTime,
-        [originX, originY, originZ],
-        rotation,
-        scale,
-        maxInstances - appended,
-        emitting,
-      );
+      const elapsed = (this.particleSimulationElapsed.get(key) ?? 0) + this.particleFrameDeltaTime;
+      const shouldUpdate = !this.particleSimulationElapsed.has(key) || this.particleFrameNumber % updateStride === 0;
+      let instances: ParticleSimulationInstance[];
+      if (shouldUpdate) {
+        this.particleSimulationElapsed.set(key, 0);
+        instances = simulation.update(
+          elapsed,
+          [originX, originY, originZ],
+          rotation,
+          scale,
+          maxInstances - appended,
+          emitting,
+        );
+      } else {
+        this.particleSimulationElapsed.set(key, elapsed);
+        instances = simulation.currentInstances(maxInstances - appended);
+      }
       const frozen = freeze ? [] : null;
       for (const instance of instances) {
         if (frozen) this.appendParticleInstance(frozen, instance);
-        this.appendParticleInstance(data, instance);
+        this.ensureParticleCapacity(group, 1);
+        this.writeParticleInstance(group.data, group.count * PARTICLE_INSTANCE_FLOATS, instance);
+        group.count++;
       }
       if (frozen) this.particleFrozenData.set(key, frozen);
       appended += instances.length;
@@ -1426,6 +1542,126 @@ export class SceneGeometryRenderer {
       instance.planeOrientation[0], instance.planeOrientation[1], instance.planeOrientation[2], instance.planeOrientation[3],
       instance.rotation[0], instance.rotation[1], instance.rotation[2], instance.rotation[3], cameraAligned ? instance.billboard : 0,
     );
+  }
+
+  private writeParticleInstance(
+    data: Float32Array,
+    offset: number,
+    instance: ParticleSimulationInstance,
+    originX?: number,
+    originY?: number,
+    originZ?: number,
+    placementRotation?: [number, number, number, number],
+    placementScale?: [number, number, number],
+  ): void {
+    const shared = placementRotation !== undefined && placementScale !== undefined;
+    const sx = placementScale !== undefined ? placementScale[0] : 1;
+    const sy = placementScale !== undefined ? placementScale[1] : 1;
+    const sz = placementScale !== undefined ? placementScale[2] : 1;
+    let centerX = instance.position[0] * sx;
+    let centerY = instance.position[1] * sy;
+    let centerZ = instance.position[2] * sz;
+    let rotationX = instance.rotation[0];
+    let rotationY = instance.rotation[1];
+    let rotationZ = instance.rotation[2];
+    let rotationW = instance.rotation[3];
+    if (shared) {
+      const q = placementRotation!;
+      const tx = 2 * (q[1] * centerZ - q[2] * centerY);
+      const ty = 2 * (q[2] * centerX - q[0] * centerZ);
+      const tz = 2 * (q[0] * centerY - q[1] * centerX);
+      centerX = centerX + q[3] * tx + q[1] * tz - q[2] * ty + (originX ?? 0);
+      centerY = centerY + q[3] * ty + q[2] * tx - q[0] * tz + (originY ?? 0);
+      centerZ = centerZ + q[3] * tz + q[0] * ty - q[1] * tx + (originZ ?? 0);
+      rotationX = q[3] * instance.rotation[0] + q[0] * instance.rotation[3] + q[1] * instance.rotation[2] - q[2] * instance.rotation[1];
+      rotationY = q[3] * instance.rotation[1] - q[0] * instance.rotation[2] + q[1] * instance.rotation[3] + q[2] * instance.rotation[0];
+      rotationZ = q[3] * instance.rotation[2] + q[0] * instance.rotation[1] - q[1] * instance.rotation[0] + q[2] * instance.rotation[3];
+      rotationW = q[3] * instance.rotation[3] - q[0] * instance.rotation[0] - q[1] * instance.rotation[1] - q[2] * instance.rotation[2];
+    }
+    const fullBillboard = instance.billboard === 1;
+    const cameraAligned = instance.billboard > 0.5;
+    const x = instance.dimensions[0];
+    const y = instance.dimensions[1];
+    const z = instance.dimensions[2];
+    let sizeX = fullBillboard ? Math.abs(x * sx) : instance.planeSize[0];
+    let sizeY = fullBillboard ? Math.abs(z * sz) : instance.planeSize[1];
+    if (!fullBillboard && shared) {
+      if (y > x && y > z) {
+        [sizeX, sizeY] = x > z
+          ? [Math.abs(x * sx), Math.abs(y * sy)]
+          : [Math.abs(y * sy), Math.abs(z * sz)];
+      } else if (x > y && x > z) {
+        [sizeX, sizeY] = z > y
+          ? [Math.abs(x * sx), Math.abs(z * sz)]
+          : [Math.abs(x * sx), Math.abs(y * sy)];
+      } else {
+        [sizeX, sizeY] = x > y
+          ? [Math.abs(x * sx), Math.abs(z * sz)]
+          : [Math.abs(y * sy), Math.abs(z * sz)];
+      }
+    }
+    if (fullBillboard) {
+      centerZ += instance.centerOffset[2] * sz * instance.scale;
+    } else {
+      const v0 = instance.centerOffset[0] * sx * instance.scale;
+      const v1 = instance.centerOffset[1] * sy * instance.scale;
+      const v2 = instance.centerOffset[2] * sz * instance.scale;
+      const tx = 2 * (rotationY * v2 - rotationZ * v1);
+      const ty = 2 * (rotationZ * v0 - rotationX * v2);
+      const tz = 2 * (rotationX * v1 - rotationY * v0);
+      centerX += v0 + rotationW * tx + rotationY * tz - rotationZ * ty;
+      centerY += v1 + rotationW * ty + rotationZ * tx - rotationX * tz;
+      centerZ += v2 + rotationW * tz + rotationX * ty - rotationY * tx;
+    }
+    data[offset] = centerX;
+    data[offset + 1] = centerY;
+    data[offset + 2] = centerZ;
+    data[offset + 3] = instance.scale;
+    data[offset + 4] = instance.opacity;
+    data[offset + 5] = 0;
+    data[offset + 6] = 0;
+    data[offset + 7] = sizeX;
+    data[offset + 8] = 0;
+    data[offset + 9] = sizeY;
+    data[offset + 10] = instance.planeOrientation[0];
+    data[offset + 11] = instance.planeOrientation[1];
+    data[offset + 12] = instance.planeOrientation[2];
+    data[offset + 13] = instance.planeOrientation[3];
+    data[offset + 14] = rotationX;
+    data[offset + 15] = rotationY;
+    data[offset + 16] = rotationZ;
+    data[offset + 17] = rotationW;
+    data[offset + 18] = cameraAligned ? instance.billboard : 0;
+  }
+
+  private ensureParticleCapacity(group: ParticleDrawGroup, additional: number): void {
+    const required = (group.count + additional) * PARTICLE_INSTANCE_FLOATS;
+    if (group.data.length >= required) return;
+    const capacity = Math.max(required, group.data.length * 2, PARTICLE_INSTANCE_FLOATS * 64);
+    const data = new Float32Array(capacity);
+    data.set(group.data.subarray(0, group.count * PARTICLE_INSTANCE_FLOATS));
+    group.data = data;
+  }
+
+  private particleLodScale(placement: IndexedPlacement): number {
+    if (!this.frameFrustum || !this.lastParticleCameraPosition) return 1;
+    const camera = this.lastParticleCameraPosition;
+    const dx = placement.origin[0] - camera[0];
+    const dy = this.acYOrigin - placement.origin[1] - camera[1];
+    const dz = placement.origin[2] - camera[2];
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance <= PARTICLE_LOD_NEAR_CAMERA_DISTANCE) return 1;
+    if (distance >= PARTICLE_LOD_FAR_CAMERA_DISTANCE) return PARTICLE_LOD_MIN_SCALE;
+    const range = PARTICLE_LOD_FAR_CAMERA_DISTANCE - PARTICLE_LOD_NEAR_CAMERA_DISTANCE;
+    const progress = (distance - PARTICLE_LOD_NEAR_CAMERA_DISTANCE) / range;
+    return 1 - progress * (1 - PARTICLE_LOD_MIN_SCALE);
+  }
+
+  private particleUpdateStride(lodScale: number): number {
+    if (lodScale >= 0.75) return 1;
+    if (lodScale >= 0.4) return 2;
+    if (lodScale >= 0.15) return 4;
+    return 8;
   }
 
   private normalize(v: [number, number, number]): [number, number, number] { const n = Math.hypot(v[0], v[1], v[2]); return n < 0.0002 ? [0, 0, 0] : [v[0] / n, v[1] / n, v[2] / n]; }
