@@ -51,6 +51,10 @@ export class ExamineWindow {
     this.item.close();
   }
 
+  image(id: number): Promise<HTMLImageElement> {
+    return this.data.image(id);
+  }
+
   destroy(): void {
     this.close();
     this.destroyed = true;

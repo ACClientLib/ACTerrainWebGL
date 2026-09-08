@@ -1013,9 +1013,15 @@ export class TerrainRenderer {
     let pointerStartX = 0;
     let pointerStartY = 0;
     let pickTimer: number | undefined;
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
     const pickDistance = 8;
+    const doubleTapWindow = 500;
+    const doubleTapDistance = 24;
     const cancelPick = () => {
       pointerId = null;
+      lastTapTime = 0;
       window.clearTimeout(pickTimer);
       pickTimer = undefined;
     };
@@ -1044,17 +1050,23 @@ export class TerrainRenderer {
         console.log(`[ACTerrain pick] pointerup ignored: drag ${JSON.stringify({ distance, pickDistance })}`);
         return;
       }
+      const now = performance.now();
+      const isDoubleTap = now - lastTapTime <= doubleTapWindow &&
+        Math.hypot(event.clientX - lastTapX, event.clientY - lastTapY) <= doubleTapDistance;
       window.clearTimeout(pickTimer);
+      if (isDoubleTap && this.portalDestinationPath) {
+        pickTimer = undefined;
+        lastTapTime = 0;
+        void this.navigateToPortal(event.clientX, event.clientY);
+        return;
+      }
+      lastTapTime = now;
+      lastTapX = event.clientX;
+      lastTapY = event.clientY;
       pickTimer = window.setTimeout(() => {
         pickTimer = undefined;
         void this.pickServerObject(event.clientX, event.clientY);
-      }, 250);
-    }, { signal: this.shutdownSignal });
-    this.canvas.addEventListener("dblclick", (event) => {
-      if (!this.portalDestinationPath) return;
-      window.clearTimeout(pickTimer);
-      pickTimer = undefined;
-      void this.navigateToPortal(event.clientX, event.clientY);
+      }, doubleTapWindow);
     }, { signal: this.shutdownSignal });
     this.canvas.addEventListener("pointercancel", cancelPick, { signal: this.shutdownSignal });
     window.addEventListener("blur", cancelPick, { signal: this.shutdownSignal });
@@ -1174,13 +1186,15 @@ export class TerrainRenderer {
       const destination = await response.json() as {
         cellId: number; x: number; y: number; z: number;
         w: number; rotationX: number; rotationY: number; rotationZ: number;
+        seenOutside?: boolean;
       };
       const cellId = Number(destination.cellId);
       const position = { x: Number(destination.x), y: Number(destination.y), z: Number(destination.z) };
       const quaternion = [destination.w, destination.rotationX, destination.rotationY, destination.rotationZ].map(Number);
       if (!Number.isFinite(cellId) || !Object.values(position).every(Number.isFinite) ||
           !quaternion.every(Number.isFinite) || Math.hypot(...quaternion) === 0) return;
-      const interior = (cellId & 0xffff) >= 0x100 && (cellId & 0xffff) < 0xfffe;
+      const interior = !destination.seenOutside &&
+        (cellId & 0xffff) >= 0x100 && (cellId & 0xffff) < 0xfffe;
       await this.navigateToLocation({
         text: "Portal destination",
         landblock: interior ? cellId >>> 16 : undefined,

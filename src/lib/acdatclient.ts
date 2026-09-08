@@ -583,6 +583,7 @@ export class AcDatClient {
     guid: number | string,
     signal?: AbortSignal,
     onPhase?: (phase: ServerObjectModelLoadPhase) => void,
+    includeParticles = true,
   ): Promise<LoadedServerObjectModel> {
     onPhase?.("loading object");
     const object = await this.getServerObject(guid, signal);
@@ -596,15 +597,18 @@ export class AcDatClient {
     onPhase?.("loading model resources");
     await this.loadResources([...new Set(resourceIds)], signal);
     const mesh = await this.meshResource(object.render.meshResourceId, signal);
-    const batches = await this.loadModelBatches(mesh, signal);
+    const batches = await this.loadModelBatches(mesh, signal, includeParticles);
     return { object, render: object.render, mesh, batches };
   }
 
-  async loadModelBatches(mesh: Mesh, signal?: AbortSignal): Promise<LoadedModelBatch[]> {
+  async loadModelBatches(mesh: Mesh, signal?: AbortSignal, includeParticles = true): Promise<LoadedModelBatch[]> {
     const batches: LoadedModelBatch[] = [];
     try {
       for (const batch of mesh.batches) {
         signal?.throwIfAborted();
+        if (!includeParticles && batch.particles) {
+          continue;
+        }
         const material = await this.material(batch.materialResourceId);
         batches.push({ mesh: batch, material });
       }

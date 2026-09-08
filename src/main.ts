@@ -1,6 +1,10 @@
 import "./style.css";
 import { TerrainRenderer } from "./lib/terrainrenderer";
-import { updateCameraRoute, parseRoute, cancelCameraRouteUpdate } from "./lib/router";
+import {
+  updateCameraRoute,
+  parseRoute,
+  cancelCameraRouteUpdate,
+} from "./lib/router";
 import {
   loadDatasetCatalog,
   populateDatasetSelector,
@@ -10,18 +14,28 @@ import { worldToMapCoordinates } from "./lib/coordinates";
 import { setupLocationsPanel } from "./lib/locationspanel";
 import { loadDungeonNames } from "./lib/dungeons";
 import { setupExamineWindow } from "./examine";
+import { setupAcSidebar } from "./examine/examineframe";
 
 const canvas: HTMLCanvasElement = document.querySelector("#canvas")!;
 const loader = document.querySelector("#loader")!;
-const coordinates = document.querySelector<HTMLElement>("#monitor-coordinates")!;
+const coordinates = document.querySelector<HTMLElement>(
+  "#monitor-coordinates",
+)!;
 
 async function start(): Promise<void> {
   const selector =
     document.querySelector<HTMLSelectElement>("#dataset-selector")!;
   const catalog = await loadDatasetCatalog();
   const selection = selectDataset(catalog);
-  const apiBase = import.meta.env.VITE_ACTERRAIN_API_URL ?? "https://terrainapi.utilitybelt.me/";
-  const apiRoot = apiBase.length === 0 ? `${window.location.origin}/` : apiBase.endsWith("/") ? apiBase : `${apiBase}/`;
+  const apiBase =
+    import.meta.env.VITE_ACTERRAIN_API_URL ??
+    "https://terrainapi.utilitybelt.me/";
+  const apiRoot =
+    apiBase.length === 0
+      ? `${window.location.origin}/`
+      : apiBase.endsWith("/")
+        ? apiBase
+        : `${apiBase}/`;
   const renderer = new TerrainRenderer(
     canvas,
     loader,
@@ -39,36 +53,90 @@ async function start(): Promise<void> {
     selection.server?.labelVersion ?? selection.server?.version,
     selection.server?.id,
     selection.server
-      ? new URL(`v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/objects`, apiRoot).toString()
+      ? new URL(
+          `v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/objects`,
+          apiRoot,
+        ).toString()
       : undefined,
   );
-  const examineWindow = selection.server ? setupExamineWindow({
-    apiBase: apiRoot,
-    serverDescriptorPath: `v3/servers/${encodeURIComponent(selection.server.id)}/dataset`,
-    serverId: selection.server.id,
-  }) : undefined;
-  const examineGuid = new URLSearchParams(window.location.search).get("examine");
+  const examineWindow = selection.server
+    ? setupExamineWindow({
+        apiBase: apiRoot,
+        serverDescriptorPath: `v3/servers/${encodeURIComponent(selection.server.id)}/dataset`,
+        serverId: selection.server.id,
+      })
+    : undefined;
+  const sidebarScrollbar = setupAcSidebar(
+    document.querySelector<HTMLElement>("#sidebar")!,
+  );
+  renderer.shutdownSignal.addEventListener(
+    "abort",
+    () => sidebarScrollbar?.destroy(),
+    { once: true },
+  );
+  const examineGuid = new URLSearchParams(window.location.search).get(
+    "examine",
+  );
   if (examineWindow && examineGuid) examineWindow.open(examineGuid);
-  window.addEventListener("ac-examine-object", (event) => {
-    const detail = (event as CustomEvent<number | string | { guid: number | string; modelIndex?: number; rotation?: [number, number, number, number]; scale?: [number, number, number] }>).detail;
-    const guid = typeof detail === "object" ? detail.guid : detail;
-    const modelIndex = typeof detail === "object" ? detail.modelIndex : undefined;
-    const transform = typeof detail === "object" && detail.rotation && detail.scale
-      ? { rotation: detail.rotation, scale: detail.scale }
-      : undefined;
-    if (examineWindow && (typeof guid === "number" || typeof guid === "string")) examineWindow.open(guid, modelIndex, transform);
-  }, { signal: renderer.shutdownSignal });
-  populateDatasetSelector(selector, catalog, selection, () => renderer.shutdown());
-  window.addEventListener("pagehide", () => { examineWindow?.destroy(); renderer.shutdown(); }, { once: true });
-  const dungeonNamesEndpoint = selection.server ? new URL(
-    `v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/dungeon-names`, apiRoot,
-  ).toString() : undefined;
+  window.addEventListener(
+    "ac-examine-object",
+    (event) => {
+      const detail = (
+        event as CustomEvent<
+          | number
+          | string
+          | {
+              guid: number | string;
+              modelIndex?: number;
+              rotation?: [number, number, number, number];
+              scale?: [number, number, number];
+            }
+        >
+      ).detail;
+      const guid = typeof detail === "object" ? detail.guid : detail;
+      const modelIndex =
+        typeof detail === "object" ? detail.modelIndex : undefined;
+      const transform =
+        typeof detail === "object" && detail.rotation && detail.scale
+          ? { rotation: detail.rotation, scale: detail.scale }
+          : undefined;
+      if (
+        examineWindow &&
+        (typeof guid === "number" || typeof guid === "string")
+      )
+        examineWindow.open(guid, modelIndex, transform);
+    },
+    { signal: renderer.shutdownSignal },
+  );
+  populateDatasetSelector(selector, catalog, selection, () =>
+    renderer.shutdown(),
+  );
+  window.addEventListener(
+    "pagehide",
+    () => {
+      examineWindow?.destroy();
+      renderer.shutdown();
+    },
+    { once: true },
+  );
+  const dungeonNamesEndpoint = selection.server
+    ? new URL(
+        `v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/dungeon-names`,
+        apiRoot,
+      ).toString()
+    : undefined;
   if (dungeonNamesEndpoint) {
     await loadDungeonNames(`${dungeonNamesEndpoint}/all`);
   }
-  setupLocationsPanel(renderer, selection.server
-    ? new URL(`v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/locations`, apiRoot).toString()
-    : undefined);
+  setupLocationsPanel(
+    renderer,
+    selection.server
+      ? new URL(
+          `v3/servers/${encodeURIComponent(selection.server.id)}/${encodeURIComponent(selection.server.version)}/locations`,
+          apiRoot,
+        ).toString()
+      : undefined,
+  );
 
   let restoringRoute = false;
   let routeRequest = 0;
@@ -79,7 +147,9 @@ async function start(): Promise<void> {
       cancelCameraRouteUpdate();
       renderer.cancelDungeonLoad();
       renderer.showWorld();
-      document.querySelector<HTMLElement>("#locations-content [role=status]")!.textContent = "";
+      document.querySelector<HTMLElement>(
+        "#locations-content [role=status]",
+      )!.textContent = "";
       restoringRoute = false;
       return;
     }
@@ -96,7 +166,9 @@ async function start(): Promise<void> {
       if (request === routeRequest) {
         renderer.cancelDungeonLoad();
         renderer.showWorld();
-        document.querySelector<HTMLElement>("#locations-content [role=status]")!.textContent = "";
+        document.querySelector<HTMLElement>(
+          "#locations-content [role=status]",
+        )!.textContent = "";
       }
     } finally {
       if (request === routeRequest) {
@@ -105,7 +177,9 @@ async function start(): Promise<void> {
     }
   }
   await restoreHash();
-  window.addEventListener("hashchange", () => void restoreHash(), { signal: renderer.shutdownSignal });
+  window.addEventListener("hashchange", () => void restoreHash(), {
+    signal: renderer.shutdownSignal,
+  });
 
   let previousFrameTime: number | null = null;
 
@@ -113,15 +187,18 @@ async function start(): Promise<void> {
 
   function draw(timestamp: number) {
     if (renderer.isShutdown) return;
-    const dt = previousFrameTime === null
-      ? 0
-      : Math.min(100, timestamp - previousFrameTime);
+    const dt =
+      previousFrameTime === null
+        ? 0
+        : Math.min(100, timestamp - previousFrameTime);
     previousFrameTime = timestamp;
     renderer.update(dt);
     renderer.draw(dt);
 
     const position = worldToMapCoordinates(renderer.currentCamera.Position);
-    coordinates.textContent = renderer.dungeonSelection ? renderer.dungeonCoordinateText : `${Math.abs(position.NS).toFixed(2)}${position.NS >= 0 ? "N" : "S"}, ${Math.abs(position.EW).toFixed(2)}${position.EW >= 0 ? "E" : "W"}`;
+    coordinates.textContent = renderer.dungeonSelection
+      ? renderer.dungeonCoordinateText
+      : `${Math.abs(position.NS).toFixed(2)}${position.NS >= 0 ? "N" : "S"}, ${Math.abs(position.EW).toFixed(2)}${position.EW >= 0 ? "E" : "W"}`;
 
     if (!restoringRoute) {
       updateCameraRoute(renderer.cameraRoute);
@@ -130,14 +207,18 @@ async function start(): Promise<void> {
     animationFrameId = window.requestAnimationFrame(draw);
   }
 
-  renderer.shutdownSignal.addEventListener("abort", () => {
-    cancelCameraRouteUpdate();
-    selector.disabled = true;
-    if (animationFrameId !== null) {
-      window.cancelAnimationFrame(animationFrameId);
-      animationFrameId = null;
-    }
-  }, { once: true });
+  renderer.shutdownSignal.addEventListener(
+    "abort",
+    () => {
+      cancelCameraRouteUpdate();
+      selector.disabled = true;
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    },
+    { once: true },
+  );
   window.addEventListener("pageshow", (event) => {
     if (event.persisted && renderer.isShutdown) {
       window.location.reload();

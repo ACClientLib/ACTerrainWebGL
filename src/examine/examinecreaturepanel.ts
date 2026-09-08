@@ -1,6 +1,8 @@
-import { examineFrame, loadExamineMedia, setupExamineDragging } from "./examineframe";
+import "./examine.css";
+import { examineFrame, setupExamineDragging } from "./examineframe";
 import { AcDatClient, type WorldObjectData } from "../lib/acdatclient";
 import { ExamineObjectRenderer } from "./examineobjectrenderer";
+import names from "./itemnames.json";
 
 export type ExamineWindowState =
   | "loading object"
@@ -16,23 +18,20 @@ export interface ExamineWindowOptions {
   parent?: HTMLElement;
 }
 
-const style = `
-.ac-examine-window{position:fixed;left:14px;top:55px;z-index:2100;width:310px;height:400px;overflow:hidden;isolation:isolate;color:#fff;font:13px "Times New Roman",serif;border:0;box-shadow:none}
-.ac-examine-title{position:absolute;left:5px;top:5px;z-index:3;width:300px;height:20px;cursor:move;touch-action:none;pointer-events:auto}.ac-examine-title span{display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:0 5px}
-.ac-examine-close{position:absolute;left:284px;top:8px;z-index:10;width:14px;height:14px;padding:0;border:0;background:transparent 0 0 no-repeat;color:transparent;cursor:pointer}
-.ac-examine-creature{position:absolute;left:5px;top:30px;width:300px;height:365px;isolation:isolate}.ac-examine-media{position:absolute;overflow:hidden;pointer-events:none;background-repeat:repeat;background-position:0 0}.ac-examine-title{pointer-events:auto}.ac-examine-canvas{position:absolute;left:0;top:68px;z-index:1;width:300px;height:265px;display:block;pointer-events:none}
-.ac-examine-state{position:absolute;left:0;top:145px;z-index:11;width:300px;display:flex;align-items:center;justify-content:center;gap:8px;color:#d6e7df;text-align:center;text-shadow:1px 1px #000;pointer-events:none}.ac-examine-spinner{width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:ac-examine-spinner .8s linear infinite}.ac-examine-state:not([data-loading="true"]) .ac-examine-spinner{display:none}@keyframes ac-examine-spinner{to{transform:rotate(360deg)}}.ac-examine-info,.ac-examine-character-meta{position:absolute;left:4px;top:0;z-index:12;width:226px;height:60px;overflow:hidden}.ac-examine-info{padding:2px 6px;white-space:nowrap}.ac-examine-character-meta>div{position:absolute;left:6px;width:222px;height:18px;overflow:hidden;white-space:nowrap}.ac-examine-character-meta>div:nth-child(1){top:2px}.ac-examine-character-meta>div:nth-child(2){top:20px}.ac-examine-character-meta>div:nth-child(3){top:38px}
-.ac-examine-character-label,.ac-examine-level-label,.ac-examine-level{position:absolute;left:237px;z-index:12;width:56px;text-align:center;white-space:nowrap}.ac-examine-character-label{top:2px;height:14px;font-size:11px}.ac-examine-level-label{top:16px;height:14px;font-size:11px}.ac-examine-level{top:30px;height:28px;font-size:20px}.ac-examine-attributes{position:absolute;left:0;top:68px;z-index:12;width:300px;pointer-events:none}.ac-examine-row{position:relative;width:292px;height:20px}.ac-examine-label,.ac-examine-value{position:absolute;top:0;height:20px;color:#fff}.ac-examine-label{left:0;width:128px;padding-left:9px;text-align:left}.ac-examine-value{left:27px;width:256px;padding-right:9px;text-align:right}.ac-examine-allegiance{position:absolute;left:0;top:258px;z-index:12;width:292px;height:20px;text-align:center}.ac-examine-misc{position:absolute;left:0;top:278px;z-index:12;width:292px;height:87px;overflow:hidden}.ac-examine-misc .ac-examine-label{width:125px}.ac-examine-misc .ac-examine-value{left:128px;width:162px}.ac-examine-window[data-state="rendering"] .ac-examine-state{display:none}`;
-let styleInstalled = false;
-export function installExamineStyle(): void {
-  if (styleInstalled) return;
-  const element = document.createElement("style");
-  element.textContent = style;
-  document.head.append(element);
-  styleInstalled = true;
-}
 function text(element: HTMLElement, value: unknown): void {
   element.textContent = value == null || value === "" ? "???" : String(value);
+}
+function appendRow(container: HTMLElement, label: string, value: unknown): void {
+  const row = document.createElement("div");
+  row.className = "ac-examine-row";
+  const labelElement = document.createElement("span");
+  labelElement.className = "ac-examine-label";
+  labelElement.textContent = label;
+  const valueElement = document.createElement("span");
+  valueElement.className = "ac-examine-value";
+  text(valueElement, value);
+  row.append(labelElement, valueElement);
+  container.append(row);
 }
 function primaryValue(object: WorldObjectData, key: string): number | null {
   const entry = object.attributes[key] as
@@ -62,12 +61,13 @@ export class ExamineCreaturePanel {
   private closed = false;
   private rendererDestroyed = false;
   constructor(private readonly options: ExamineWindowOptions) {
-    installExamineStyle();
     this.root = document.createElement("main");
     this.root.className = "ac-examine-window";
     this.root.setAttribute("aria-label", "AC creature examine window");
     this.root.hidden = true;
-    this.root.innerHTML = examineFrame(`<section class="ac-examine-creature"><div class="ac-examine-media" data-media="06004CC2" style="inset:0"></div><div class="ac-examine-media" data-media="060012C6" style="left:230px;top:0;width:7px;height:60px"></div><div class="ac-examine-media" data-media="0600612C" style="left:0;top:60px;width:300px;height:5px"></div><div class="ac-examine-media" data-media="0600612C" style="left:0;top:250px;width:300px;height:5px"></div><canvas class="ac-examine-canvas"></canvas><div class="ac-examine-state" role="status"><span class="ac-examine-spinner" aria-hidden="true"></span><span class="ac-examine-state-label"></span></div><div class="ac-examine-info"></div><div class="ac-examine-character-meta"><div></div><div></div><div></div></div><div class="ac-examine-character-label"></div><div class="ac-examine-level-label"></div><div class="ac-examine-level"></div><div class="ac-examine-attributes" role="list" aria-label="Attributes"></div><div class="ac-examine-allegiance"></div><div class="ac-examine-misc" role="list" aria-label="Miscellaneous information"></div></section>`);
+    this.root.innerHTML = examineFrame(
+      `<section class="ac-examine-creature"><div class="ac-examine-surface"></div><div class="ac-examine-character-divider"></div><div class="ac-examine-content-divider ac-examine-content-divider-top"></div><div class="ac-examine-content-divider ac-examine-content-divider-bottom"></div><canvas class="ac-examine-canvas"></canvas><div class="ac-examine-state" role="status"><span class="ac-examine-spinner" aria-hidden="true"></span><span class="ac-examine-state-label"></span></div><div class="ac-examine-info"></div><div class="ac-examine-character-meta"><div></div><div></div><div></div></div><div class="ac-examine-character-label"></div><div class="ac-examine-level-label"></div><div class="ac-examine-level"></div><div class="ac-examine-attributes" role="list" aria-label="Attributes"></div><div class="ac-examine-allegiance"></div><div class="ac-examine-misc" role="list" aria-label="Miscellaneous information"></div></section>`,
+    );
     (options.parent ?? document.body).append(this.root);
     this.title = this.root.querySelector<HTMLElement>(".ac-examine-title")!;
     this.info = this.root.querySelector<HTMLElement>(".ac-examine-info")!;
@@ -98,7 +98,6 @@ export class ExamineCreaturePanel {
       options.serverId,
     );
     this.renderer = this.createRenderer();
-    void loadExamineMedia(this.root, this.datClient);
     const resize = () => {
       this.renderer.resize();
       this.renderer.render();
@@ -106,7 +105,15 @@ export class ExamineCreaturePanel {
     this.resizeObserver = new ResizeObserver(resize);
     this.resizeObserver.observe(this.canvas);
   }
-  open(object: WorldObjectData, guid: number | string, modelIndex?: number, placement?: { rotation: [number, number, number, number]; scale: [number, number, number] }): void {
+  open(
+    object: WorldObjectData,
+    guid: number | string,
+    modelIndex?: number,
+    placement?: {
+      rotation: [number, number, number, number];
+      scale: [number, number, number];
+    },
+  ): void {
     if (this.closed) return;
     if (this.rendererDestroyed) this.renderer = this.createRenderer();
     const request = ++this.request;
@@ -161,8 +168,11 @@ export class ExamineCreaturePanel {
   }
   private setState(state: ExamineWindowState, message: string = state): void {
     this.root.dataset.state = state;
-    const loading = state === "loading object" || state === "loading model resources";
-    this.state.querySelector<HTMLElement>(".ac-examine-state-label")!.textContent = loading ? "Loading" : message;
+    const loading =
+      state === "loading object" || state === "loading model resources";
+    this.state.querySelector<HTMLElement>(
+      ".ac-examine-state-label",
+    )!.textContent = loading ? "Loading" : message;
     this.state.dataset.loading = loading ? "true" : "false";
   }
   private createRenderer(): ExamineObjectRenderer {
@@ -172,18 +182,26 @@ export class ExamineCreaturePanel {
     );
   }
   private updateObjectInfo(object: WorldObjectData): void {
-    const isCharacter = object.string.Template != null || object.int.CharacterTitleId != null;
+    const isCharacter =
+      object.string.Template != null || object.int.CharacterTitleId != null;
     text(
       this.title.querySelector("span") as HTMLElement,
-      object.name ?? "Object",
+      object.string.DisplayName ?? object.name ?? "Object",
     );
     this.info.hidden = isCharacter;
     this.characterMeta.hidden = !isCharacter;
-    this.info.textContent = object.name ?? "Object";
+    const creatureType = (names.CreatureType as Record<string, string>)[String(object.int.CreatureType)];
+    this.info.textContent = creatureType ?? object.name ?? "Object";
     const meta = this.characterMeta.children;
-    meta[0].textContent = Number(object.int.CreatureType) === 5 ? "Lugian" : "???";
+    // CharExamineUI::SetAppraiseInfo / InqGenderHeritageDisplay.
+    const gender = (names.Gender as Record<string, string>)[String(object.int.Gender)];
+    const heritage = Number(object.int.HeritageGroup)
+      ? (names.HeritageGroup as Record<string, string>)[String(object.int.HeritageGroup)]
+      : creatureType;
+    meta[0].textContent = [gender, heritage].filter(Boolean).join(" ");
     meta[1].textContent =
-      object.string.Template == null ? "" : String(object.string.Template);
+      (names.CharacterTitle as Record<string, string>)[String(object.int.CharacterTitleId)]
+      ?? String(object.string.Template ?? "");
     meta[2].textContent =
       Number(object.int.PlayerKillerStatus) & 4
         ? "Player Killer"
@@ -195,9 +213,9 @@ export class ExamineCreaturePanel {
     ).textContent = isCharacter ? "Character" : "";
     (
       this.root.querySelector(".ac-examine-level-label") as HTMLElement
-    ).textContent = isCharacter ? "Level" : "";
+    ).textContent = "Level";
     (this.root.querySelector(".ac-examine-level") as HTMLElement).textContent =
-      isCharacter && Number(object.int.Level) > 0
+      Number(object.int.Level) > 0
         ? String(object.int.Level)
         : "???";
     this.allegiance.textContent =
@@ -235,24 +253,39 @@ export class ExamineCreaturePanel {
       ]);
     }
     for (const [label, value] of values) {
-      const row = document.createElement("div");
-      row.className = "ac-examine-row";
-      const labelElement = document.createElement("span");
-      labelElement.className = "ac-examine-label";
-      labelElement.textContent = label;
-      const valueElement = document.createElement("span");
-      valueElement.className = "ac-examine-value";
-      text(valueElement, value);
-      row.append(labelElement, valueElement);
-      this.attributes.append(row);
+      appendRow(this.attributes, label, value);
     }
     this.misc.replaceChildren();
+    this.misc.scrollTop = 0;
+    const addMisc = (label: string, value: string) => appendRow(this.misc, label, value);
+    // CreatureExamineUI::SetAppraiseInfo includes these ratings when nonzero.
+    const rating = (key: string) => Number(object.int[key] ?? 0);
+    for (const [label, first, second, extra, format] of [
+      ["Dmg/CritDmg", "DamageRating", "CritDamageRating", "CritRating", "%Rating: "],
+      ["Dmg/CritDmg", "DamageResistRating", "CritDamageResistRating", "CritResistRating", "%Resist: "],
+      ["Overpower %", "Overpower", "OverpowerResist", "", ""],
+      ["PK Dmg/Res", "PKDamageRating", "PKDamageResistRating", "", "%Rating: "],
+      ["DoT/Life:", "DotResistRating", "LifeResistRating", "", "%Resist: "],
+    ]) {
+      if (rating(first) > 0 || rating(second) > 0 || rating(extra) > 0) {
+        addMisc(label, first === "Overpower"
+          ? `+${rating(first)}/-${rating(second)}`
+          : `${format}${rating(first)}/${rating(second)}`);
+      }
+    }
     if (isCharacter) {
-      const row = document.createElement("div");
-      row.className = "ac-examine-row";
-      row.innerHTML = `<span class="ac-examine-label">* = Unenchantable</span><span class="ac-examine-value"></span>`;
-      this.misc.append(row);
+      for (const [key, label] of Object.entries({ MonarchsTitle: "Monarch:", PatronsTitle: "Patron:", Fellowship: "Fellowship:", DateOfBirth: "Arrived in Dereth:" })) {
+        if (object.string[key] != null) {
+          addMisc(label, String(object.string[key]));
+        }
+      }
+      for (const [key, label] of Object.entries({ AllegianceFollowers: "Followers:", ChessRank: "Chess Rank:", FakeFishingSkill: "Fishing Skill:", NumDeaths: "Deaths:", NumCharacterTitles: "Titles Earned:", Enlightenment: "Enlightenment:" })) {
+        if (object.int[key] != null) {
+          addMisc(label, key === "NumDeaths" && Number(object.int[key]) === 0
+            ? "Has never died"
+            : String(object.int[key]));
+        }
+      }
     }
   }
 }
-
