@@ -2,7 +2,7 @@ import { LAND_BLOCK_SIZE, MAP_SIZE } from "./worldgeometry";
 import { hexId } from "./dungeons";
 
 export interface LocationResult {
-  type: "poi" | "npc" | "portal" | "dungeon";
+  type: "poi" | "npc" | "vendor" | "portal" | "dungeon";
   id: string;
   text: string;
   x: number;
@@ -19,7 +19,7 @@ export interface LocationTarget {
   position?: { x: number; y: number; z: number };
   rotation?: { yaw: number; pitch: number; roll: number };
   zoom?: number;
-  type?: "poi" | "npc" | "portal";
+  type?: "poi" | "npc" | "vendor" | "portal";
 }
 
 // AC quaternions are W/X/Y/Z; the renderer reflects AC's north axis.

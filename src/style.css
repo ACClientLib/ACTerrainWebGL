@@ -275,7 +275,7 @@ html.touch-device #camera-hint {
   height: 100%;
   box-sizing: border-box;
   border: 0;
-  background: #090805;
+  background: #090805cc;
   color: #f5f0d0;
   font:
     13px/1.4 "Times New Roman",
@@ -292,14 +292,11 @@ html.touch-device #camera-hint {
 .sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin: 5px;
-  padding: 7px 9px;
+  gap: 4px;
+  margin: 5px 5px 0;
+  padding: 3px 9px;
   background: var(--ac-title);
   border: 0;
-  color: #f4dc54;
-  font-size: 16px;
-  font-weight: 600;
 }
 #sidebar-close {
   width: 14px;
@@ -317,7 +314,7 @@ html.touch-device #camera-hint {
 }
 .sidebar-content {
   box-sizing: border-box;
-  height: calc(100% - 54px);
+  height: calc(100% - 36px);
   overflow-y: auto;
   padding: 0 20px 24px 10px;
   scrollbar-width: none;
@@ -328,35 +325,70 @@ html.touch-device #camera-hint {
 .sidebar-content::-webkit-scrollbar {
   display: none;
 }
-.sidebar-section {
-  padding: 12px 0;
-  border-bottom: 1px solid #806820;
+.sidebar-panel[hidden] {
+  display: none !important;
 }
-.sidebar-section h2 {
+#locations-panel {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  flex-direction: column;
+}
+.sidebar-content.locations-active {
+  overflow: hidden;
+}
+.sidebar-panel h2 {
   margin: 0 0 10px;
   color: #f4dc54;
   font-size: 13px;
   font-weight: 400;
 }
-.sidebar-section-toggle {
-  display: flex;
-  width: 100%;
-  justify-content: space-between;
-  padding: 0 4px;
-  border: 0;
-  background: none;
-  color: #f4dc54;
-  cursor: pointer;
-  font:
-    13px "Times New Roman",
-    serif;
-  text-align: left;
-}
 .sidebar-section-content {
   margin-top: 12px;
 }
+#locations-content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+#locations-content form {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+#locations-content .location-results {
+  min-height: 0;
+  flex: 1 1 auto;
+  max-height: none;
+  overflow-y: auto;
+  scrollbar-width: none;
+  align-content: start;
+}
+#locations-content .location-results::-webkit-scrollbar {
+  display: none;
+}
+.location-results-viewport {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+#locations-content .location-results.has-ac-scrollbar {
+  padding-right: 20px;
+}
 .sidebar-section-content.collapsed {
   display: none;
+}
+#settings-panel #config-content {
+  margin-top: 0;
+}
+#sidebar-actions-content {
+  display: grid;
+  gap: 6px;
+  margin-top: 18px;
 }
 .location-search {
   width: 100%;

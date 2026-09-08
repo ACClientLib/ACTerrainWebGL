@@ -1,6 +1,7 @@
 import type { TerrainRenderer } from "./terrainrenderer";
 import { hexId } from "./dungeons";
 import { locationTarget, parseLocationTargets, type LocationResult, type LocationTarget } from "./locationsearch";
+import { ExamineScrollbar } from "../examine/examinescrollbar";
 
 export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string): void {
   const section = document.querySelector<HTMLElement>("#locations-content")!;
@@ -22,13 +23,22 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
   const help = document.createElement("p");
   help.id = "location-search-help";
   help.className = "explore-help";
-  help.textContent = `${endpoint ? "Dungeons, NPCs, POIs, portals. " : "Name search requires a server dataset. "}Enter a hex landblock, 12.3N,5.54E, or a cell ID [x y z] with optional W X Y Z quaternion.`;
+  help.textContent = `${endpoint ? "Dungeons, NPCs, vendors, POIs, portals. " : "Name search requires a server dataset. "}Enter a hex landblock, 12.3N,5.54E, or a cell ID [x y z] with optional W X Y Z quaternion.`;
   const results = document.createElement("div");
   results.className = "location-results dungeon-results";
+  const resultsViewport = document.createElement("div");
+  resultsViewport.className = "location-results-viewport";
   const status = document.createElement("div");
   status.setAttribute("role", "status");
-  form.append(input, help, results);
+  resultsViewport.append(results);
+  form.append(input, help, resultsViewport);
   section.replaceChildren(currentLocation, world, form, status);
+  const scrollbar = new ExamineScrollbar(results, 0, 1);
+  scrollbar.root.style.cssText =
+    "position:absolute;right:0;top:0;left:auto;width:16px;height:100%";
+  resultsViewport.append(scrollbar.root);
+  scrollbar.update();
+  renderer.shutdownSignal.addEventListener("abort", () => scrollbar.destroy(), { once: true });
   let timer: number | undefined;
   let controller: AbortController | undefined;
   let action = 0;
@@ -37,13 +47,14 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
     window.clearTimeout(timer);
     controller?.abort();
     results.replaceChildren();
+    scrollbar.update();
   }
   function sync(): void {
     const selection = renderer.dungeonSelection;
     world.hidden = !selection;
     currentLocation.textContent = selection
       ? `${selection.name ?? "Dungeon"} · ${hexId(selection.landblock, 4)}`
-      : "World / landscape";
+      : "Search";
   }
   world.addEventListener("click", () => {
     action++;
@@ -56,7 +67,7 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
     clearSearch();
     const request = ++action;
     renderer.cancelDungeonLoad();
-    input.value = target.text;
+    input.value = "";
     status.textContent = "Loading location…";
     world.hidden = false;
     try {
@@ -110,6 +121,7 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
     clearSearch();
     const query = input.value.trim();
     results.replaceChildren(...parseLocationTargets(query).map(target => createResult(target, "GO")));
+    scrollbar.update();
     status.textContent = "";
     if (query && endpoint) {
       status.textContent = "Searching locations…";

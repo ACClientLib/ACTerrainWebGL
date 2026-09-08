@@ -610,26 +610,30 @@ export class TerrainRenderer {
     });
     const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
     const sidebar = document.querySelector<HTMLElement>("#sidebar")!;
+    const sidebarContent = document.querySelector<HTMLElement>(".sidebar-content")!;
     const close = document.querySelector<HTMLButtonElement>("#sidebar-close")!;
-    document.querySelectorAll<HTMLButtonElement>(".sidebar-section-toggle").forEach((button) => {
-      button.addEventListener("click", () => {
-        const content = document.getElementById(button.getAttribute("aria-controls")!);
-        const expanded = button.getAttribute("aria-expanded") === "true";
-        if (!expanded) {
-          document.querySelectorAll<HTMLButtonElement>(".sidebar-section-toggle").forEach((other) => {
-            if (other === button) return;
-            other.setAttribute("aria-expanded", "false");
-            document.getElementById(other.getAttribute("aria-controls")!)?.classList.add("collapsed");
-            const otherIndicator = other.querySelector("span:last-child");
-            if (otherIndicator) otherIndicator.textContent = "⌄";
-          });
-        }
-        button.setAttribute("aria-expanded", String(!expanded));
-        content?.classList.toggle("collapsed", expanded);
-        const indicator = button.querySelector("span:last-child");
-        if (indicator) indicator.textContent = expanded ? "⌄" : "⌃";
+    const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".sidebar-tab"));
+    const selectTab = (selectedTab: HTMLButtonElement) => {
+      for (const tab of tabs) {
+        const selected = tab === selectedTab;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        document.getElementById(tab.getAttribute("aria-controls")!)!.hidden = !selected;
+      }
+      sidebarContent.classList.toggle("locations-active", selectedTab.id === "locations-tab");
+    };
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => selectTab(tab), { signal: this.shutdownSignal });
+      tab.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const offset = event.key === "ArrowRight" ? 1 : -1;
+        const nextTab = tabs[(tabs.indexOf(tab) + offset + tabs.length) % tabs.length];
+        selectTab(nextTab);
+        nextTab.focus();
       }, { signal: this.shutdownSignal });
-    });
+    }
+    selectTab(tabs[0]);
     const setOpen = (open: boolean) => { sidebar.classList.toggle("open", open); toggle.setAttribute("aria-expanded", String(open)); };
     const releaseCameraInput = () => {
       if (document.pointerLockElement) document.exitPointerLock();
@@ -715,7 +719,7 @@ export class TerrainRenderer {
     this.canvas.dispatchEvent(new Event("locationchange"));
   }
 
-  focusLocation(x: number, y: number, type: "poi" | "npc" | "portal"): void {
+  focusLocation(x: number, y: number, type: "poi" | "npc" | "vendor" | "portal"): void {
     this.showWorld();
     if (this.currentCameraMode !== CameraMode.Camera2D) this.switchCamera(CameraMode.Camera2D, false);
     this.camera2D.Zoom = this.capCameraZoom(type === "poi" ? 0.12 : 40);
