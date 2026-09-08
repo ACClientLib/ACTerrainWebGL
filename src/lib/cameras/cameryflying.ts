@@ -33,6 +33,7 @@ export class CameraFlying extends BaseCamera {
   private _mobileMovement = { x: 0, y: 0 };
   private _mobileLook = { x: 0, y: 0 };
   private _mobileInputActive = false;
+  private _ignoreNextPointerLockMove = false;
 
   get Yaw() {
     return this._yaw;
@@ -168,6 +169,7 @@ export class CameraFlying extends BaseCamera {
       if (this.renderer.currentCamera != this) return;
       if (event.button === 2) {
         this._mouseDown = true;
+        this._ignoreNextPointerLockMove = true;
         this.canvas.requestPointerLock();
         event.preventDefault();
       }
@@ -177,9 +179,23 @@ export class CameraFlying extends BaseCamera {
       if (this.renderer.currentCamera != this) return;
       if (event.button === 2) {
         this._mouseDown = false;
+        this._ignoreNextPointerLockMove = false;
         document.exitPointerLock();
         event.preventDefault();
       }
+    }, { signal: this.renderer.shutdownSignal });
+
+    document.addEventListener("pointerlockchange", () => {
+      if (document.pointerLockElement === this.canvas) {
+        this._ignoreNextPointerLockMove = true;
+      } else {
+        this._ignoreNextPointerLockMove = false;
+        this.cancelPointerInput();
+      }
+    }, { signal: this.renderer.shutdownSignal });
+    document.addEventListener("pointerlockerror", () => {
+      this._ignoreNextPointerLockMove = false;
+      this.cancelPointerInput();
     }, { signal: this.renderer.shutdownSignal });
 
     this.canvas.addEventListener("contextmenu", (event) => {
@@ -190,6 +206,10 @@ export class CameraFlying extends BaseCamera {
     this.canvas.addEventListener("mousemove", (event) => {
       if (this.renderer.currentCamera != this) return;
       if (this._mouseDown && document.pointerLockElement === this.canvas) {
+        if (this._ignoreNextPointerLockMove) {
+          this._ignoreNextPointerLockMove = false;
+          return;
+        }
         this.handleMouseLook(event.movementX, event.movementY);
         this.mousePos.x = event.clientX;
         this.mousePos.y = event.clientY;

@@ -511,12 +511,15 @@ export class TerrainRenderer {
     skyGroup.className = "control-row";
     skyGroup.innerHTML = "<span>Sky Group</span><select></select>";
     const skyGroupSelect = skyGroup.querySelector<HTMLSelectElement>("select")!;
+    const skyTimeName = document.createElement("div");
+    skyTimeName.className = "sky-time-name";
     const updateSkyControls = () => {
       const descriptor = this.#sceneGeometry.datClient.getRegionSkyDescriptor();
       const available = descriptor !== null;
       const landscape = available && !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying;
       skyTime.hidden = !available;
       skyGroup.hidden = !available;
+      skyTimeName.hidden = !available;
       skyTimeInput.disabled = !landscape;
       skyGroupSelect.disabled = !landscape || this.#skyGroupRequest !== null;
       if (!available) return;
@@ -550,7 +553,8 @@ export class TerrainRenderer {
       skyTimeInput.value = String(this.#sceneGeometry.datClient.getSkyTime());
       const activeTime = this.#sceneGeometry.datClient.getSkyTime();
       const period = descriptor.timesOfDay.reduce((selected, candidate) => candidate.start <= activeTime ? candidate : selected, descriptor.timesOfDay[descriptor.timesOfDay.length - 1]);
-      skyTimeOutput.value = period ? `${period.name} (${Math.round(activeTime * 100)}%)` : `${Math.round(activeTime * 100)}%`;
+      skyTimeOutput.value = `${Math.round(activeTime * 100)}%`;
+      skyTimeName.textContent = period?.name ?? "";
       if (this.#skyGroupRequest === null) skyGroupSelect.value = String(this.#sceneGeometry.datClient.getSkyGroupIndex());
     };
     this.#updateSkyControls = updateSkyControls;
@@ -574,7 +578,7 @@ export class TerrainRenderer {
       });
     }, { signal: this.shutdownSignal });
     this.#updateSkyControls();
-    section.append(skyTime, skyGroup);
+    section.append(skyTime, skyTimeName, skyGroup);
     addActionButton("Clear Data Caches & Reload", async () => {
       this.shutdown(true);
       try {
@@ -597,7 +601,8 @@ export class TerrainRenderer {
       this.shutdown();
       const url = new URL(window.location.href);
       url.searchParams.delete("dataset");
-      window.location.assign(url.toString());
+      if (url.toString() === window.location.href) window.location.reload();
+      else window.location.assign(url.toString());
     });
     addActionButton("Reset Camera", () => this.#resetCamera());
     document.querySelector<HTMLButtonElement>("#camera-toggle")!.addEventListener("click", () => this.switchCamera(this.currentCameraType === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D), { signal: this.shutdownSignal });
@@ -1030,7 +1035,6 @@ export class TerrainRenderer {
       pickTimer = undefined;
     };
     this.canvas.addEventListener("pointerdown", (event) => {
-      console.log(`[ACTerrain pick] pointerdown ${JSON.stringify({ button: event.button, pointerId: event.pointerId, client: [event.clientX, event.clientY] })}`);
       if (event.button !== 0) return;
       pointerId = event.pointerId;
       pointerStartX = event.clientX;
@@ -1043,15 +1047,12 @@ export class TerrainRenderer {
       }
     }, { signal: this.shutdownSignal });
     this.canvas.addEventListener("pointerup", (event) => {
-      console.log(`[ACTerrain pick] pointerup ${JSON.stringify({ button: event.button, pointerId: event.pointerId, expectedPointerId: pointerId, client: [event.clientX, event.clientY] })}`);
       if (event.pointerId !== pointerId) {
-        console.log("[ACTerrain pick] pointerup ignored: pointer id mismatch");
         return;
       }
       pointerId = null;
       const distance = Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY);
       if (distance > pickDistance) {
-        console.log(`[ACTerrain pick] pointerup ignored: drag ${JSON.stringify({ distance, pickDistance })}`);
         return;
       }
       const now = performance.now();
@@ -1123,44 +1124,15 @@ export class TerrainRenderer {
   private async pickServerObject(clientX: number, clientY: number, examine = true): Promise<IndexedPlacement | null> {
     const generation = ++this.serverPickGeneration;
     if (!this.#serverGeometry || this.cameraTransition) {
-      console.log(`[ACTerrain pick] click ignored ${JSON.stringify({
-        hasServerGeometry: !!this.#serverGeometry,
-        cameraTransition: !!this.cameraTransition,
-      })}`);
       return null;
     }
     const rect = this.canvas.getBoundingClientRect();
-    const localX = clientX - rect.left;
-    const localY = clientY - rect.top;
     const ray = this.currentCameraMode === CameraMode.Camera2D
       ? this.camera2D.ScreenToWorldRay(clientX, clientY)
       : this.flyingCamera.ScreenToWorldRay(clientX, clientY);
     const placement = this.currentCameraMode === CameraMode.Camera2D
       ? await this.#serverGeometry.pickServerSpawn2D(ray)
       : (await this.#serverGeometry.pickServerSpawn3D(ray))?.placement ?? null;
-    console.log(`[ACTerrain pick] click ${JSON.stringify({
-      mode: this.currentCameraMode,
-      client: [clientX, clientY],
-      local: [localX, localY],
-      canvas: [this.canvas.width, this.canvas.height],
-      css: [rect.width, rect.height],
-      camera: {
-        position: [this.flyingCamera.Position.x, this.flyingCamera.Position.y, this.flyingCamera.Position.z],
-        yaw: this.flyingCamera.Yaw,
-        pitch: this.flyingCamera.Pitch,
-        roll: this.flyingCamera.Roll,
-        fov: this.flyingCamera.FOV,
-      },
-      ray: ray ? {
-        origin: [ray.origin.x, ray.origin.y, ray.origin.z],
-        direction: [ray.direction.x, ray.direction.y, ray.direction.z],
-      } : undefined,
-      selected: placement ? {
-        guid: placement.objectGuid,
-        modelIndex: placement.modelIndex,
-        origin: placement.origin,
-      } : null,
-    })}`);
     if (generation !== this.serverPickGeneration || this.shutdownSignal.aborted) {
       return null;
     }

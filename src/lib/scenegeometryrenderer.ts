@@ -499,24 +499,6 @@ export class SceneGeometryRenderer {
       if (!best || hit.distance < best.distance ||
         hit.distance === best.distance && this.comparePlacement(hit.placement, best.placement) < 0) best = hit;
     }
-    console.log(`[ACTerrain pick] candidates ${JSON.stringify({
-      mode,
-      ray: {
-        origin: [ray.origin.x, ray.origin.y, ray.origin.z],
-        direction: [ray.direction.x, ray.direction.y, ray.direction.z],
-      },
-      frustumSkipped,
-      hitCount: hits.length,
-      exactHitCount: exactHits.length,
-      hits: hits.slice(0, 10).map(hit => ({
-        distance: hit.distance,
-        guid: hit.placement.objectGuid,
-        modelIndex: hit.placement.modelIndex,
-        origin: hit.placement.origin,
-        bounds: hit.bounds,
-      })),
-      selected: best ? { guid: best.placement.objectGuid, distance: best.distance, modelIndex: best.placement.modelIndex, origin: best.placement.origin, bounds: best.bounds } : null,
-    })}`);
     return best;
   }
 

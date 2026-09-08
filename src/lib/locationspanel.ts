@@ -10,13 +10,11 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
   world.type = "button";
   world.className = "dungeon-landblock";
   world.textContent = "← Return to world / landscape";
-  const currentLocation = document.createElement("p");
-  currentLocation.className = "explore-help";
   const form = document.createElement("form");
   const input = document.createElement("input");
   input.className = "location-search";
   input.type = "search";
-  input.placeholder = "Name, landblock, or coordinates…";
+  input.placeholder = "Search … Name, landblock, or coordinates…";
   input.autocomplete = "off";
   input.setAttribute("aria-label", "Search all locations");
   input.setAttribute("aria-describedby", "location-search-help");
@@ -32,7 +30,7 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
   status.setAttribute("role", "status");
   resultsViewport.append(results);
   form.append(input, help, resultsViewport);
-  section.replaceChildren(currentLocation, world, form, status);
+  section.replaceChildren(world, form, status);
   const scrollbar = new ExamineScrollbar(results, 0, 1);
   scrollbar.root.style.cssText =
     "position:absolute;right:0;top:0;left:auto;width:16px;height:100%";
@@ -52,9 +50,6 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
   function sync(): void {
     const selection = renderer.dungeonSelection;
     world.hidden = !selection;
-    currentLocation.textContent = selection
-      ? `${selection.name ?? "Dungeon"} · ${hexId(selection.landblock, 4)}`
-      : "Search";
   }
   world.addEventListener("click", () => {
     action++;
@@ -108,7 +103,12 @@ export function setupLocationsPanel(renderer: TerrainRenderer, endpoint?: string
       if (request.signal.aborted || renderer.isShutdown) {
         return;
       }
-      results.append(...body.locations.map(location => createResult(locationTarget(location),
+      const locations = [...body.locations].sort((left, right) => {
+        const priority = (type: LocationResult["type"]): number =>
+          type === "poi" ? 0 : type === "dungeon" ? 1 : 2;
+        return priority(left.type) - priority(right.type);
+      });
+      results.append(...locations.map(location => createResult(locationTarget(location),
         `${location.type.toUpperCase()} · ${hexId(location.cellId >>> 16, 4)}`)));
       status.textContent = results.childElementCount ? "" : "No matching locations.";
     } catch (error) {

@@ -9,34 +9,35 @@ const vitals = ["", "Maximum Health", "Health", "Maximum Stamina", "Stamina", "M
 const number = (value: unknown): string => Number(value).toLocaleString("en-US", { maximumFractionDigits: 2 });
 const percent = (value: unknown): string => `${number(Number(value) * 100)}%`;
 const name = (group: keyof typeof names, value: unknown): string => (names[group] as Record<string, string>)[String(value)] ?? String(value);
+const present = (value: unknown): boolean => value != null && value !== "";
+const positive = (value: unknown): boolean => present(value) && Number(value) > 0;
+const nonDefaultModifier = (value: unknown): boolean => present(value) && Number(value) !== 1;
 
 // Only describe properties available in the dataset. Live ownership, effective
 // combat values and hosted-item profiles cannot be inferred from a raw weenie.
 export function itemAppraisalText(object: WorldObjectData, spells: ItemSpellText = {}): string {
   const { int: i, float: f, bool: b, string: s } = object;
   const lines: string[] = [];
+  const hasSpells = Object.keys(object.spells).length > 0 || object.did.Spell != null;
   const add = (label: string, value: unknown) => {
-    if (value != null && value !== "") {
+    if (present(value)) {
       lines.push(`${label}: ${value}`);
     }
   };
-  const fields = (properties: WorldObjectScalarProperties, entries: Record<string, string>, format = number) => {
+  const fields = (
+    properties: WorldObjectScalarProperties,
+    entries: Record<string, string>,
+    format = number,
+    include: (value: unknown) => boolean = present,
+  ) => {
     for (const [key, label] of Object.entries(entries)) {
-      if (properties[key] != null) {
+      if (include(properties[key])) {
         add(label, format(properties[key]));
       }
     }
   };
   add("Value", i.Value == null ? "???" : number(i.Value));
   add("Burden", i.EncumbranceVal == null ? "Unknown" : number(i.EncumbranceVal));
-  if (i.MaterialType != null) {
-    add("Material", name("MaterialType", i.MaterialType));
-  }
-  if (i.ItemWorkmanship != null) {
-    const count = Number(i.NumItemsInMaterial ?? 1);
-    add("Workmanship", number(Number(i.ItemWorkmanship) / (count > 0 ? count : 1)));
-  }
-  fields(i, { NumItemsInMaterial: "Salvaged items", NumTimesTinkered: "Times tinkered" });
   if (b.AppraisalHasAllowedWielder) {
     add("Wield requirement", s.CraftsmanName ?? "the original owner");
   }
@@ -62,11 +63,11 @@ export function itemAppraisalText(object: WorldObjectData, spells: ItemSpellText
     lines.push("Phantasmal");
   }
   for (const [key, label] of Object.entries({ AbsorbMagicDamage: "Magic Absorbing", CriticalMultiplier: "Crushing Blow", CriticalFrequency: "Biting Strike", IgnoreArmor: "Armor Cleaving" })) {
-    if (f[key] != null) {
+    if (nonDefaultModifier(f[key])) {
       lines.push(label);
     }
   }
-  if (f.ResistanceModifier != null && i.ResistanceModifierType != null) {
+  if (nonDefaultModifier(f.ResistanceModifier) && present(i.ResistanceModifierType)) {
     add("Resistance Cleaving", damageTypes.filter((_, bit) => (Number(i.ResistanceModifierType) & (1 << bit)) !== 0).join(", "));
   }
   if (Number(i.ResistMagic) >= 9999) {
@@ -93,8 +94,7 @@ export function itemAppraisalText(object: WorldObjectData, spells: ItemSpellText
     add("Skill", name("Skill", i.WeaponSkill));
   }
   if (i.Damage != null) {
-    const maximum = Number(i.Damage);
-    add("Damage", f.DamageVariance == null ? number(maximum) : `${number(maximum * (1 - Number(f.DamageVariance)))} – ${number(maximum)}`);
+    add("Damage", number(i.Damage));
   }
   if (i.DamageType != null) {
     add("Damage type", damageTypes.filter((_, bit) => (Number(i.DamageType) & (1 << bit)) !== 0).join(", "));
@@ -103,26 +103,45 @@ export function itemAppraisalText(object: WorldObjectData, spells: ItemSpellText
   if (i.AmmoType != null) {
     add("Ammunition", ({ 1: "Arrows", 2: "Bolts", 4: "Atlatl darts" } as Record<string, string>)[String(i.AmmoType)] ?? i.AmmoType);
   }
-  fields(f, { DamageMod: "Damage multiplier", MaximumVelocity: "Missile velocity" });
+  if (present(i.AmmoType)) {
+    fields(f, { DamageMod: "Damage multiplier", MaximumVelocity: "Missile velocity" });
+  }
   for (const [key, label] of Object.entries({ WeaponOffense: "Attack bonus", WeaponDefense: "Melee defense bonus", WeaponMissileDefense: "Missile defense bonus", WeaponMagicDefense: "Magic defense bonus", ManaConversionMod: "Mana conversion bonus", ElementalDamageMod: "Elemental spell damage bonus vs. monsters" })) {
-    if (f[key] != null) {
+    if (key === "ElementalDamageMod" && !present(i.DamageType)) {
+      continue;
+    }
+    if (key === "ManaConversionMod"
+      ? present(f[key]) && Number(f[key]) !== 0
+      : nonDefaultModifier(f[key])) {
       add(label, percent(Number(f[key]) - (key === "ManaConversionMod" ? 0 : 1)));
     }
   }
-  if (f.ElementalDamageMod != null) {
+  if (present(i.DamageType) && nonDefaultModifier(f.ElementalDamageMod)) {
     add("Elemental spell damage bonus vs. players", percent((Number(f.ElementalDamageMod) - 1) * 0.5));
   }
+  const armorLevel = Number(i.ArmorLevel);
   for (const type of ["Slash", "Pierce", "Bludgeon", "Cold", "Fire", "Acid", "Electric", "Nether"]) {
-    if (f[`ArmorModVs${type}`] != null) {
+    if (armorLevel > 0 && nonDefaultModifier(f[`ArmorModVs${type}`])) {
       add(`Armor modifier vs. ${type.toLowerCase()}`, number(f[`ArmorModVs${type}`]));
     }
   }
-  fields(i, { ItemsCapacity: "Item capacity", ContainersCapacity: "Container capacity", AppraisalPages: "Filled pages", AppraisalMaxPages: "Maximum pages" });
+  const itemCapacity = Number(i.ItemsCapacity);
+  const containerCapacity = Number(i.ContainersCapacity);
+  if (itemCapacity > 0 || containerCapacity > 0) {
+    add("Capacity", itemCapacity > 0 && containerCapacity > 0
+      ? `${number(itemCapacity)} items and ${number(containerCapacity)} containers`
+      : itemCapacity > 0
+        ? `${number(itemCapacity)} items`
+        : `${number(containerCapacity)} containers`);
+  }
+  if (positive(i.AppraisalPages) && positive(i.AppraisalMaxPages)) {
+    add("Pages", `${number(i.AppraisalPages)} of ${number(i.AppraisalMaxPages)} full`);
+  }
   if (b.Locked != null) {
     lines.push(b.Locked ? "Locked" : "Unlocked");
   }
-  fields(i, { ResistLockpick: "Lockpick resistance", AppraisalLockpickSuccessPercent: "Lockpick success (%)", LockpickMod: "Lockpick skill bonus" });
-  fields(i, { MinLevel: "Minimum level", MaxLevel: "Maximum level" });
+  fields(i, { ResistLockpick: "Lockpick resistance", AppraisalLockpickSuccessPercent: "Lockpick success (%)", LockpickMod: "Lockpick skill bonus" }, number, positive);
+  fields(i, { MinLevel: "Minimum level", MaxLevel: "Maximum level" }, number, positive);
   if (Number(i.UseRequiresLevel) > 0) {
     lines.push(`Use requires level ${number(i.UseRequiresLevel)}.`);
   }
@@ -147,11 +166,16 @@ export function itemAppraisalText(object: WorldObjectData, spells: ItemSpellText
     const boost = Number(i.BoostValue);
     lines.push(`${boost < 0 ? "Depletes" : "Restores"} ${number(Math.abs(boost))} ${(vitals[Number(i.BoosterEnum)] ?? "points").toLowerCase()}.`);
   }
-  fields(f, { HealkitMod: "Restoration bonus" }, percent);
-  if (Object.keys(object.spells).length === 0) {
-    fields(f, { ItemEfficiency: "Mana efficiency", ManaStoneDestroyChance: "Destruction chance" }, percent);
+  fields(f, { HealkitMod: "Restoration bonus" }, percent, nonDefaultModifier);
+  if (!hasSpells) {
+    fields(f, { ItemEfficiency: "Mana efficiency", ManaStoneDestroyChance: "Destruction chance" }, percent, nonDefaultModifier);
   }
-  fields(i, { ItemCurMana: Object.keys(object.spells).length === 0 ? "Stored mana" : "Current mana", ItemMaxMana: "Maximum mana", ItemManaCost: "Mana cost", ItemSpellcraft: "Spellcraft", ItemDifficulty: "Arcane Lore required", ItemSkillLevelLimit: "Activation skill required", NumKeys: "Keys" });
+  if (hasSpells) {
+    fields(i, { ItemCurMana: "Current mana", ItemMaxMana: "Maximum mana", ItemManaCost: "Mana cost", ItemSpellcraft: "Spellcraft", ItemDifficulty: "Arcane Lore required", ItemSkillLevelLimit: "Activation skill required" }, number, positive);
+  } else {
+    fields(i, { ItemCurMana: "Stored mana" }, number, positive);
+  }
+  fields(i, { NumKeys: "Keys" }, number, positive);
   if (i.AppraisalItemSkill != null) {
     add("Activation skill", name("Skill", i.AppraisalItemSkill));
   }
@@ -169,7 +193,7 @@ export function itemAppraisalText(object: WorldObjectData, spells: ItemSpellText
       add("Activation requirement", `${labels[Number(i[key])] ?? "Unknown"}: ${number(i[levelKey])}`);
     }
   }
-  if (f.ManaRate != null && Number(f.ManaRate) !== 0) {
+  if (hasSpells && f.ManaRate != null && Number(f.ManaRate) !== 0) {
     add("Mana cost", `1 point per ${Math.round(Math.abs(1 / Number(f.ManaRate)))} seconds`);
   }
   if (b.UnlimitedUse) {
@@ -222,25 +246,7 @@ export function itemAppraisalText(object: WorldObjectData, spells: ItemSpellText
   if (i.EquipmentSetId != null) {
     add("Set", name("EquipmentSet", i.EquipmentSetId));
   }
-  fields(i, { DamageRating: "Damage rating", DamageResistRating: "Damage resistance rating", CritRating: "Critical rating", CritDamageRating: "Critical damage rating", CritResistRating: "Critical resistance rating", CritDamageResistRating: "Critical damage resistance rating", HealingBoostRating: "Healing boost rating", Vitality: "Vitality", RareId: "Rare", ItemMaxLevel: "Maximum item level" });
-  fields(i, { Overpower: "Overpower %", OverpowerResist: "Overpower reduction %", PKDamageRating: "PK damage rating", PKDamageResistRating: "PK damage resistance rating", NetherResistRating: "Nether resistance rating", LifeResistRating: "Life resistance rating" });
-  const baseXp = BigInt(object.int64.ItemBaseXp ?? 0);
-  const totalXp = BigInt(object.int64.ItemTotalXp ?? 0);
-  const xpStyle = Number(i.ItemXpStyle);
-  const maxLevel = Number(i.ItemMaxLevel);
-  if (baseXp > 0n && maxLevel > 0 && xpStyle >= 1 && xpStyle <= 3) {
-    // ExperienceSystem supports fixed, doubling and linearly increasing costs.
-    let level = 0;
-    let threshold = 0n;
-    let cost = baseXp;
-    while (level < maxLevel && totalXp >= threshold + cost) {
-      threshold += cost;
-      level++;
-      cost = xpStyle === 2 ? cost * 2n : xpStyle === 3 ? cost + baseXp : baseXp;
-    }
-    add("Item level", `${level} / ${maxLevel}`);
-    add("Item XP", `${totalXp.toLocaleString("en-US")} / ${(level === maxLevel ? threshold : threshold + cost).toLocaleString("en-US")}`);
-  }
+  fields(i, { DamageRating: "Damage rating", DamageResistRating: "Damage resistance rating", CritRating: "Critical rating", CritDamageRating: "Critical damage rating", CritResistRating: "Critical resistance rating", CritDamageResistRating: "Critical damage resistance rating", HealingBoostRating: "Healing boost rating", Vitality: "Vitality", RareId: "Rare", ItemMaxLevel: "Maximum item level" }, number, positive);
   if (Number(i.CloakWeaveProc) === 2) {
     lines.push("This cloak has a chance to reduce an incoming attack by 200 damage.");
   }

@@ -1,4 +1,3 @@
-import "../ui.css";
 import { ExamineScrollbar } from "./examinescrollbar";
 export function examineFrame(body: string): string {
   return `<div class="ac-examine-title"><span></span></div><button class="ac-examine-close" type="button" aria-label="Close"></button>${body}<div class="ac-examine-divider"></div>`;
@@ -26,8 +25,9 @@ export function setupAcSidebar(
   const content = root.querySelector<HTMLElement>(".sidebar-content");
   if (content) {
     const scrollbar = new ExamineScrollbar(content, 0, 1);
+    const headerHeight = root.querySelector<HTMLElement>(".sidebar-header")?.offsetHeight ?? 25;
     scrollbar.root.style.cssText =
-      "position:absolute;right:4px;top:54px;left:auto;width:16px;height:calc(100% - 59px)";
+      `position:absolute;right:4px;top:${headerHeight}px;left:auto;width:16px;height:calc(100% - ${headerHeight}px)`;
     root.append(scrollbar.root);
     scrollbar.update();
     return scrollbar;

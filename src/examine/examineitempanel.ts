@@ -11,11 +11,7 @@ export class ExamineItemPanel {
   private readonly root: HTMLElement;
   private readonly title: HTMLElement;
   private readonly description: HTMLElement;
-  private readonly inscription: HTMLElement;
-  private readonly signature: HTMLElement;
-  private readonly inscriptionMedia: HTMLElement[];
   private readonly appraisalScrollbar: ExamineScrollbar;
-  private readonly inscriptionScrollbar: ExamineScrollbar;
   private request = 0;
 
   constructor(
@@ -30,32 +26,14 @@ export class ExamineItemPanel {
     // LayoutDesc 0x2100006B, item subpanel 0x1000012E.
     this.root.innerHTML = examineFrame(`<section class="ac-examine-item">
       <div class="ac-examine-surface" style="inset:0"></div>
-      <div class="ac-examine-content-divider ac-examine-inscription-media" style="left:0;top:286px;width:300px;height:5px"></div>
-      <div class="ac-examine-inscription-surface ac-examine-inscription-media" style="left:0;top:291px;width:300px;height:74px"></div>
       <div class="ac-examine-item-text" tabindex="0" aria-label="Item appraisal"></div>
-      <div class="ac-examine-item-inscription" tabindex="0" aria-label="Inscription"></div>
-      <div class="ac-examine-item-signature"></div>
     </section>`);
     this.title = this.root.querySelector<HTMLElement>(".ac-examine-title")!;
     this.description = this.root.querySelector<HTMLElement>(
       ".ac-examine-item-text",
     )!;
-    this.inscription = this.root.querySelector<HTMLElement>(
-      ".ac-examine-item-inscription",
-    )!;
-    this.signature = this.root.querySelector<HTMLElement>(
-      ".ac-examine-item-signature",
-    )!;
-    this.inscriptionMedia = [
-      ...this.root.querySelectorAll<HTMLElement>(
-        ".ac-examine-inscription-media",
-      ),
-    ];
-    this.appraisalScrollbar = new ExamineScrollbar(this.description, 0, 286);
-    this.inscriptionScrollbar = new ExamineScrollbar(this.inscription, 291, 57);
-    this.root
-      .querySelector(".ac-examine-item")!
-      .append(this.appraisalScrollbar.root, this.inscriptionScrollbar.root);
+    this.appraisalScrollbar = new ExamineScrollbar(this.description, 0, 365);
+    this.root.querySelector(".ac-examine-item")!.append(this.appraisalScrollbar.root);
     this.root
       .querySelector(".ac-examine-close")!
       .addEventListener("click", onClose);
@@ -69,11 +47,6 @@ export class ExamineItemPanel {
     this.title.querySelector("span")!.textContent = "Examine";
     this.description.textContent = "Loading object…";
     this.description.scrollTop = 0;
-    this.inscription.hidden = true;
-    this.signature.hidden = true;
-    for (const media of this.inscriptionMedia) {
-      media.hidden = true;
-    }
     this.updateScrollbars();
   }
 
@@ -86,19 +59,7 @@ export class ExamineItemPanel {
       stack > 1 ? `${name} (${stack})` : String(name);
     this.description.textContent = itemAppraisalText(object);
     this.description.scrollTop = 0;
-    const inscribable = Boolean(object.bool.Inscribable);
-    this.inscription.hidden = !inscribable;
-    this.signature.hidden = !inscribable;
-    for (const media of this.inscriptionMedia) {
-      media.hidden = !inscribable;
-    }
-    this.inscription.textContent = String(object.string.Inscription ?? "");
-    this.inscription.scrollTop = 0;
-    this.signature.textContent = object.string.ScribeName
-      ? `--${object.string.ScribeName}`
-      : "";
     this.updateScrollbars();
-    // This viewer has no inscription-write endpoint; existing inscriptions remain selectable.
     if (Object.keys(object.spells).length > 0 || object.did.Spell != null) {
       spellText ??= import("./itemspells.json").then(
         (module) => module.default,
@@ -123,7 +84,6 @@ export class ExamineItemPanel {
 
   private updateScrollbars(): void {
     this.appraisalScrollbar.update();
-    this.inscriptionScrollbar.update();
   }
 
   close(): void {
@@ -134,7 +94,6 @@ export class ExamineItemPanel {
   destroy(): void {
     this.close();
     this.appraisalScrollbar.destroy();
-    this.inscriptionScrollbar.destroy();
     this.root.remove();
   }
 }

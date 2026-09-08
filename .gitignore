@@ -1,5 +1,6 @@
 # Logs
 scripts/
+tools/
 logs
 *.log
 npm-debug.log*

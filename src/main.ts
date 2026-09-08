@@ -22,6 +22,18 @@ const coordinates = document.querySelector<HTMLElement>(
   "#monitor-coordinates",
 )!;
 
+function syncVisualViewport(): void {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  document.documentElement.style.setProperty(
+    "--ac-visual-viewport-height",
+    `${viewport.height}px`,
+  );
+}
+
+syncVisualViewport();
+window.visualViewport?.addEventListener("resize", syncVisualViewport);
+
 async function start(): Promise<void> {
   const selector =
     document.querySelector<HTMLSelectElement>("#dataset-selector")!;
