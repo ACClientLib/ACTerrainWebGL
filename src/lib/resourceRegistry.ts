@@ -50,6 +50,7 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
   private gpuBytes = 0;
   private nextGeneration = 1;
   private clock = 0;
+  private changeRevision = 0;
   private contextAvailable = true;
   private uploadBytesThisFrame = 0;
   private restorationQueue = new Set<ResourceGeneration<TCpu, TGpu>>();
@@ -69,6 +70,10 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
       if (entry.uploadPending && entry.generation.gpu === undefined) count++;
     }
     return count;
+  }
+
+  get revision(): number {
+    return this.changeRevision;
   }
 
   beginFrame(): void {
@@ -97,6 +102,15 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
   }
 
   publish(id: number, cpu: TCpu, sizes: { encodedBytes: number; decodedBytes: number }, gpu?: TGpu, gpuBytes = 0): ResourceGeneration<TCpu, TGpu> {
+    return this.publishEntry(id, cpu, sizes, gpu, gpuBytes, 0).generation;
+  }
+
+  publishAndAcquire(id: number, cpu: TCpu, sizes: { encodedBytes: number; decodedBytes: number }, gpu?: TGpu, gpuBytes = 0): ResourceLease<TCpu, TGpu> {
+    return this.lease(this.publishEntry(id, cpu, sizes, gpu, gpuBytes, 1));
+  }
+
+  private publishEntry(id: number, cpu: TCpu, sizes: { encodedBytes: number; decodedBytes: number }, gpu: TGpu | undefined, gpuBytes: number, references: number): Entry<TCpu, TGpu> {
+    this.changeRevision++;
     const previous = this.entries.get(id);
     const generation: ResourceGeneration<TCpu, TGpu> = { id, generation: this.nextGeneration++, cpuEncodedBytes: sizes.encodedBytes, cpuDecodedBytes: sizes.decodedBytes, gpuBytes, cpu, gpu };
     if (previous) {
@@ -104,18 +118,19 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
       this.retired.add(previous);
       this.collect(previous);
     }
-    const entry: Entry<TCpu, TGpu> = { generation, references: 0, lastUsed: ++this.clock, uploadPending: false, retired: false, collected: false };
+    const entry: Entry<TCpu, TGpu> = { generation, references, lastUsed: ++this.clock, uploadPending: false, retired: false, collected: false };
     this.entries.set(id, entry);
     this.encodedBytes += sizes.encodedBytes;
     this.decodedBytes += sizes.decodedBytes;
     this.gpuBytes += gpuBytes;
     this.evict();
-    return generation;
+    return entry;
   }
 
   attachGpu(generation: ResourceGeneration<TCpu, TGpu>, gpu: TGpu, gpuBytes: number): boolean {
     const entry = this.findEntry(generation);
     if (!entry || entry.generation !== generation || !this.contextAvailable || gpuBytes < 0) return false;
+    this.changeRevision++;
     if (generation.gpu !== undefined) this.deferGpuDestruction(generation.gpu);
     this.gpuBytes -= generation.gpuBytes;
     generation.gpu = gpu;
@@ -130,6 +145,7 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
   detachGpu(generation: ResourceGeneration<TCpu, TGpu>): void {
     const entry = this.findEntry(generation);
     if (!entry || entry.generation !== generation || generation.gpu === undefined) return;
+    this.changeRevision++;
     this.deferGpuDestruction(generation.gpu);
     generation.gpu = undefined;
     this.gpuBytes -= generation.gpuBytes;
@@ -141,6 +157,10 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
     if (!entry) return undefined;
     entry.references++;
     entry.lastUsed = ++this.clock;
+    return this.lease(entry);
+  }
+
+  private lease(entry: Entry<TCpu, TGpu>): ResourceLease<TCpu, TGpu> {
     let released = false;
     return { value: entry.generation, release: () => { if (released) return; released = true; entry.references--; entry.lastUsed = ++this.clock; this.collect(entry); this.evict(); } };
   }
@@ -173,6 +193,7 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
   }
 
   contextLost(): void {
+    this.changeRevision++;
     this.contextAvailable = false;
     this.restorationQueue.clear();
     for (const entry of [...this.entries.values(), ...this.retired]) {
@@ -214,6 +235,7 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
 
   private removeEntry(id: number, entry: Entry<TCpu, TGpu>): void {
     if (this.entries.get(id) !== entry) return;
+    this.changeRevision++;
     this.entries.delete(id);
     this.dispose(entry);
   }

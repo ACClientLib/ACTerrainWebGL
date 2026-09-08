@@ -3,7 +3,6 @@ import { CameraFlying } from "./cameras/cameryflying";
 import { BaseCamera } from "./cameras/basecamera";
 import { CameraMode } from "./cameras/cameramode";
 import { Vector3 } from "@math.gl/core";
-import * as glhelpers from "./glhelpers";
 import {
   AcDatClient,
   ObjectMaterial,
@@ -23,10 +22,6 @@ import {
   Bounds3,
   FrustumPlanes,
 } from "./objectvisibility";
-import { Building3DVertSource } from "../shaders/building3d.vert";
-import { Building3DFragSource } from "../shaders/building3d.frag";
-import { ParticleVertSource } from "../shaders/particle.vert";
-import { ParticleFragSource } from "../shaders/particle.frag";
 import { BUILDING_TEXTURE_UNIT } from "./dattexture";
 import { getSceneDrawState, invalidateSceneDrawState } from "./scenedrawstate";
 import {
@@ -40,6 +35,7 @@ import { LegacyMeshGpuOwner } from "./gpuresources";
 import { cullForTransform, type ScenePass, type SceneRenderKey, type SceneSubmission, type SceneSubmissionSink } from "./scenesubmission";
 import type { SceneView } from "./sceneview";
 import { ParticleSimulation, type ParticleSimulationInstance } from "./particlesimulation";
+import { SceneGeometryResources, type SceneGeometryUniforms, type SceneParticleUniforms } from "./scenegeometryresources";
 
 interface GpuBatch {
   vertexBuffer: WebGLBuffer | null;
@@ -92,46 +88,16 @@ interface SceneGroup {
   instanceCount: number;
 }
 interface TwoDChunkData {
-  itemCount: number;
   groups: Map<string, SceneGroup>;
-  buildings: number;
-  statics: number;
-  serverSpawns: number;
-  envCells: number;
-  scenery: number;
 }
-interface Diagnostics {
-  visibleChunks: number;
-  prefetchedChunks: number;
-  visiblePlacements: number;
-  visibleBuildings: number;
-  visibleStatics: number;
-  visibleServerSpawns: number;
-  visibleEnvCells: number;
-  visibleScenery: number;
-  visibleUniqueModels: number;
-  instancedBatchCount: number;
-  drawCalls: number;
-  instanceBufferUploadBytes: number;
-  bakedChunkBatchCount: number;
-  cacheEvictions: number;
+interface Static3DPreparation {
+  key: string;
+  drawableGroups: { key: string; group: SceneGroup; mesh: GpuMesh }[];
+  commonGroups: Map<string, { modelIndex: number; parity: boolean; instanceCount: number; offset: number }>;
+  submissions: SceneSubmission[];
+  instanceData: Float32Array;
+  requiredFloats: number;
 }
-
-export interface SceneLoadDiagnostics {
-  httpRequests: number;
-  queuedBatches: number;
-  cacheReads: number;
-  processorRequests: number;
-  meshes: number;
-  bakedMeshes: number;
-  materials: number;
-  cacheEnabled: boolean;
-  cacheUsageBytes: number;
-  cacheQuotaBytes: number;
-  cacheBytes: number;
-}
-
-const BUILDINGS = 0;
 const STATICS = 1;
 const MAX_2D_STATIC_FOOTPRINT = 192;
 const INSTANCE_FLOATS = 10;
@@ -180,6 +146,7 @@ export class SceneGeometryRenderer {
     this.pendingEviction = null;
     this.lastResourceRequest = "";
     this.twoDPreparedDirty = true;
+    this.invalidateStaticPreparation();
   }
 
   getDungeonBounds(): Bounds3[] {
@@ -202,8 +169,6 @@ export class SceneGeometryRenderer {
     this.dats.beginFrame();
     this.refreshMeshHandles();
     this.fogDistance = 0;
-    this.diagnostics = this.emptyDiagnostics();
-    this.diagnostics.visiblePlacements = this.dungeonPlacements.length;
     // Reuse instancing without exterior distance, zoom, or 2D category filters.
     this.twoDPreparedDirty = true;
     this.prepareCommonSubmissions(camera, mode, this.groupVisible3D(this.dungeonPlacements), [], submit);
@@ -219,49 +184,14 @@ export class SceneGeometryRenderer {
   private particleProgram: WebGLProgram | null = null;
   private particleUploadData = new Float32Array(0);
   private instanceUploadData = new Float32Array(0);
-  private uniforms!: {
-    xWorld: WebGLUniformLocation | null;
-    acYOrigin: WebGLUniformLocation | null;
-    cameraMode: WebGLUniformLocation | null;
-    texture: WebGLUniformLocation | null;
-    diffuse: WebGLUniformLocation | null;
-    luminosity: WebGLUniformLocation | null;
-    opacity: WebGLUniformLocation | null;
-    alphaMode: WebGLUniformLocation | null;
-    alphaCutoff: WebGLUniformLocation | null;
-    renderPass: WebGLUniformLocation | null;
-    cameraPosition: WebGLUniformLocation | null;
-    fogColor: WebGLUniformLocation | null;
-    fogStart: WebGLUniformLocation | null;
-    fogEnd: WebGLUniformLocation | null;
-    fogEnabled: WebGLUniformLocation | null;
-    lightDirection: WebGLUniformLocation | null;
-    sunlightColor: WebGLUniformLocation | null;
-    ambientColor: WebGLUniformLocation | null;
-  };
-  private particleUniforms!: {
-    xWorld: WebGLUniformLocation | null;
-    acYOrigin: WebGLUniformLocation | null;
-    texture: WebGLUniformLocation | null;
-    cameraRight: WebGLUniformLocation | null;
-    cameraUp: WebGLUniformLocation | null;
-    opacity: WebGLUniformLocation | null;
-    alphaMode: WebGLUniformLocation | null;
-    alphaCutoff: WebGLUniformLocation | null;
-    renderPass: WebGLUniformLocation | null;
-    cameraPosition: WebGLUniformLocation | null;
-    fogColor: WebGLUniformLocation | null;
-    fogStart: WebGLUniformLocation | null;
-    fogEnd: WebGLUniformLocation | null;
-    fogEnabled: WebGLUniformLocation | null;
-  };
+  private uniforms!: SceneGeometryUniforms;
+  private particleUniforms!: SceneParticleUniforms;
   private dats: AcDatClient;
   private chunks = new Map<string, LoadedChunk | null>();
   private meshes = new Map<number, GpuMesh | null>();
   private pendingMeshes = new Set<number>();
   private bakedMeshes = new Map<number, GpuMesh | null>();
   private pendingBakedMeshes = new Set<number>();
-  private diagnostics: Diagnostics = this.emptyDiagnostics();
   private previousCameraPosition: Vector3 | null = null;
   private frameFrustum: FrustumPlanes | null = null;
   private lastResourceRequest = "";
@@ -285,6 +215,12 @@ export class SceneGeometryRenderer {
   private twoDPreparedVisibleKey = "";
   private twoDPreparedSubmissions: SceneSubmission[] = [];
   private twoDPreparedDirty = true;
+  private static3DPreparation: Static3DPreparation | null = null;
+  private staticPreparationRevision = 0;
+  private instanceBufferPreparationKey = "";
+  private lastMeshHandleRevision = -1;
+  private placementIdentity = new WeakMap<IndexedPlacement, number>();
+  private nextPlacementIdentity = 1;
   readonly meshOwner: LegacyMeshGpuOwner;
   private readonly commonGroups = new Map<string, { modelIndex: number; parity: boolean; instanceCount: number; offset: number }>();
   private readonly contextLostHandler = (event: Event) => {
@@ -310,10 +246,12 @@ export class SceneGeometryRenderer {
     invalidateSceneDrawState(this.gl);
     this.createProducerResources();
     this.twoDPreparedDirty = true;
+    this.invalidateStaticPreparation();
   };
 
   constructor(
     private gl: WebGL2RenderingContext,
+    private readonly geometryResources: SceneGeometryResources,
     descriptorPath = "v3/dataset",
     cacheNamespace: import("./opfsresourcecacheprotocol").CacheNamespace = "dat",
     serverId?: string,
@@ -331,10 +269,6 @@ export class SceneGeometryRenderer {
 
   get textureProfile(): string {
     return this.dats.textureProfile;
-  }
-
-  get datasetDiagnostics(): object {
-    return this.dats.datasetDiagnostics;
   }
 
   isCloseEnough(
@@ -367,6 +301,7 @@ export class SceneGeometryRenderer {
     this.twoDPreparedVisibleKey = "";
     this.twoDPreparedSubmissions = [];
     this.twoDPreparedDirty = true;
+    this.invalidateStaticPreparation();
     this.twoDChunkCache = new WeakMap<IndexedChunk, TwoDChunkData>();
     this.twoDAggregatedGroups.clear();
     this.twoDAggregateRangeKey = "";
@@ -409,8 +344,6 @@ export class SceneGeometryRenderer {
     this.gl.deleteBuffer(this.particleBuffer);
     this.gl.deleteBuffer(this.particleQuadBuffer);
     this.gl.deleteVertexArray(this.particleVao);
-    this.gl.deleteProgram(this.program);
-    this.gl.deleteProgram(this.particleProgram);
     this.dats.shutdown();
   }
 
@@ -421,7 +354,7 @@ export class SceneGeometryRenderer {
     return this.dats.totalRequestCount;
   }
   get pendingApiRequestCount(): number {
-    const load = this.loadDiagnostics;
+    const load = this.dats.loadDiagnostics;
     return (
       load.httpRequests +
       load.queuedBatches +
@@ -435,17 +368,6 @@ export class SceneGeometryRenderer {
 
   get pendingGpuUploadCount(): number {
     return this.dats.pendingGpuUploadCount;
-  }
-  get loadDiagnostics(): SceneLoadDiagnostics {
-    const load = this.dats.loadDiagnostics;
-    return {
-      ...load,
-      meshes: this.pendingMeshes.size,
-      bakedMeshes: this.pendingBakedMeshes.size,
-    };
-  }
-  get frameDiagnostics(): Diagnostics {
-    return { ...this.diagnostics };
   }
   get loadedResourceBytes(): number {
     return this.dats.loadedResourceBytes;
@@ -652,17 +574,10 @@ export class SceneGeometryRenderer {
       : null;
     const preloadBlocks =
       mode === CameraMode.Flying ? [] : this.preloadRing(visibleBlocks, camera);
-    this.requestChunks(visibleBlocks, preloadBlocks);
-    this.diagnostics = this.emptyDiagnostics();
-    this.diagnostics.prefetchedChunks = preloadBlocks.length;
-
+    const visibleKeys = this.canonicalChunkKeys(visibleBlocks);
+    const preloadKeys = this.canonicalChunkKeys(preloadBlocks);
+    this.requestChunks(visibleBlocks, preloadBlocks, visibleKeys, preloadKeys);
     const visible: IndexedPlacement[] = [];
-    let visibleBuildings = 0;
-    let visibleStatics = 0;
-    let visibleServerSpawns = 0;
-    let visibleEnvCells = 0;
-    let visibleScenery = 0;
-    let visiblePlacementCount = 0;
     for (const [x, y] of visibleBlocks) {
       const loaded = this.chunks.get(`${x},${y}`);
       if (!loaded) continue;
@@ -671,15 +586,7 @@ export class SceneGeometryRenderer {
         !this.chunkVisible(loaded, mode)
       )
         continue;
-      this.diagnostics.visibleChunks++;
       if (mode === CameraMode.Camera2D) {
-        const chunk = this.twoDChunkData(loaded);
-        visiblePlacementCount += chunk.itemCount;
-        visibleBuildings += chunk.buildings;
-        visibleStatics += chunk.statics;
-        visibleServerSpawns += chunk.serverSpawns;
-        visibleEnvCells += chunk.envCells;
-        visibleScenery += chunk.scenery;
         continue;
       }
       const placements = this.dats.placementsForChunk(loaded.chunk);
@@ -687,39 +594,14 @@ export class SceneGeometryRenderer {
         if (!this.placementVisible(placement, mode))
           continue;
         visible.push(placement);
-        if (placement.category === BUILDINGS) visibleBuildings++;
-        else if (placement.category === STATICS || placement.category === CELL_STATICS) visibleStatics++;
-        else if (placement.category === SERVER_SPAWNS || placement.category === CELL_SERVER_SPAWNS) visibleServerSpawns++;
-        else if (placement.category === ENV_CELLS) visibleEnvCells++;
-        else if (placement.category === SCENERY) visibleScenery++;
       }
     }
-    this.diagnostics.visiblePlacements = mode === CameraMode.Camera2D
-      ? visiblePlacementCount
-      : visible.length;
-    this.diagnostics.visibleBuildings = visibleBuildings;
-    this.diagnostics.visibleStatics = visibleStatics;
-    this.diagnostics.visibleServerSpawns = visibleServerSpawns;
-    this.diagnostics.visibleEnvCells = visibleEnvCells;
-    this.diagnostics.visibleScenery = visibleScenery;
 
     const groups = mode === CameraMode.Camera2D
       ? this.twoDAggregateGroups(visibleBlocks)
       : this.groupVisible3D(visible);
-    this.diagnostics.visibleUniqueModels = new Set(
-      [...groups.values()].map((group) => group.modelIndex),
-    ).size;
-    this.diagnostics.instancedBatchCount = [...new Set(
-      [...groups.values()].map((group) => group.modelIndex),
-    )].reduce(
-      (total, items) =>
-        total + (this.meshes.get(items)?.batches.length ?? 0),
-      0,
-    );
     this.prepareCommonSubmissions(camera, mode, groups, visibleBlocks, submissions, skyParticles);
-    const retainedKeys = [...visibleBlocks, ...preloadBlocks]
-      .map(([x, y]) => `${x},${y}`)
-      .sort();
+    const retainedKeys = [...new Set([...visibleKeys, ...preloadKeys])].sort();
     const evictionKey = retainedKeys.join("|");
     if (evictionKey !== this.lastEvictionKey) {
       this.lastEvictionKey = evictionKey;
@@ -744,6 +626,44 @@ export class SceneGeometryRenderer {
       groups.set(key, group);
     }
     return groups;
+  }
+
+  private drawableGroups(groups: Map<string, SceneGroup>): { key: string; group: SceneGroup; mesh: GpuMesh }[] {
+    const drawable: { key: string; group: SceneGroup; mesh: GpuMesh }[] = [];
+    for (const [key, group] of groups) {
+      const mesh = this.meshes.get(group.modelIndex);
+      if (mesh === undefined) {
+        this.requestMesh(group.modelIndex);
+        continue;
+      }
+      if (mesh) drawable.push({ key, group, mesh });
+    }
+    return drawable;
+  }
+
+  private static3DKey(
+    groups: Map<string, SceneGroup>,
+    visibleBlocks: [number, number][],
+    camera: BaseCamera,
+  ): string {
+    const frustum = this.frameFrustum ? [...this.frameFrustum].join(",") : "";
+    const placements = [...groups.values()].flatMap(group =>
+      group.placementSegments.flatMap(segment => segment.map(placement => {
+        let identity = this.placementIdentity.get(placement);
+        if (identity === undefined) {
+          identity = this.nextPlacementIdentity++;
+          this.placementIdentity.set(placement, identity);
+        }
+        return identity;
+      })),
+    );
+    const blocks = visibleBlocks.map(([x, y]) => `${x},${y}`).join("|");
+    return `${this.staticPreparationRevision}|${camera.constructor.name}|${this.acYOrigin}|${this.fogDistance}|${frustum}|${blocks}|${placements.join(",")}`;
+  }
+
+  private invalidateStaticPreparation(): void {
+    this.staticPreparationRevision++;
+    this.static3DPreparation = null;
   }
 
   private twoDAggregateGroups(visibleBlocks: [number, number][]): Map<string, SceneGroup> {
@@ -819,61 +739,83 @@ export class SceneGeometryRenderer {
     let particleInstancesRemaining = mode === CameraMode.Camera2D
       ? MAX_2D_PARTICLE_INSTANCES
       : MAX_3D_PARTICLE_INSTANCES;
-    const drawableGroups: { key: string; group: SceneGroup; mesh: GpuMesh }[] = [];
-    let requiredFloats = 0;
-    for (const [key, group] of groups) {
-      const mesh = this.meshes.get(group.modelIndex);
-      if (mesh === undefined) {
-        this.requestMesh(group.modelIndex);
-        continue;
+    const staticKey = mode === CameraMode.Camera2D ? "" : this.static3DKey(groups, visibleBlocks, camera);
+    const cachedStatic = mode === CameraMode.Flying && this.static3DPreparation?.key === staticKey
+      ? this.static3DPreparation
+      : null;
+    const drawableGroups = cachedStatic?.drawableGroups ?? this.drawableGroups(groups);
+    let requiredFloats = cachedStatic?.requiredFloats ?? 0;
+    if (cachedStatic) {
+      for (const [key, group] of cachedStatic.commonGroups) this.commonGroups.set(key, group);
+      if (this.instanceUploadData.length < requiredFloats) {
+        this.instanceUploadData = new Float32Array(requiredFloats);
       }
-      if (!mesh) continue;
-      drawableGroups.push({ key, group, mesh });
-      requiredFloats += group.instanceCount * INSTANCE_FLOATS;
-    }
-    if (this.instanceUploadData.length < requiredFloats) {
-      this.instanceUploadData = new Float32Array(Math.max(requiredFloats, this.instanceUploadData.length * 2, INSTANCE_FLOATS * 64));
-    }
-    let instanceOffset = 0;
-    for (const { key, group, mesh } of drawableGroups) {
-      const groupOffset = instanceOffset;
-      this.commonGroups.set(key, { modelIndex: group.modelIndex, parity: group.parity, instanceCount: group.instanceCount, offset: groupOffset });
-      if (group.instanceSegments) {
-        let floatOffset = groupOffset;
-        for (const data of group.instanceSegments) {
-          this.instanceUploadData.set(data, floatOffset);
-          floatOffset += data.length;
+      this.instanceUploadData.set(cachedStatic.instanceData, 0);
+      for (const submission of cachedStatic.submissions) submit(submission);
+    } else {
+      requiredFloats = drawableGroups.reduce((total, item) => total + item.group.instanceCount * INSTANCE_FLOATS, 0);
+      if (this.instanceUploadData.length < requiredFloats) {
+        this.instanceUploadData = new Float32Array(Math.max(requiredFloats, this.instanceUploadData.length * 2, INSTANCE_FLOATS * 64));
+      }
+      let instanceOffset = 0;
+      const staticSubmissions: SceneSubmission[] = [];
+      for (const { key, group, mesh } of drawableGroups) {
+        const groupOffset = instanceOffset;
+        this.commonGroups.set(key, { modelIndex: group.modelIndex, parity: group.parity, instanceCount: group.instanceCount, offset: groupOffset });
+        if (group.instanceSegments) {
+          let floatOffset = groupOffset;
+          for (const data of group.instanceSegments) {
+            this.instanceUploadData.set(data, floatOffset);
+            floatOffset += data.length;
+          }
+        } else {
+          let itemOffset = 0;
+          for (const placements of group.placementSegments) {
+            for (const placement of placements) {
+              this.writePlacementInstance(this.instanceUploadData, groupOffset + itemOffset * INSTANCE_FLOATS, placement);
+              itemOffset++;
+            }
+          }
         }
-      } else {
-        let itemOffset = 0;
-        for (const placements of group.placementSegments) {
-          for (const placement of placements) {
-            this.writePlacementInstance(this.instanceUploadData, groupOffset + itemOffset * INSTANCE_FLOATS, placement);
-            itemOffset++;
+        instanceOffset += group.instanceCount * INSTANCE_FLOATS;
+        for (let batchIndex = 0; batchIndex < mesh.batches.length; batchIndex++) {
+          const batch = mesh.batches[batchIndex];
+          if (!batch.material || batch.materialError) continue;
+          if (!batch.particles && batch.indexCount > 0) {
+            const staticSubmit: SceneSubmissionSink = (submission) => {
+              staticSubmissions.push(submission);
+              preparedSubmit(submission);
+            };
+            this.emitCommonMeshSubmission(key, batch, batchIndex, group.instanceCount, staticSubmit);
           }
         }
       }
-      instanceOffset += group.instanceCount * INSTANCE_FLOATS;
+      if (mode === CameraMode.Flying) {
+        this.static3DPreparation = {
+          key: staticKey,
+          drawableGroups,
+          commonGroups: new Map(this.commonGroups),
+          submissions: staticSubmissions,
+          instanceData: this.instanceUploadData.slice(0, requiredFloats),
+          requiredFloats,
+        };
+      }
+    }
+    for (const { group, mesh } of drawableGroups) {
       for (let batchIndex = 0; batchIndex < mesh.batches.length; batchIndex++) {
         const batch = mesh.batches[batchIndex];
-        if (!batch.material || batch.materialError) continue;
-        if (!batch.particles && batch.indexCount > 0) {
-          this.emitCommonMeshSubmission(key, batch, batchIndex, group.instanceCount, preparedSubmit);
-        }
-        if (batch.particles) {
-          for (let segmentIndex = 0; segmentIndex < group.placementSegments.length && particleInstancesRemaining > 0; segmentIndex++) {
-            particleInstancesRemaining -= this.appendParticlesForGroup(
-              batch,
-              group.placementSegments[segmentIndex],
-              `${group.modelIndex}:${group.parity ? 1 : 0}:${batchIndex}:${segmentIndex}`,
-              particleInstancesRemaining,
-              mode === CameraMode.Camera2D && this.particle2DFrozen,
-            );
-          }
+        if (!batch.material || batch.materialError || !batch.particles) continue;
+        for (let segmentIndex = 0; segmentIndex < group.placementSegments.length && particleInstancesRemaining > 0; segmentIndex++) {
+          particleInstancesRemaining -= this.appendParticlesForGroup(
+            batch,
+            group.placementSegments[segmentIndex],
+            `${group.modelIndex}:${group.parity ? 1 : 0}:${batchIndex}:${segmentIndex}`,
+            particleInstancesRemaining,
+            mode === CameraMode.Camera2D && this.particle2DFrozen,
+          );
         }
       }
     }
-    requiredFloats = instanceOffset;
     const bakedResult = this.prepareCommonBaked(
       camera,
       mode,
@@ -884,16 +826,19 @@ export class SceneGeometryRenderer {
     );
     requiredFloats = bakedResult.offset;
     particleInstancesRemaining = bakedResult.particleInstancesRemaining;
+    const instanceBufferKey = mode === CameraMode.Flying
+      ? `${staticKey}|${requiredFloats}`
+      : `${mode}|${this.staticPreparationRevision}|${preparedKey}|${requiredFloats}`;
     const skyGroups: ParticleDrawGroup[] = [];
     for (const input of skyParticles) {
       const group: ParticleDrawGroup = { material: input.material, data: new Float32Array(0), count: 0, offset: 0, skyPass: input.skyPass, skyObjectIndex: input.objectIndex };
       skyGroups.push(group);
       particleInstancesRemaining -= this.appendParticleInstances(group, input.particles, input.origin[0], this.acYOrigin - input.origin[1], input.origin[2], input.rotation, input.scale, input.key, particleInstancesRemaining, false, input.emitting);
     }
-    if (requiredFloats > 0) {
+    if (requiredFloats > 0 && this.instanceBufferPreparationKey !== instanceBufferKey) {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
       this.gl.bufferData(this.gl.ARRAY_BUFFER, this.instanceUploadData.subarray(0, requiredFloats), this.gl.DYNAMIC_DRAW);
-      this.diagnostics.instanceBufferUploadBytes += requiredFloats * Float32Array.BYTES_PER_ELEMENT;
+      this.instanceBufferPreparationKey = instanceBufferKey;
     }
     let particleFloats = 0;
     for (const [material, group] of this.particleGroups) {
@@ -979,9 +924,9 @@ export class SceneGeometryRenderer {
       state.particlePass = null;
       state.particleMaterial = null;
       state.particleOffset = -1;
+      state.producerOrigin = null;
       gl.useProgram(this.program);
       gl.uniformMatrix4fv(this.uniforms.xWorld, false, view.viewProjection);
-      gl.uniform1f(this.uniforms.acYOrigin, this.acYOrigin);
       gl.uniform1i(this.uniforms.cameraMode, view.cameraMode === CameraMode.Camera2D ? 0 : 1);
       gl.uniform3f(this.uniforms.cameraPosition, ...view.cameraPosition);
       gl.uniform3f(this.uniforms.fogColor, ...view.fog.color);
@@ -993,6 +938,10 @@ export class SceneGeometryRenderer {
       gl.uniform3f(this.uniforms.ambientColor, ...view.lighting.ambient);
       gl.uniform1i(this.uniforms.texture, BUILDING_TEXTURE_UNIT);
       gl.activeTexture(gl.TEXTURE0 + BUILDING_TEXTURE_UNIT);
+    }
+    if (state.producerOrigin !== this.acYOrigin) {
+      state.producerOrigin = this.acYOrigin;
+      gl.uniform1f(this.uniforms.acYOrigin, this.acYOrigin);
     }
     if (state.meshPass !== pass) {
       state.meshPass = pass;
@@ -1034,7 +983,6 @@ export class SceneGeometryRenderer {
       gl.vertexAttribPointer(5, 3, gl.FLOAT, false, INSTANCE_FLOATS * 4, byteOffset + 28);
     }
     gl.drawElementsInstanced(gl.TRIANGLES, batch.indexCount, gl.UNSIGNED_INT, 0, group.instanceCount);
-    this.diagnostics.drawCalls++;
   }
 
   private prepareCommonBaked(
@@ -1080,11 +1028,16 @@ export class SceneGeometryRenderer {
         }
         const instanceOffset = offset;
         if (this.instanceUploadData.length < instanceOffset + INSTANCE_FLOATS) {
-          this.instanceUploadData = new Float32Array(Math.max(instanceOffset + INSTANCE_FLOATS, this.instanceUploadData.length * 2, INSTANCE_FLOATS * 64));
+          const data = new Float32Array(Math.max(instanceOffset + INSTANCE_FLOATS, this.instanceUploadData.length * 2, INSTANCE_FLOATS * 64));
+          data.set(this.instanceUploadData);
+          this.instanceUploadData = data;
         }
         this.instanceUploadData[instanceOffset] = x * LAND_BLOCK_SIZE;
         this.instanceUploadData[instanceOffset + 1] = y * LAND_BLOCK_SIZE;
         this.instanceUploadData[instanceOffset + 2] = 0;
+        this.instanceUploadData[instanceOffset + 3] = 0;
+        this.instanceUploadData[instanceOffset + 4] = 0;
+        this.instanceUploadData[instanceOffset + 5] = 0;
         this.instanceUploadData[instanceOffset + 6] = 1;
         this.instanceUploadData[instanceOffset + 7] = 1;
         this.instanceUploadData[instanceOffset + 8] = 1;
@@ -1154,10 +1107,9 @@ export class SceneGeometryRenderer {
       state.particlePass = null;
       state.particleMaterial = null;
       state.particleOffset = -1;
+      state.producerOrigin = null;
       gl.useProgram(this.particleProgram);
-      gl.bindVertexArray(this.particleVao);
       gl.uniformMatrix4fv(this.particleUniforms.xWorld, false, view.viewProjection);
-      gl.uniform1f(this.particleUniforms.acYOrigin, this.acYOrigin);
       gl.uniform3f(this.particleUniforms.cameraRight, ...view.particleRight);
       gl.uniform3f(this.particleUniforms.cameraUp, ...view.particleUp);
       gl.uniform3f(this.particleUniforms.cameraPosition, ...view.cameraPosition);
@@ -1169,10 +1121,20 @@ export class SceneGeometryRenderer {
       gl.uniform1i(this.particleUniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : 0);
       gl.activeTexture(gl.TEXTURE0 + BUILDING_TEXTURE_UNIT);
     }
+    if (state.producerOrigin !== this.acYOrigin) {
+      state.producerOrigin = this.acYOrigin;
+      gl.uniform1f(this.particleUniforms.acYOrigin, this.acYOrigin);
+    }
     if (state.particlePass !== pass) {
       state.particlePass = pass;
       state.particleMaterial = null;
       gl.uniform1i(this.particleUniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : 0);
+    }
+    // Programs are shared, but each producer owns its particle VAO and buffer.
+    if (state.particleVao !== this.particleVao || state.particleOffset === -1) {
+      gl.bindVertexArray(this.particleVao);
+      state.particleVao = this.particleVao;
+      state.particleOffset = -1;
     }
     if (state.particleOffset !== group.offset) {
       state.particleOffset = group.offset;
@@ -1189,7 +1151,6 @@ export class SceneGeometryRenderer {
       gl.uniform1i(this.particleUniforms.alphaMode, group.material.alphaMode === "cutout" ? 1 : group.material.alphaMode === "blended" ? 2 : group.material.alphaMode === "additive" ? 3 : 0);
     }
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, group.count);
-    this.diagnostics.drawCalls++;
   }
 
   private appendSharedParticleInstances(
@@ -1260,20 +1221,11 @@ export class SceneGeometryRenderer {
   private requestChunks(
     visibleBlocks: [number, number][],
     preloadBlocks: [number, number][],
+    visibleKeys: string[],
+    preloadKeys: string[],
   ): void {
-    // The preload list is sorted by camera movement, so its order can change
-    // while the requested set stays the same. Use a canonical key to avoid
-    // aborting an otherwise valid load on every movement/zoom event.
-    const visibleKey = visibleBlocks
-      .map(([x, y]) => `${x},${y}`)
-      .sort()
-      .join("|");
-    const preloadKey = preloadBlocks
-      .map(([x, y]) => `${x},${y}`)
-      .sort()
-      .join("|");
     // Promoting a prefetched block to visible still needs to publish its chunk.
-    const requestKey = `${visibleKey};${preloadKey}`;
+    const requestKey = `${visibleKeys.join("|")};${preloadKeys.join("|")}`;
     if (requestKey === this.lastResourceRequest) return;
     if (performance.now() < this.nextResourceRetry) return;
     this.decodeController.abort();
@@ -1292,6 +1244,7 @@ export class SceneGeometryRenderer {
           });
           this.twoDAggregateRangeKey = "";
           this.twoDPreparedDirty = true;
+          this.invalidateStaticPreparation();
           if (this.lastResourceRequest === requestKey) {
             this.resourceLoadState = "ready";
             this.nextResourceRetry = 0;
@@ -1316,6 +1269,10 @@ export class SceneGeometryRenderer {
       });
   }
 
+  private canonicalChunkKeys(blocks: [number, number][]): string[] {
+    return blocks.map(([x, y]) => `${x},${y}`).sort();
+  }
+
   private requestMesh(modelIndex: number): void {
     if (this.pendingMeshes.has(modelIndex)) return;
     const generation = this.cacheGeneration;
@@ -1329,6 +1286,7 @@ export class SceneGeometryRenderer {
             this.uploadMesh(this.dats.model(modelIndex)!.meshResourceId, mesh),
           );
           this.twoDPreparedDirty = true;
+          this.invalidateStaticPreparation();
         }
       })
       .catch((error) => {
@@ -1342,6 +1300,7 @@ export class SceneGeometryRenderer {
           );
           this.meshes.set(modelIndex, null);
           this.twoDPreparedDirty = true;
+          this.invalidateStaticPreparation();
         }
       })
       .finally(() => {
@@ -1366,6 +1325,7 @@ export class SceneGeometryRenderer {
             this.uploadMesh(resourceId, mesh),
           );
           this.twoDPreparedDirty = true;
+          this.invalidateStaticPreparation();
         }
       })
       .catch((error) => {
@@ -1379,6 +1339,7 @@ export class SceneGeometryRenderer {
           );
           this.bakedMeshes.set(resourceId, null);
           this.twoDPreparedDirty = true;
+          this.invalidateStaticPreparation();
         }
       })
       .finally(() => {
@@ -1411,10 +1372,12 @@ export class SceneGeometryRenderer {
         .then((material) => {
           batch.material = material;
           this.twoDPreparedDirty = true;
+          this.invalidateStaticPreparation();
         })
         .catch((error) => {
           batch.materialError = String(error);
           this.twoDPreparedDirty = true;
+          this.invalidateStaticPreparation();
           console.error("Unable to load ACTerrain material", {
             materialResourceId: item.materialResourceId,
             textureProfile: this.dats.textureProfile,
@@ -1710,23 +1673,11 @@ export class SceneGeometryRenderer {
     const placements = this.dats.placementsForChunk(loaded.chunk);
     const oversizedStatics = this.oversizedStatics2D(loaded, placements);
     const data: TwoDChunkData = {
-      itemCount: 0,
       groups: new Map<string, SceneGroup>(),
-      buildings: 0,
-      statics: 0,
-      serverSpawns: 0,
-      envCells: 0,
-      scenery: 0,
     };
     for (const placement of placements) {
       if (placement.category === CELL_STATICS || placement.category === CELL_SERVER_SPAWNS) continue;
       if (oversizedStatics.has(placement)) continue;
-      data.itemCount++;
-      if (placement.category === BUILDINGS) data.buildings++;
-      else if (placement.category === STATICS) data.statics++;
-      else if (placement.category === SERVER_SPAWNS) data.serverSpawns++;
-      else if (placement.category === ENV_CELLS) data.envCells++;
-      else if (placement.category === SCENERY) data.scenery++;
       if (placement.geometryPath === 1) continue;
       const parity = placement.scale[0] * placement.scale[1] * placement.scale[2] < 0;
       const key = `${placement.modelIndex}:${parity ? 1 : 0}`;
@@ -2043,18 +1994,19 @@ export class SceneGeometryRenderer {
     if (chunksChanged) {
       this.twoDAggregateRangeKey = "";
       this.twoDPreparedDirty = true;
+      this.invalidateStaticPreparation();
     }
     for (const [modelIndex, mesh] of this.meshes)
       if (!retainedModels.has(modelIndex)) {
         this.deleteMesh(mesh);
         this.meshes.delete(modelIndex);
-        this.diagnostics.cacheEvictions++;
+        this.invalidateStaticPreparation();
       }
     for (const [resourceId, mesh] of this.bakedMeshes)
       if (!retainedBaked.has(resourceId)) {
         this.deleteMesh(mesh);
         this.bakedMeshes.delete(resourceId);
-        this.diagnostics.cacheEvictions++;
+        this.invalidateStaticPreparation();
       }
   }
 
@@ -2071,6 +2023,9 @@ export class SceneGeometryRenderer {
   }
 
   private refreshMeshHandles(): void {
+    const revision = this.meshOwner.revision;
+    if (revision === this.lastMeshHandleRevision) return;
+
     const refresh = (mesh: GpuMesh) => {
       const current = this.meshOwner.current(mesh.id);
       if (!current) return;
@@ -2086,29 +2041,15 @@ export class SceneGeometryRenderer {
     };
     for (const mesh of this.meshes.values()) if (mesh) refresh(mesh);
     for (const mesh of this.bakedMeshes.values()) if (mesh) refresh(mesh);
+    this.lastMeshHandleRevision = revision;
   }
 
   private createProducerResources(): void {
     const gl = this.gl;
-    const vertex = glhelpers.createShader(gl, gl.VERTEX_SHADER, Building3DVertSource);
-    const fragment = glhelpers.createShader(gl, gl.FRAGMENT_SHADER, Building3DFragSource);
-    this.program = vertex && fragment ? glhelpers.createProgram(gl, vertex, fragment) : null;
-    if (vertex) {
-      gl.deleteShader(vertex);
-    }
-    if (fragment) {
-      gl.deleteShader(fragment);
-    }
+    this.program = this.geometryResources.program;
     this.instanceBuffer = gl.createBuffer();
-    const particleVertex = glhelpers.createShader(gl, gl.VERTEX_SHADER, ParticleVertSource);
-    const particleFragment = glhelpers.createShader(gl, gl.FRAGMENT_SHADER, ParticleFragSource);
-    this.particleProgram = particleVertex && particleFragment ? glhelpers.createProgram(gl, particleVertex, particleFragment) : null;
-    if (particleVertex) {
-      gl.deleteShader(particleVertex);
-    }
-    if (particleFragment) {
-      gl.deleteShader(particleFragment);
-    }
+    this.instanceBufferPreparationKey = "";
+    this.particleProgram = this.geometryResources.particleProgram;
     this.particleVao = gl.createVertexArray();
     this.particleBuffer = gl.createBuffer();
     this.particleQuadBuffer = gl.createBuffer();
@@ -2117,21 +2058,8 @@ export class SceneGeometryRenderer {
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]), gl.STATIC_DRAW);
     }
     this.configureParticleVao();
-    const uniform = (program: WebGLProgram | null, name: string) => program ? gl.getUniformLocation(program, name) : null;
-    this.uniforms = {
-      acYOrigin: uniform(this.program, "acYOrigin"), xWorld: uniform(this.program, "xWorld"), cameraMode: uniform(this.program, "cameraMode"), texture: uniform(this.program, "buildingTexture"),
-      diffuse: uniform(this.program, "diffuseAmount"), luminosity: uniform(this.program, "luminosity"), opacity: uniform(this.program, "opacity"),
-      alphaMode: uniform(this.program, "alphaMode"), alphaCutoff: uniform(this.program, "alphaCutoff"), renderPass: uniform(this.program, "renderPass"),
-      cameraPosition: uniform(this.program, "cameraPosition"), fogColor: uniform(this.program, "fogColor"), fogStart: uniform(this.program, "fogStart"),
-      fogEnd: uniform(this.program, "fogEnd"), fogEnabled: uniform(this.program, "fogEnabled"), lightDirection: uniform(this.program, "lightDirection"),
-      sunlightColor: uniform(this.program, "sunlightColor"), ambientColor: uniform(this.program, "ambientColor"),
-    };
-    this.particleUniforms = {
-      acYOrigin: uniform(this.particleProgram, "acYOrigin"), xWorld: uniform(this.particleProgram, "xWorld"), texture: uniform(this.particleProgram, "particleTexture"), cameraRight: uniform(this.particleProgram, "cameraRight"),
-      cameraUp: uniform(this.particleProgram, "cameraUp"), opacity: uniform(this.particleProgram, "materialOpacity"), alphaMode: uniform(this.particleProgram, "alphaMode"), alphaCutoff: uniform(this.particleProgram, "alphaCutoff"), renderPass: uniform(this.particleProgram, "renderPass"),
-      cameraPosition: uniform(this.particleProgram, "cameraPosition"), fogColor: uniform(this.particleProgram, "fogColor"), fogStart: uniform(this.particleProgram, "fogStart"),
-      fogEnd: uniform(this.particleProgram, "fogEnd"), fogEnabled: uniform(this.particleProgram, "fogEnabled"),
-    };
+    this.uniforms = this.geometryResources.uniforms;
+    this.particleUniforms = this.geometryResources.particleUniforms;
   }
 
   private createBatchVao(batch: GpuBatch): WebGLVertexArrayObject | null {
@@ -2194,23 +2122,5 @@ export class SceneGeometryRenderer {
     for (let y = minY; y <= maxY; y++)
       for (let x = minX; x <= maxX; x++) result.push([x, y]);
     return result;
-  }
-  private emptyDiagnostics(): Diagnostics {
-    return {
-      visibleChunks: 0,
-      prefetchedChunks: 0,
-      visiblePlacements: 0,
-      visibleBuildings: 0,
-      visibleStatics: 0,
-      visibleServerSpawns: 0,
-      visibleEnvCells: 0,
-      visibleScenery: 0,
-      visibleUniqueModels: 0,
-      instancedBatchCount: 0,
-      drawCalls: 0,
-      instanceBufferUploadBytes: 0,
-      bakedChunkBatchCount: 0,
-      cacheEvictions: 0,
-    };
   }
 }

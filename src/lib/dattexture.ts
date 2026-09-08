@@ -1,6 +1,6 @@
 import { TEXTURE_PROFILE, type TextureProfile } from "./formatcontract";
 import type { TextureExtensions } from "./textureprofile";
-import { ResourceRegistry } from "./resourceRegistry";
+import { ResourceRegistry, type ResourceLease } from "./resourceRegistry";
 
 export const BUILDING_TEXTURE_UNIT = 3;
 
@@ -38,13 +38,13 @@ interface Palette {
 }
 
 interface IndexedFinalTexture {
-  promise: Promise<WebGLTexture>;
+  promise: Promise<ResourceLease<IndexedGpuCpu, WebGLTexture>>;
   references: number;
   imageKey: string;
 }
 
 interface IndexedPlane {
-  promise: Promise<WebGLTexture>;
+  promise: Promise<ResourceLease<IndexedGpuCpu, WebGLTexture>>;
   references: number;
 }
 
@@ -109,6 +109,7 @@ class PaletteTextureMaterializer {
   constructor(private gl: WebGL2RenderingContext) {}
 
   contextLost(): void {
+    this.clear();
     this.framebuffer = null;
     this.framebufferValidated = false;
     this.vao = null;
@@ -196,7 +197,7 @@ class PaletteTextureMaterializer {
     const oldSampler0 = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
     gl.activeTexture(gl.TEXTURE1);
     const oldSampler1 = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
-    gl.activeTexture(oldActive);
+    // Allocate the result on unit 1, whose binding is restored below.
     try {
       // Integer index planes require nearest filtering, supplied by the textures.
       gl.bindSampler(0, null);
@@ -260,7 +261,13 @@ export class IndexedTextureLoader {
     return this.gpuRegistry.pendingUploadCount + this.restoreQueue.size;
   }
 
+  get revision(): number {
+    return this.gpuRegistry.revision;
+  }
+
   clear(): void {
+    const releases = [...this.finals.values(), ...this.planes.values()]
+      .map(cached => cached.promise.then(lease => lease.release()));
     this.finals.clear();
     this.planes.clear();
     this.palettes.clear();
@@ -268,6 +275,8 @@ export class IndexedTextureLoader {
     this.materializer.clear();
     this.gpuRegistry.replaceDataset();
     this.gpuRegistry.beginFrame();
+    // Shutdown has no next render frame to collect the released GPU handles.
+    void Promise.allSettled(releases).then(() => this.gpuRegistry.beginFrame());
   }
 
   shutdown(): void {
@@ -290,15 +299,22 @@ export class IndexedTextureLoader {
       const promise = this.create(materialId, definition, load).catch(error => { if (this.finals.get(materialId) === created) this.finals.delete(materialId); throw error; });
       created = { promise, references: 0, imageKey }; cached = created; this.finals.set(materialId, cached);
     }
-    cached.references++; return cached.promise;
+    cached.references++;
+    return cached.promise.then(lease => lease.value.gpu!);
   }
 
   release(materialId: number): void {
     const cached = this.finals.get(materialId); if (!cached || --cached.references > 0) return;
-      void cached.promise.then(() => { if (cached.references || this.finals.get(materialId) !== cached) return; this.finals.delete(materialId); this.gpuRegistry.remove(this.finalKey(materialId)); this.releasePlane(Number(cached.imageKey)); }).catch(() => undefined);
+    void cached.promise.then(lease => {
+      if (cached.references || this.finals.get(materialId) !== cached) return;
+      this.finals.delete(materialId);
+      lease.release();
+      this.gpuRegistry.remove(this.finalKey(materialId));
+      this.releasePlane(Number(cached.imageKey));
+    }).catch(() => undefined);
   }
 
-  private async create(materialId: number, definition: IndexedMaterialDefinition, load: ResourceLoader): Promise<WebGLTexture> {
+  private async create(materialId: number, definition: IndexedMaterialDefinition, load: ResourceLoader): Promise<ResourceLease<IndexedGpuCpu, WebGLTexture>> {
     const imageResource = await load(definition.imageResourceId, 3), image = readIndexed(await decodeTextureBytes(imageResource));
     this.lifecycleController.signal.throwIfAborted();
     const plane = await this.acquirePlane(definition.imageResourceId, image, load);
@@ -319,11 +335,11 @@ export class IndexedTextureLoader {
       const paletteKey = this.paletteKey(materialId);
       const palette = this.uploadPalette(paletteKey, colors);
       try {
-        const texture = await this.materializer.materializeAsync(image, plane, palette);
+        const texture = await this.materializer.materializeAsync(image, plane, palette.value.gpu!);
         this.lifecycleController.signal.throwIfAborted();
-        this.gpuRegistry.publish(this.finalKey(materialId), { image, palette: colors.slice(), planeId: definition.imageResourceId }, { encodedBytes: 0, decodedBytes: image.width * image.height * 4 }, texture, this.materializedBytes(image));
-        return texture;
+        return this.gpuRegistry.publishAndAcquire(this.finalKey(materialId), { image, palette: colors.slice(), planeId: definition.imageResourceId }, { encodedBytes: 0, decodedBytes: image.width * image.height * 4 }, texture, this.materializedBytes(image));
       } finally {
+        palette.release();
         this.gpuRegistry.remove(paletteKey);
       }
     } catch (error) { this.releasePlane(definition.imageResourceId); throw error; }
@@ -344,23 +360,31 @@ export class IndexedTextureLoader {
       const promise = Promise.resolve().then(() => {
         this.lifecycleController.signal.throwIfAborted();
         const texture = this.uploadPlane(image);
-        this.gpuRegistry.publish(
+        return this.gpuRegistry.publishAndAcquire(
           this.planeKey(id),
           { image, planeId: id },
           { encodedBytes: 0, decodedBytes: image.pixels.byteLength },
           texture,
           image.pixels.byteLength,
         );
-        return texture;
       });
       cached = { promise, references: 0 };
       this.planes.set(id, cached);
     }
     cached.references++;
-    return cached.promise;
+    return cached.promise.then(lease => lease.value.gpu!);
   }
 
-  private releasePlane(id: number): void { const cached = this.planes.get(id); if (!cached || --cached.references > 0) return; void cached.promise.then(() => { if (cached.references || this.planes.get(id) !== cached) return; this.planes.delete(id); this.gpuRegistry.remove(this.planeKey(id)); }).catch(() => undefined); }
+  private releasePlane(id: number): void {
+    const cached = this.planes.get(id);
+    if (!cached || --cached.references > 0) return;
+    void cached.promise.then(lease => {
+      if (cached.references || this.planes.get(id) !== cached) return;
+      this.planes.delete(id);
+      lease.release();
+      this.gpuRegistry.remove(this.planeKey(id));
+    }).catch(() => undefined);
+  }
 
   private finalKey(id: number): number { return -1 - id * 2; }
   private planeKey(id: number): number { return -2 - id * 2; }
@@ -373,9 +397,23 @@ export class IndexedTextureLoader {
     }
   }
 
-  private uploadPalette(id: number, colors: Uint8Array): WebGLTexture {
+  private uploadPalette(id: number, colors: Uint8Array): ResourceLease<IndexedGpuCpu, WebGLTexture> {
     const texture = this.gl.createTexture(); if (!texture) throw new Error("Unable to create palette texture");
-    try { this.gl.activeTexture(this.gl.TEXTURE1); this.gl.bindTexture(this.gl.TEXTURE_2D, texture); this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1); this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA8, colors.length / 4, 1, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, colors); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE); this.gpuRegistry.publish(id, { palette: colors.slice() }, { encodedBytes: 0, decodedBytes: colors.byteLength }, texture, colors.byteLength); return texture; } catch (error) { this.gl.deleteTexture(texture); throw error; }
+    const gl = this.gl;
+    try {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, colors.length / 4, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, colors);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return this.gpuRegistry.publishAndAcquire(id, { palette: colors.slice() }, { encodedBytes: 0, decodedBytes: colors.byteLength }, texture, colors.byteLength);
+    } catch (error) {
+      gl.deleteTexture(texture);
+      throw error;
+    }
   }
 
   private uploadPlane(image: IndexedImage): WebGLTexture {
@@ -389,16 +427,15 @@ export class IndexedTextureLoader {
         const texture = this.uploadPlane(generation.cpu.image);
         if (!this.gpuRegistry.attachGpu(generation, texture, generation.cpu.image.pixels.byteLength)) this.gl.deleteTexture(texture);
       } else if (generation.cpu.image) {
-          const planeLease = this.gpuRegistry.acquire(this.planeKey(generation.cpu.planeId!));
-          const plane = planeLease?.value.gpu;
+          const plane = this.gpuRegistry.current(this.planeKey(generation.cpu.planeId!))?.gpu;
           if (!plane) throw new Error("Indexed plane is not restored");
           const palette = this.uploadPalette(this.paletteKey(generation.id), generation.cpu.palette!);
           try {
-            const texture = this.materializer.materialize(generation.cpu.image, plane, palette);
+            const texture = this.materializer.materialize(generation.cpu.image, plane, palette.value.gpu!);
             if (!this.gpuRegistry.attachGpu(generation, texture, this.materializedBytes(generation.cpu.image))) this.gl.deleteTexture(texture);
           } finally {
+            palette.release();
             this.gpuRegistry.remove(this.paletteKey(generation.id));
-            planeLease?.release();
           }
       }
       this.gpuRegistry.markUploadPending(generation.id, false);

@@ -46,6 +46,10 @@ export class LegacyMeshGpuOwner {
     this.registry = new ResourceRegistry({ budgets, destroyGpu: (mesh) => this.destroy(mesh), contextRestored: (generation) => { this.restoring.add(generation); } });
   }
 
+  get revision(): number {
+    return this.registry.revision;
+  }
+
   beginFrame(): void {
     this.registry.beginFrame();
     for (const generation of [...this.restoring]) {

@@ -302,6 +302,10 @@ export class SkyboxRenderer {
           const source = mesh.batches[index];
           const material = {
             ...materials[index],
+            // Follow the resource owner's handle when its texture is restored.
+            get texture() {
+              return materials[index].texture;
+            },
             cullState: source.cullState ?? materials[index].cullState,
             // Preserve the batch's UV addressing mode. Non-tiled cube faces
             // need edge clamping, while clouds and other sky effects may use

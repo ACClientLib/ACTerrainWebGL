@@ -10,6 +10,8 @@ export interface SceneDrawState {
   particlePass: ScenePass | null;
   particleMaterial: object | null;
   particleOffset: number;
+  particleVao: WebGLVertexArrayObject | null;
+  producerOrigin: number | null;
 }
 
 const states = new WeakMap<WebGL2RenderingContext, SceneDrawState>();
@@ -24,6 +26,8 @@ function createState(): SceneDrawState {
     particlePass: null,
     particleMaterial: null,
     particleOffset: -1,
+    particleVao: null,
+    producerOrigin: null,
   };
 }
 
@@ -46,4 +50,6 @@ export function invalidateSceneDrawState(gl: WebGL2RenderingContext): void {
   state.particlePass = null;
   state.particleMaterial = null;
   state.particleOffset = -1;
+  state.particleVao = null;
+  state.producerOrigin = null;
 }

@@ -30,6 +30,7 @@ import {
   TERRAIN_DATA_SIDE,
 } from "./worldgeometry";
 import { SceneRenderer } from "./scenerenderer";
+import { SceneGeometryResources } from "./scenegeometryresources";
 import { SkyboxRenderer } from "./skyboxrenderer";
 import { createSceneView, type SceneLighting, type SceneView } from "./sceneview";
 import type { SceneSubmission } from "./scenesubmission";
@@ -223,8 +224,14 @@ export class TerrainRenderer {
   #terrainInstanceBuffer: WebGLBuffer | null = null;
   #terrainInstanceCapacity = 0;
   #terrainInstanceData = new Float32Array(0);
+  #terrainInstancePreparationKey = "";
+  #terrainRenderView: [number, number, number, number] = [0, 0, LAND_BLOCK_SIDE, LAND_BLOCK_SIDE];
+  #terrainScale = 1;
+  #terrainMinZoomForTextures = 0;
+  #terrainCameraMode = 1;
   #submissions: SceneSubmission[] = [];
   #sceneGeometry!: SceneGeometryRenderer;
+  #geometryResources!: SceneGeometryResources;
   #serverGeometry?: SceneGeometryRenderer;
   private readonly minTerrainTextureCellArea = 4;
   private terrainColorData = new Float32Array(32 * 3);
@@ -318,6 +325,7 @@ export class TerrainRenderer {
     if (!this.gl) {
       this.throwError("No Canvas / webgl2?");
     }
+    this.#geometryResources = new SceneGeometryResources(this.gl);
     this.sceneRenderer = new SceneRenderer(this.gl);
     this.gl.canvas.addEventListener("webglcontextrestored", () => {
       this.invalidate("context restoration");
@@ -325,6 +333,7 @@ export class TerrainRenderer {
 
     this.#sceneGeometry = new SceneGeometryRenderer(
       this.gl,
+      this.#geometryResources,
       datDescriptorPath,
       "dat",
     );
@@ -335,7 +344,7 @@ export class TerrainRenderer {
       () => this.invalidate("resource publication"),
     );
     this.#serverGeometry = serverDescriptorPath
-      ? new SceneGeometryRenderer(this.gl, serverDescriptorPath, "server", serverId)
+      ? new SceneGeometryRenderer(this.gl, this.#geometryResources, serverDescriptorPath, "server", serverId)
       : undefined;
     if (labelsPath) {
       this.#labels = new LabelsClient(labelsPath, document.querySelector<HTMLElement>("#labels-overlay")!, labelsRevision);
@@ -387,6 +396,7 @@ export class TerrainRenderer {
     this.skyboxRenderer.destroy();
     this.#sceneGeometry.shutdown();
     this.#serverGeometry?.shutdown();
+    this.#geometryResources.dispose();
     this.#dataTexture.shutdown();
     this.#terrainHeightData = null;
     this.#submissions = [];
@@ -597,7 +607,6 @@ export class TerrainRenderer {
         console.error("Unable to clear ACTerrain data caches", error);
       }
     });
-    addActionButton("Print Diagnostics", () => this.#printDiagnostics());
     addActionButton("Reset Settings to Defaults", () => {
       settings.resetSettings();
       this.shutdown();
@@ -652,37 +661,6 @@ export class TerrainRenderer {
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape") setOpen(false);
     }, { signal: this.shutdownSignal });
-  }
-
-  #printDiagnostics(): void {
-    const diagnostics = {
-      camera: {
-        mode: this.currentCameraMode,
-        position: {
-          x: this.currentCamera.Position.x,
-          y: this.currentCamera.Position.y,
-          z: this.currentCamera.Position.z,
-        },
-        zoom: this.camera2D.Zoom,
-      },
-      sceneGeometry: {
-        transparency: {
-          tier: this.sceneRenderer.tier,
-          drawBuffersIndexed:
-            this.sceneRenderer.capabilities.drawBuffersIndexed,
-          colorBufferFloat: this.sceneRenderer.capabilities.colorBufferFloat,
-          floatBlend: this.sceneRenderer.capabilities.floatBlend,
-        },
-        dataset: this.#sceneGeometry.datasetDiagnostics,
-        server: this.#serverGeometry?.datasetDiagnostics,
-        loadState: this.#sceneGeometry.sceneLoadState,
-        loadError: this.#sceneGeometry.sceneLoadError,
-        frame: this.#sceneGeometry.frameDiagnostics,
-        loading: this.#sceneGeometry.loadDiagnostics,
-      },
-    };
-
-    console.log("[ACTerrain diagnostics]", diagnostics);
   }
 
   updateFlyingCameraControls(): void {
@@ -1234,6 +1212,7 @@ export class TerrainRenderer {
       this.gl.DYNAMIC_DRAW,
     );
     this.#terrainInstanceCapacity = 1;
+    this.#terrainInstancePreparationKey = "";
     this.gl.enableVertexAttribArray(0);
     this.gl.vertexAttribPointer(
       0,
@@ -1604,7 +1583,7 @@ export class TerrainRenderer {
 
     // Set uniforms based on camera type
     if (!this.dungeonSelection) {
-      this.#setUniforms();
+      this.#prepareTerrainInstances();
     }
   }
 
@@ -1670,13 +1649,7 @@ export class TerrainRenderer {
     this.#terrainInstanceCapacity = count;
   }
 
-  #setUniforms() {
-    this.gl.useProgram(this.program);
-    this.gl.uniformMatrix4fv(
-      this.#xWorldLoc!,
-      false,
-      this.currentCamera.FrameTransform,
-    );
+  #prepareTerrainInstances() {
     const minZoomForTextures =
       this.currentCameraMode === CameraMode.Camera2D
         ? Math.max(
@@ -1686,18 +1659,11 @@ export class TerrainRenderer {
               TERRAIN_CELL_SIZE,
           )
         : settings.data.minZoomForTextures;
-    this.gl.uniform1f(this.#minZoomForTexturesLoc!, minZoomForTextures);
-    this.gl.uniform1i(
-      this.#terrainGridEnabledLoc!,
-      settings.data.terrainGridEnabled ? 1 : 0,
-    );
+    this.#terrainMinZoomForTextures = minZoomForTextures;
+    this.#terrainCameraMode = this.currentCameraMode === CameraMode.Camera2D ? 0 : 1;
     if (this.currentCameraMode === CameraMode.Camera2D) {
       // 2D camera specific uniforms
       const camera2D = this.currentCamera as Camera2D;
-      this.gl.uniform1f(this.#scaleLoc!, camera2D.Zoom);
-
-      this.gl.uniform1i(this.#cameraMode, 0);
-
       const topLeft = camera2D.ScreenToWorld(new Vector3(0, 0, 1));
       const bottomRight = camera2D.ScreenToWorld(
         new Vector3(this.canvas.width, this.canvas.height, 1),
@@ -1722,17 +1688,20 @@ export class TerrainRenderer {
       );
       const countX = Math.max(1, maxX - minX);
       const countY = Math.max(1, maxY - minY);
+      const key = `2d:${minX},${minY},${countX},${countY}`;
+      this.#terrainScale = camera2D.Zoom;
+      this.#terrainRenderView = [minX, minY, countX, countY];
       this.#visibleLandblockCount = countX * countY;
       // The terrain VAO has a per-instance attribute even though 2D derives
       // the landblock position from gl_InstanceID. Keep its buffer large
       // enough for the instanced draw on the initial 2D frame as well as
       // after switching back from 3D.
-      this.#ensureTerrainInstanceCapacity(this.#visibleLandblockCount);
-      this.gl.uniform4f(this.#renderViewLoc!, minX, minY, countX, countY);
+      if (key !== this.#terrainInstancePreparationKey) {
+        this.#ensureTerrainInstanceCapacity(this.#visibleLandblockCount);
+        this.#terrainInstancePreparationKey = key;
+      }
     } else {
       // Flying camera specific uniforms
-      this.gl.uniform1f(this.#scaleLoc!, 1.0);
-      this.gl.uniform1i(this.#cameraMode, 1);
       const centerX = Math.max(
         0,
         Math.min(
@@ -1745,6 +1714,12 @@ export class TerrainRenderer {
       const frustum = this.currentCamera.FrameFrustum;
       const instanceCountLimit = (Math.min(254, centerX + radius) - Math.max(0, centerX - radius) + 1) *
         (Math.min(254, centerY + radius) - Math.max(0, centerY - radius) + 1);
+      const frustumKey = frustum ? [...frustum].join(",") : "";
+      const key = `3d:${centerX},${centerY},${radius},${this.maxTerrainHeight},${frustumKey}`;
+      this.#terrainScale = 1;
+      this.#terrainRenderView = [0, 0, LAND_BLOCK_SIDE, LAND_BLOCK_SIDE];
+      if (key === this.#terrainInstancePreparationKey) return;
+      this.#terrainInstancePreparationKey = key;
       this.#ensureTerrainInstanceCapacity(instanceCountLimit);
       let instanceFloatCount = 0;
       for (
@@ -1785,56 +1760,7 @@ export class TerrainRenderer {
         0,
         this.#terrainInstanceData.subarray(0, instanceFloatCount),
       );
-      this.gl.uniform4f(
-        this.#renderViewLoc!,
-        0,
-        0,
-        LAND_BLOCK_SIDE,
-        LAND_BLOCK_SIDE,
-      );
     }
-
-    if (this.#hasTerrainTextureDirty) {
-      this.gl.uniform1fv(
-        this.#hasTerrainTextureLoc,
-        new Float32Array(this.hasTerrainTexture),
-      );
-      this.#hasTerrainTextureDirty = false;
-    }
-    this.gl.uniform3f(
-      this.#cameraPositionLoc,
-      this.currentCamera.Position.x,
-      this.currentCamera.Position.y,
-      this.currentCamera.Position.z,
-    );
-    this.gl.uniform3f(
-      this.#fogColorLoc,
-      ...this.sceneView.fog.color,
-    );
-    this.gl.uniform1f(
-      this.#fogStartLoc,
-      this.sceneView.fog.start,
-    );
-    this.gl.uniform1f(
-      this.#fogEndLoc,
-      this.sceneView.fog.end,
-    );
-    this.gl.uniform1i(
-      this.#fogEnabledLoc,
-      this.sceneView.fog.enabled ? 1 : 0,
-    );
-    this.gl.uniform3f(
-      this.#lightDirectionLoc,
-      ...this.sceneView.lighting.direction,
-    );
-    this.gl.uniform3f(
-      this.#sunlightColorLoc,
-      ...this.sceneView.lighting.sunlight,
-    );
-    this.gl.uniform3f(
-      this.#ambientColorLoc,
-      ...this.sceneView.lighting.ambient,
-    );
   }
 
   #updateOverlay() {
@@ -1851,13 +1777,14 @@ export class TerrainRenderer {
         geometry.pendingGpuUploadCount,
         geometry.sceneLoadState,
         geometry.sceneLoadError,
-        ...Object.values(geometry.loadDiagnostics),
       ]),
     ].join("|");
     if (overlayKey !== this.#lastOverlayKey) {
       this.#lastOverlayKey = overlayKey;
       this.#loadingSpinner?.classList.toggle("visible", isLoading);
-      this.#updateLoadingDetails(geometries);
+      if (this.#loadingDetails) {
+        this.#loadingDetails.textContent = isLoading ? "Loading scene resources…" : "Nothing pending";
+      }
       if (this.#sceneGeometry.sceneLoadState === "error") {
         this.loader.textContent = `Unable to load terrain: ${this.#sceneGeometry.sceneLoadError}`;
       }
@@ -1874,40 +1801,6 @@ export class TerrainRenderer {
       this.#monitorFrameCount = 0;
       this.#monitorFrameStarted = now;
     }
-  }
-
-  #updateLoadingDetails(geometries: SceneGeometryRenderer[]): void {
-    if (!this.#loadingDetails) return;
-
-    const sections = geometries
-      .map((geometry, index) => {
-        const load = geometry.loadDiagnostics;
-        const name = index === 0 ? "Terrain" : "Server overlay";
-        const waitRows: [string, number][] = [
-          ["Network requests", load.httpRequests],
-          ["Queued batches", load.queuedBatches],
-          ["Cache reads", load.cacheReads],
-          ["Data worker", load.processorRequests],
-          ["Meshes", load.meshes],
-          ["Baked meshes", load.bakedMeshes],
-          ["Materials", load.materials],
-          ["GPU uploads", geometry.pendingGpuUploadCount],
-        ];
-        const rows = waitRows
-          .filter(([, count]) => count > 0)
-          .map(
-            ([label, count]) =>
-              `<div class="loading-details-row"><span>${label}</span><span>${count}</span></div>`,
-          )
-          .join("");
-
-        return rows.length > 0
-          ? `<div class="loading-details-section"><div class="loading-details-title">${name}</div>${rows}</div>`
-          : "";
-      })
-      .join("");
-
-    this.#loadingDetails.innerHTML = sections || "Nothing pending";
   }
 
   draw(dt: number) {
@@ -1999,24 +1892,33 @@ export class TerrainRenderer {
     if (
       !this.program ||
       !this.#terrainVao ||
+      !this.#terrainInstanceBuffer ||
       !this.#dataTexture ||
       !this.#terrainTextureArray ||
       !this.#alphaTextureArray
     )
       return;
-    if (view.cameraMode === CameraMode.Camera2D && this.#useTerrainOverview()) {
+    const useOverview = view.cameraMode === CameraMode.Camera2D && this.#useTerrainOverview();
+    const gl = this.gl;
+    if (useOverview) {
       this.#drawTerrainOverview(view);
       return;
     }
-    const gl = this.gl;
     invalidateSceneDrawState(gl);
     gl.useProgram(this.program);
     gl.uniformMatrix4fv(this.#xWorldLoc, false, view.viewProjection);
+    gl.uniform1f(this.#scaleLoc, this.#terrainScale);
     gl.uniform1i(
       this.#cameraMode,
-      view.cameraMode === CameraMode.Camera2D ? 0 : 1,
+      this.#terrainCameraMode,
     );
+    gl.uniform1f(this.#minZoomForTexturesLoc, this.#terrainMinZoomForTextures);
+    gl.uniform4f(this.#renderViewLoc, ...this.#terrainRenderView);
     gl.uniform1i(this.#terrainGridEnabledLoc, settings.data.terrainGridEnabled ? 1 : 0);
+    if (this.#hasTerrainTextureDirty) {
+      gl.uniform1fv(this.#hasTerrainTextureLoc, new Float32Array(this.hasTerrainTexture));
+      this.#hasTerrainTextureDirty = false;
+    }
     gl.uniform3f(this.#cameraPositionLoc, ...view.cameraPosition);
     gl.uniform3f(this.#fogColorLoc, ...view.fog.color);
     gl.uniform1f(this.#fogStartLoc, view.fog.start);

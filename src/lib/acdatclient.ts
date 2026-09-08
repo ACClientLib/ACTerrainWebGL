@@ -238,6 +238,7 @@ export type ServerObjectModelLoadPhase =
   | "loading model resources";
 interface CachedMaterial {
   promise: Promise<ObjectMaterial>;
+  material?: ObjectMaterial;
   references: number;
   lease?: ResourceLease<ObjectMaterial, ObjectMaterial>;
 }
@@ -473,20 +474,17 @@ export class AcDatClient {
   get textureProfile(): TextureProfile {
     return this.textureCapabilities.profile;
   }
+  private lastIndexedTextureRevision = -1;
+
   beginFrame(): void {
     this.textureRegistry.beginFrame();
     this.indexedTextures.beginFrame();
-    for (const cached of this.materials.values())
-      void cached.promise
-        .then((material) => {
-          if (material.indexedMaterialResourceId !== undefined) {
-            const texture = this.indexedTextures.current(
-              material.indexedMaterialResourceId,
-            );
-            if (texture) material.texture = texture;
-          }
-        })
-        .catch(() => undefined);
+    const indexedTextureRevision = this.indexedTextures.revision;
+    if (indexedTextureRevision === this.lastIndexedTextureRevision) return;
+    this.lastIndexedTextureRevision = indexedTextureRevision;
+    for (const cached of this.materials.values()) {
+      if (cached.material) this.refreshIndexedMaterial(cached.material);
+    }
   }
   get pendingMaterialCount(): number {
     return this.pendingMaterials.size;
@@ -1016,9 +1014,11 @@ export class AcDatClient {
       this.materials.set(id, cached);
       const entry = cached;
       void promise
-        .then(() => {
-          if (this.materials.get(id) === entry)
-            entry.lease = this.materialRegistry.acquire(id);
+        .then((material) => {
+          if (this.materials.get(id) !== entry) return;
+          entry.material = material;
+          this.refreshIndexedMaterial(material);
+          entry.lease = this.materialRegistry.acquire(id);
         })
         .catch(() => undefined);
       this.pendingMaterials.add(promise);
@@ -1040,6 +1040,7 @@ export class AcDatClient {
         if (cached.references !== 0 || this.materials.get(id) !== cached)
           return;
         this.materials.delete(id);
+        cached.material = undefined;
         cached.lease?.release();
         this.materialRegistry.remove(id);
       })
@@ -1061,7 +1062,10 @@ export class AcDatClient {
     for (const lease of this.skyGroupLeases) lease.release();
     this.skyGroupLeases = [];
     this.evaluatedSky = null;
-    for (const material of this.materials.values()) material.lease?.release();
+    for (const material of this.materials.values()) {
+      material.lease?.release();
+      material.material = undefined;
+    }
     for (const texture of this.textures.values()) texture.lease?.release();
     this.registry.replaceDataset();
     this.materialRegistry.replaceDataset();
@@ -1092,6 +1096,7 @@ export class AcDatClient {
     this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
     for (const material of this.materials.values()) {
       material.lease?.release();
+      material.material = undefined;
     }
     for (const texture of this.textures.values()) {
       texture.lease?.release();
@@ -2165,16 +2170,15 @@ export class AcDatClient {
       )
         this.gl.deleteTexture(uploaded.texture);
       else
-        for (const cached of this.materials.values())
-          void cached.promise
-            .then((material) => {
-              if (
-                material.textureResourceId === generation.id ||
-                material.solidTextureResourceId === generation.id
-              )
-                material.texture = uploaded.texture;
-            })
-            .catch(() => undefined);
+        for (const cached of this.materials.values()) {
+          const material = cached.material;
+          if (
+            material &&
+            (material.textureResourceId === generation.id ||
+              material.solidTextureResourceId === generation.id)
+          )
+            material.texture = uploaded.texture;
+        }
     } catch {
       this.textureRegistry.markUploadPending(generation.id, true);
     }
@@ -2257,6 +2261,14 @@ export class AcDatClient {
       uploaded.gpuBytes,
     );
     return uploaded.texture;
+  }
+
+  private refreshIndexedMaterial(material: ObjectMaterial): void {
+    if (material.indexedMaterialResourceId === undefined) return;
+    const texture = this.indexedTextures.current(
+      material.indexedMaterialResourceId,
+    );
+    if (texture) material.texture = texture;
   }
 
   private uploadSolidTexture(color: Uint8Array): {
