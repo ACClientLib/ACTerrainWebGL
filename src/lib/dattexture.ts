@@ -1,6 +1,8 @@
 import { TEXTURE_PROFILE, type TextureProfile } from "./formatcontract";
 import type { TextureExtensions } from "./textureprofile";
 import { ResourceRegistry, type ResourceLease } from "./resourceRegistry";
+import { PaletteFragSource } from "../shaders/palette.frag";
+import { PaletteVertSource } from "../shaders/palette.vert";
 
 export const BUILDING_TEXTURE_UNIT = 3;
 
@@ -169,8 +171,8 @@ class PaletteTextureMaterializer {
       return shader;
     };
     const program = this.gl.createProgram()!;
-    const vertex = compile(this.gl.VERTEX_SHADER, "#version 300 es\nconst vec2 p[3]=vec2[3](vec2(-1,-1),vec2(3,-1),vec2(-1,3)); void main(){gl_Position=vec4(p[gl_VertexID],0,1);}");
-    const fragment = compile(this.gl.FRAGMENT_SHADER, "#version 300 es\nprecision highp float; precision highp usampler2D; uniform usampler2D indexPlane; uniform sampler2D palette; out vec4 color; void main(){uint index=texelFetch(indexPlane, ivec2(gl_FragCoord.xy), 0).r; color=texelFetch(palette, ivec2(int(index),0), 0);}");
+    const vertex = compile(this.gl.VERTEX_SHADER, PaletteVertSource);
+    const fragment = compile(this.gl.FRAGMENT_SHADER, PaletteFragSource);
     this.gl.attachShader(program, vertex); this.gl.attachShader(program, fragment); this.gl.linkProgram(program);
     this.gl.deleteShader(vertex); this.gl.deleteShader(fragment);
     if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) throw new Error(this.gl.getProgramInfoLog(program) || "Palette shader link failed");

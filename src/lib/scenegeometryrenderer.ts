@@ -1179,12 +1179,23 @@ export class SceneGeometryRenderer {
       }
       const lastFrame = this.sharedParticleFrame.get(descriptor);
       let elapsed = this.sharedParticleElapsed.get(descriptor) ?? 0;
+      const previousStride = this.sharedParticleUpdateStride.get(descriptor);
+      const strideWasRequestedThisFrame = previousStride?.frame === this.particleFrameNumber;
+      const effectiveStride = strideWasRequestedThisFrame
+        ? Math.min(previousStride!.stride, updateStride)
+        : updateStride;
+      const strideWasPromoted = strideWasRequestedThisFrame && effectiveStride < previousStride!.stride;
+      this.sharedParticleUpdateStride.set(descriptor, {
+        frame: this.particleFrameNumber,
+        stride: effectiveStride,
+      });
       if (lastFrame !== this.particleFrameNumber) {
         elapsed += this.particleFrameDeltaTime;
         this.sharedParticleFrame.set(descriptor, this.particleFrameNumber);
       }
       const shouldUpdate = !this.sharedParticleInitialized.has(descriptor) ||
-        (!freeze && lastFrame !== this.particleFrameNumber && this.particleFrameNumber % updateStride === 0);
+        (!freeze && lastFrame !== this.particleFrameNumber && this.particleFrameNumber % effectiveStride === 0) ||
+        (!freeze && strideWasPromoted);
       if (shouldUpdate) {
         simulation.update(
           elapsed,
@@ -1400,6 +1411,7 @@ export class SceneGeometryRenderer {
   private sharedParticleSimulations = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, ParticleSimulation>();
   private sharedParticleElapsed = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, number>();
   private sharedParticleFrame = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, number>();
+  private sharedParticleUpdateStride = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, { frame: number; stride: number }>();
   private sharedParticleInitialized = new WeakSet<import("./acdatclient").ParticleEmitterDescriptor>();
   private particle2DFrozen = false;
   private particle2DVisibleKey = "";
@@ -1516,12 +1528,14 @@ export class SceneGeometryRenderer {
     }
     const fullBillboard = instance.billboard === 1;
     const cameraAligned = instance.billboard > 0.5;
-    const x = instance.dimensions[0];
-    const y = instance.dimensions[1];
-    const z = instance.dimensions[2];
-    let sizeX = fullBillboard ? Math.abs(x * sx) : instance.planeSize[0];
-    let sizeY = fullBillboard ? Math.abs(z * sz) : instance.planeSize[1];
+    // Use the authored surface rectangle for every representation. In
+    // particular, full billboards must not assume the source quad was XZ.
+    let sizeX = instance.planeSize[0];
+    let sizeY = instance.planeSize[1];
     if (!fullBillboard && shared) {
+      const x = instance.dimensions[0];
+      const y = instance.dimensions[1];
+      const z = instance.dimensions[2];
       if (y > x && y > z) {
         [sizeX, sizeY] = x > z
           ? [Math.abs(x * sx), Math.abs(y * sy)]

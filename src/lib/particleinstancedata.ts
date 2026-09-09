@@ -3,8 +3,11 @@ import type { ParticleSimulationInstance } from "./particlesimulation";
 export function appendParticleInstance(data: number[], instance: ParticleSimulationInstance): void {
   const fullBillboard = instance.billboard === 1;
   const cameraAligned = instance.billboard > 0.5;
-  const sizeX = fullBillboard ? instance.dimensions[0] : instance.planeSize[0];
-  const sizeY = fullBillboard ? instance.dimensions[2] : instance.planeSize[1];
+  // planeSize is the rectangle occupied by the authored particle surface.
+  // The source GfxObj is not guaranteed to lie in the XZ plane (torch flames
+  // are a common XY/YZ case), so never infer billboard dimensions from X/Z.
+  const sizeX = instance.planeSize[0];
+  const sizeY = instance.planeSize[1];
   let centerX = instance.position[0];
   let centerY = instance.position[1];
   let centerZ = instance.position[2];

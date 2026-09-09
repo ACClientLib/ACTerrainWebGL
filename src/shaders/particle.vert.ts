@@ -34,12 +34,18 @@ vec3 constrainedBillboardOffset(vec3 local, vec4 orientation, int pinnedAxis, ve
   return local.x * x + local.y * y + local.z * z;
 }
 void main() {
-  uv = quad * 0.5 + 0.5; opacity = scaleOpacity.y;
-  // The uploaded quad vertices span [-1, 1]. Dimensions are full extents,
-  // so halve them here to match the authored GfxObj bounds.
+  // AC's billboard buffer assigns V=1 to the lower vertices and V=0 to the
+  // upper vertices. Flip WebGL's quad V coordinate to preserve that mapping.
+  uv = vec2(quad.x * 0.5 + 0.5, 0.5 - quad.y * 0.5); opacity = scaleOpacity.y;
+  // The uploaded quad vertices span [-1, 1]. The CPU stores the authored
+  // surface rectangle in dimensions.x/z, so halve those full extents here.
+  // This is deliberately independent of the source GfxObj's world axes.
   vec3 local = vec3(quad.x * dimensions.x, 0.0, quad.y * dimensions.z) * (0.5 * scaleOpacity.x);
   vec3 orientedLocal = qrot(local, planeOrientation);
   vec3 offset;
+  // A full billboard uses the camera basis directly. planeOrientation is only
+  // meaningful for the non-billboard representation; applying it here would
+  // rotate an already camera-facing torch flame.
   if (billboard == 1.0) offset = cameraRight * local.x + cameraUp * local.z;
   else if (billboard >= 2.5) offset = constrainedBillboardOffset(orientedLocal, rotation, int(billboard) - 3, center - cameraPosition);
   else offset = qrot(orientedLocal, rotation);

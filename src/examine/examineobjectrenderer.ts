@@ -5,7 +5,8 @@ import {
 } from "../lib/acdatclient";
 import { ExamineObjectLoader } from "./examineobjectloader";
 import { createExamineCamera, type ExamineCamera } from "./examinecamera";
-import { ExamineFragmentShader, ExamineVertexShader } from "./examineshaders";
+import { ExamineFragmentShader } from "../shaders/examine.frag";
+import { ExamineVertexShader } from "../shaders/examine.vert";
 import type { ExamineWindowState } from "./examinecreaturepanel";
 
 type RenderBatch = LoadedModelBatch & {

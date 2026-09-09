@@ -1,4 +1,6 @@
 import { Vector2 } from "@math.gl/core";
+import { TextureArrayFragSource } from "../shaders/texturearray.frag";
+import { TextureArrayVertSource } from "../shaders/texturearray.vert";
 
 export class TextureArray {
   layerCount: number;
@@ -54,16 +56,10 @@ export class TextureArray {
       throw new Error("Texture array layer count mismatch");
     const gl = this.gl;
     const vertex = gl.createShader(gl.VERTEX_SHADER)!;
-    gl.shaderSource(
-      vertex,
-      "#version 300 es\nconst vec2 p[3]=vec2[3](vec2(-1,-1),vec2(3,-1),vec2(-1,3)); out vec2 uv; void main(){gl_Position=vec4(p[gl_VertexID],0,1);uv=p[gl_VertexID]*.5+.5;}",
-    );
+    gl.shaderSource(vertex, TextureArrayVertSource);
     gl.compileShader(vertex);
     const fragment = gl.createShader(gl.FRAGMENT_SHADER)!;
-    gl.shaderSource(
-      fragment,
-      "#version 300 es\nprecision highp float; uniform sampler2D source; in vec2 uv; out vec4 color; void main(){color=texture(source,uv);}",
-    );
+    gl.shaderSource(fragment, TextureArrayFragSource);
     gl.compileShader(fragment);
     const program = gl.createProgram()!;
     gl.attachShader(program, vertex);

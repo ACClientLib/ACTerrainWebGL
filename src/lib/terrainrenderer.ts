@@ -410,8 +410,6 @@ export class TerrainRenderer {
     this.gl.deleteProgram(this.#overviewProgram);
     this.gl.deleteShader(this.vertexShader);
     this.gl.deleteShader(this.fragmentShader);
-    // This renderer is terminal: release the entire context, including driver
-    // allocations, before the next document creates its WebGL context.
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 
@@ -494,10 +492,10 @@ export class TerrainRenderer {
     activeTexture.className = "control-row active-value";
     activeTexture.innerHTML = `<span>Active Texture Type</span><span>${this.#sceneGeometry.textureProfile}</span>`;
     section.append(activeTexture);
-    addRange("Min 3D Object Zoom", () => settings.data.minZoomFor3DObjects, (v) => { settings.data.minZoomFor3DObjects = v; }, 0.05, 5, 0.05);
+    addRange("2D Object Min Zoom", () => settings.data.minZoomFor3DObjects, (v) => { settings.data.minZoomFor3DObjects = v; }, 0.05, 5, 0.05);
     addCheckbox("Show Labels", () => settings.data.showLabels, (v) => { settings.data.showLabels = v; });
     addCheckbox("Terrain Grid", () => settings.data.terrainGridEnabled, (v) => { settings.data.terrainGridEnabled = v; this.invalidate("input"); });
-    addRange("3D Object / Fog Distance", () => settings.data.distanceLandblocks, (v) => { settings.data.distanceLandblocks = v; this.#updateFlyingFarPlane(); }, 3, 25, 1);
+    addRange("View Distance", () => settings.data.distanceLandblocks, (v) => { settings.data.distanceLandblocks = v; this.#updateFlyingFarPlane(); }, 3, 25, 1);
     const moveSpeed = addRange("Move Speed", () => settings.data.moveSpeed, (v) => { settings.data.moveSpeed = v; }, 0.1, 2000, 0.1);
     moveSpeed.classList.add("desktop-only-control");
     this.#updateMoveSpeedControl = () => {
