@@ -1570,13 +1570,17 @@ export class TerrainRenderer {
       this.#updateFlyingFarPlane();
     }
     this.currentCamera.prepareFrame();
+    const regionSkyDescriptor = this.#sceneGeometry.datClient.getRegionSkyDescriptor();
+    const regionLighting = !this.dungeonSelection && regionSkyDescriptor !== null
+      ? this.#sceneGeometry.datClient.getRegionLighting()
+      : null;
     const sky = this.skyboxRenderer.select(skyEnabled ? this.#sceneGeometry.datClient.getRegionSky() : null);
     this.sceneSky = sky;
     this.sceneView = createSceneView(
       this.currentCamera,
       this.currentCameraMode,
       this.#getFog(sky),
-      this.#getLighting(sky),
+      this.#getLighting(sky, regionLighting),
     );
 
     this.sceneRenderer?.resize(this.canvas.width, this.canvas.height);
@@ -1587,7 +1591,10 @@ export class TerrainRenderer {
     }
   }
 
-  #getLighting(sky: ReturnType<AcDatClient["getRegionSky"]>): SceneLighting {
+  #getLighting(
+    sky: ReturnType<AcDatClient["getRegionSky"]>,
+    regionLighting: ReturnType<AcDatClient["getRegionLighting"]> | null = null,
+  ): SceneLighting {
     const { directionX, directionY, directionZ, lightIntensity: intensity } =
       settings.data;
     const length = Math.hypot(directionX, directionY, directionZ);
@@ -1599,7 +1606,7 @@ export class TerrainRenderer {
             number,
           ])
         : ([0, 0, 1] as [number, number, number]);
-    const regionLighting = sky?.lighting ?? {
+    const lighting = regionLighting ?? sky?.lighting ?? {
       direction: [0, 0, 1] as [number, number, number],
       sunlight: [1, 1, 1] as [number, number, number],
       ambient: [0.25, 0.25, 0.25] as [number, number, number],
@@ -1607,15 +1614,15 @@ export class TerrainRenderer {
     return {
       // DAT supplies the vector toward the light; shaders consume the
       // direction the light travels and negate it for the surface vector.
-      direction: sky
-        ? [-regionLighting.direction[0], regionLighting.direction[1], -regionLighting.direction[2]] as [number, number, number]
+      direction: regionLighting || sky
+        ? [-lighting.direction[0], lighting.direction[1], -lighting.direction[2]] as [number, number, number]
         : direction,
-      sunlight: regionLighting.sunlight.map((value) => value * intensity) as [
+      sunlight: lighting.sunlight.map((value) => value * intensity) as [
         number,
         number,
         number,
       ],
-      ambient: regionLighting.ambient,
+      ambient: lighting.ambient,
     };
   }
 
