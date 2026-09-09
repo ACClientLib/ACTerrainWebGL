@@ -1,6 +1,9 @@
 import type { ParticleSimulationInstance } from "./particlesimulation";
 
-export function appendParticleInstance(data: number[], instance: ParticleSimulationInstance): void {
+export function appendParticleInstance(
+  data: number[],
+  instance: ParticleSimulationInstance,
+): void {
   const fullBillboard = instance.billboard === 1;
   const cameraAligned = instance.billboard > 0.5;
   // planeSize is the rectangle occupied by the authored particle surface.
@@ -26,11 +29,24 @@ export function appendParticleInstance(data: number[], instance: ParticleSimulat
     centerZ += v2 + q[3] * tz + q[0] * ty - q[1] * tx;
   }
   data.push(
-    centerX, centerY, centerZ,
+    centerX,
+    centerY,
+    centerZ,
     instance.scale,
-    instance.opacity, 0, 0,
-    sizeX, 0, sizeY,
-    instance.planeOrientation[0], instance.planeOrientation[1], instance.planeOrientation[2], instance.planeOrientation[3],
-    instance.rotation[0], instance.rotation[1], instance.rotation[2], instance.rotation[3], cameraAligned ? instance.billboard : 0,
+    instance.opacity,
+    0,
+    0,
+    sizeX,
+    0,
+    sizeY,
+    instance.planeOrientation[0],
+    instance.planeOrientation[1],
+    instance.planeOrientation[2],
+    instance.planeOrientation[3],
+    instance.rotation[0],
+    instance.rotation[1],
+    instance.rotation[2],
+    instance.rotation[3],
+    cameraAligned ? instance.billboard : 0,
   );
 }

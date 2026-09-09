@@ -32,10 +32,19 @@ import {
 import { SceneRenderer } from "./scenerenderer";
 import { SceneGeometryResources } from "./scenegeometryresources";
 import { SkyboxRenderer } from "./skyboxrenderer";
-import { createSceneView, type SceneLighting, type SceneView } from "./sceneview";
+import {
+  createSceneView,
+  type SceneLighting,
+  type SceneView,
+} from "./sceneview";
 import type { SceneSubmission } from "./scenesubmission";
 import { LabelsClient } from "./labelsclient";
-import { dungeonCoordinates, dungeonName, type DungeonCell, type DungeonSelection } from "./dungeons";
+import {
+  dungeonCoordinates,
+  dungeonName,
+  type DungeonCell,
+  type DungeonSelection,
+} from "./dungeons";
 import { rotation, type LocationTarget } from "./locationsearch";
 import { isTextEditingTarget } from "./keyboard";
 import { pushCameraRoute } from "./router";
@@ -63,22 +72,36 @@ export class TerrainRenderer {
 
   get cameraRoute(): CameraRoute {
     const position = this.currentCamera.Position;
-    return { dungeon: this.dungeonSelection, position: { x: position.x, y: position.y, z: position.z },
+    return {
+      dungeon: this.dungeonSelection,
+      position: { x: position.x, y: position.y, z: position.z },
       ...(this.currentCameraMode === CameraMode.Camera2D
         ? { mode: "2d" as const, zoom: this.camera2D.Zoom }
-        : { mode: "3d" as const, yaw: this.flyingCamera.Yaw, pitch: this.flyingCamera.Pitch,
-            roll: this.flyingCamera.Roll }) };
+        : {
+            mode: "3d" as const,
+            yaw: this.flyingCamera.Yaw,
+            pitch: this.flyingCamera.Pitch,
+            roll: this.flyingCamera.Roll,
+          }),
+    };
   }
 
   get dungeonCoordinateText(): string {
-    return dungeonCoordinates(this.dungeonSelection!, this.dungeonCells, this.currentCamera.Position);
+    return dungeonCoordinates(
+      this.dungeonSelection!,
+      this.dungeonCells,
+      this.currentCamera.Position,
+    );
   }
 
   cancelDungeonLoad(): void {
     this.dungeonRequest++;
   }
 
-  async showDungeon(selection: DungeonSelection, route?: CameraRoute): Promise<void> {
+  async showDungeon(
+    selection: DungeonSelection,
+    route?: CameraRoute,
+  ): Promise<void> {
     const request = ++this.dungeonRequest;
     const [data, server] = await Promise.all([
       this.#sceneGeometry.datClient.dungeon(selection.landblock),
@@ -87,24 +110,36 @@ export class TerrainRenderer {
     if (request !== this.dungeonRequest || this.isShutdown) {
       return;
     }
-    const selectedCell = selection.cellId === undefined ? undefined : data.cells.find(cell => cell.id === selection.cellId);
+    const selectedCell =
+      selection.cellId === undefined
+        ? undefined
+        : data.cells.find((cell) => cell.id === selection.cellId);
     if (selection.cellId !== undefined && !selectedCell) {
       throw new Error("The selected dungeon cell is not in this DAT dataset.");
     }
-    const cells = selectedCell ? data.cells.filter(cell => cell.groupId === selectedCell.groupId) : data.cells;
+    const cells = selectedCell
+      ? data.cells.filter((cell) => cell.groupId === selectedCell.groupId)
+      : data.cells;
     if (cells.length === 0) {
       throw new Error("This landblock contains no packed envcells.");
     }
-    const ids = new Set(cells.map(cell => cell.id));
-    const serverCells = server?.cells.filter(cell => ids.has(cell.id)) ?? [];
-    await Promise.all([this.#sceneGeometry.loadDungeon(cells), this.#serverGeometry?.loadDungeon(serverCells)]);
+    const ids = new Set(cells.map((cell) => cell.id));
+    const serverCells = server?.cells.filter((cell) => ids.has(cell.id)) ?? [];
+    await Promise.all([
+      this.#sceneGeometry.loadDungeon(cells),
+      this.#serverGeometry?.loadDungeon(serverCells),
+    ]);
     if (request !== this.dungeonRequest || this.isShutdown) {
       return;
     }
     if (!this.dungeonSelection) {
       this.worldRoute = this.cameraRoute;
     }
-    this.dungeonSelection = { ...selection, name: selection.name ?? dungeonName(selection.landblock, selection.cellId) };
+    this.dungeonSelection = {
+      ...selection,
+      name:
+        selection.name ?? dungeonName(selection.landblock, selection.cellId),
+    };
     this.dungeonCells = cells;
     this.#sceneGeometry.setDungeon(cells);
     this.#serverGeometry?.setDungeon(serverCells);
@@ -118,14 +153,20 @@ export class TerrainRenderer {
         maximum[axis] = Math.max(maximum[axis], bounds.maximum[axis]);
       }
     }
-    this.dungeonCenter = new Vector3((minimum[0] + maximum[0]) / 2,
-      (minimum[1] + maximum[1]) / 2, (minimum[2] + maximum[2]) / 2);
+    this.dungeonCenter = new Vector3(
+      (minimum[0] + maximum[0]) / 2,
+      (minimum[1] + maximum[1]) / 2,
+      (minimum[2] + maximum[2]) / 2,
+    );
     this.dungeonExtents = new Vector3(
       Math.max(1, maximum[0] - minimum[0]),
       Math.max(1, maximum[1] - minimum[1]),
       Math.max(1, maximum[2] - minimum[2]),
     );
-    this.dungeonRadius = Math.max(1, Math.hypot(...maximum.map((value, axis) => value - minimum[axis])) / 2);
+    this.dungeonRadius = Math.max(
+      1,
+      Math.hypot(...maximum.map((value, axis) => value - minimum[axis])) / 2,
+    );
     // Location selections frame the dungeon; anchor routes restore their saved camera position.
     this.frameDungeon(route === undefined);
     if (route) {
@@ -172,14 +213,31 @@ export class TerrainRenderer {
       }
       camera.Near = 1;
       camera.FitToPoints(points, this.dungeonCenter);
-      this.camera2D.Position = new Vector3(this.dungeonCenter.x, this.dungeonCenter.y, 1);
-      this.camera2D.Zoom = Math.min(this.canvas.width / this.dungeonExtents.x,
-        this.canvas.height / this.dungeonExtents.y) * settings.data.renderScale * 0.9;
+      this.camera2D.Position = new Vector3(
+        this.dungeonCenter.x,
+        this.dungeonCenter.y,
+        1,
+      );
+      this.camera2D.Zoom =
+        Math.min(
+          this.canvas.width / this.dungeonExtents.x,
+          this.canvas.height / this.dungeonExtents.y,
+        ) *
+        settings.data.renderScale *
+        0.9;
     }
-    this.camera2D.DepthRange = Math.max(4096, Math.abs(this.dungeonCenter.z) + this.dungeonRadius + 2);
+    this.camera2D.DepthRange = Math.max(
+      4096,
+      Math.abs(this.dungeonCenter.z) + this.dungeonRadius + 2,
+    );
     if (recenter) {
-      this.restoreCameraRoute({ mode: "3d", position: camera.Position, yaw: camera.Yaw, pitch: camera.Pitch,
-        roll: 0 });
+      this.restoreCameraRoute({
+        mode: "3d",
+        position: camera.Position,
+        yaw: camera.Yaw,
+        pitch: camera.Pitch,
+        roll: 0,
+      });
     }
     this.#updateFlyingFarPlane();
   }
@@ -225,7 +283,12 @@ export class TerrainRenderer {
   #terrainInstanceCapacity = 0;
   #terrainInstanceData = new Float32Array(0);
   #terrainInstancePreparationKey = "";
-  #terrainRenderView: [number, number, number, number] = [0, 0, LAND_BLOCK_SIDE, LAND_BLOCK_SIDE];
+  #terrainRenderView: [number, number, number, number] = [
+    0,
+    0,
+    LAND_BLOCK_SIDE,
+    LAND_BLOCK_SIDE,
+  ];
   #terrainScale = 1;
   #terrainMinZoomForTextures = 0;
   #terrainCameraMode = 1;
@@ -327,9 +390,13 @@ export class TerrainRenderer {
     }
     this.#geometryResources = new SceneGeometryResources(this.gl);
     this.sceneRenderer = new SceneRenderer(this.gl);
-    this.gl.canvas.addEventListener("webglcontextrestored", () => {
-      this.invalidate("context restoration");
-    }, { signal: this.shutdownSignal });
+    this.gl.canvas.addEventListener(
+      "webglcontextrestored",
+      () => {
+        this.invalidate("context restoration");
+      },
+      { signal: this.shutdownSignal },
+    );
 
     this.#sceneGeometry = new SceneGeometryRenderer(
       this.gl,
@@ -344,10 +411,20 @@ export class TerrainRenderer {
       () => this.invalidate("resource publication"),
     );
     this.#serverGeometry = serverDescriptorPath
-      ? new SceneGeometryRenderer(this.gl, this.#geometryResources, serverDescriptorPath, "server", serverId)
+      ? new SceneGeometryRenderer(
+          this.gl,
+          this.#geometryResources,
+          serverDescriptorPath,
+          "server",
+          serverId,
+        )
       : undefined;
     if (labelsPath) {
-      this.#labels = new LabelsClient(labelsPath, document.querySelector<HTMLElement>("#labels-overlay")!, labelsRevision);
+      this.#labels = new LabelsClient(
+        labelsPath,
+        document.querySelector<HTMLElement>("#labels-overlay")!,
+        labelsRevision,
+      );
       this.#labels.loadPois();
     }
     this.#applySettings();
@@ -367,10 +444,13 @@ export class TerrainRenderer {
   #applySettings(): void {
     this.#labels?.setEnabled(settings.data.showLabels);
     this.#sceneGeometry.loadDistance = settings.data.distanceLandblocks;
-    if (this.#serverGeometry) this.#serverGeometry.loadDistance = settings.data.distanceLandblocks;
+    if (this.#serverGeometry)
+      this.#serverGeometry.loadDistance = settings.data.distanceLandblocks;
     this.flyingCamera.MoveSpeed = settings.data.moveSpeed;
-    this.flyingCamera.MobileMoveSensitivity = settings.data.mobileMoveSensitivity;
-    this.flyingCamera.MobileLookSensitivity = settings.data.mobileLookSensitivity;
+    this.flyingCamera.MobileMoveSensitivity =
+      settings.data.mobileMoveSensitivity;
+    this.flyingCamera.MobileLookSensitivity =
+      settings.data.mobileLookSensitivity;
     this.flyingCamera.MobileLookInvertY = settings.data.mobileLookInvertY;
     this.flyingCamera.FOV = settings.data.fov;
     this.#updateFlyingFarPlane();
@@ -432,12 +512,20 @@ export class TerrainRenderer {
       const cameraMode = this.currentCameraMode;
       this.frameDungeon();
       if (cameraMode === CameraMode.Camera2D) {
-        this.restoreCameraRoute({ mode: "2d", position: this.camera2D.Position, zoom: this.camera2D.Zoom });
+        this.restoreCameraRoute({
+          mode: "2d",
+          position: this.camera2D.Position,
+          zoom: this.camera2D.Zoom,
+        });
       }
       return;
     }
     this.switchCamera(CameraMode.Camera2D, false);
-    this.camera2D.Position = new Vector3(24162.252488664108, 29663.566666805677, 2.4964);
+    this.camera2D.Position = new Vector3(
+      24162.252488664108,
+      29663.566666805677,
+      2.4964,
+    );
     this.invalidate("input");
   }
 
@@ -449,54 +537,145 @@ export class TerrainRenderer {
     this.flyingCamera.Position = new Vector3(mapCenter.x, mapCenter.y, 500);
 
     // Look down at the map initially
-    this.flyingCamera.SetRotation(
-      Math.PI,
-      -(Math.PI / 2 - Math.PI / 18),
-      0,
-    ); // Look down at 10 degrees off vertical with north at the top
+    this.flyingCamera.SetRotation(Math.PI, -(Math.PI / 2 - Math.PI / 18), 0); // Look down at 10 degrees off vertical with north at the top
 
     this.#updateFlyingFarPlane();
   }
 
   #addSettings() {
     const section = document.querySelector<HTMLElement>("#config-content")!;
-    const actionsSection = document.querySelector<HTMLElement>("#sidebar-actions-content")!;
+    const actionsSection = document.querySelector<HTMLElement>(
+      "#sidebar-actions-content",
+    )!;
     const updateControls = new Set<() => void>();
-    const addRange = (label: string, value: () => number, set: (value: number) => void, min: number, max: number, step: number) => {
+    const addRange = (
+      label: string,
+      value: () => number,
+      set: (value: number) => void,
+      min: number,
+      max: number,
+      step: number,
+    ) => {
       const row = document.createElement("label");
       row.className = "control-row range-row";
       row.innerHTML = `<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><output></output>`;
       const input = row.querySelector<HTMLInputElement>("input")!;
       const output = row.querySelector<HTMLOutputElement>("output")!;
-      const update = () => { input.value = String(value()); output.value = input.value; };
+      const update = () => {
+        input.value = String(value());
+        output.value = input.value;
+      };
       updateControls.add(update);
-      input.addEventListener("input", () => { set(Number(input.value)); update(); }, { signal: this.shutdownSignal });
-      update(); section.append(row); return row;
+      input.addEventListener(
+        "input",
+        () => {
+          set(Number(input.value));
+          update();
+        },
+        { signal: this.shutdownSignal },
+      );
+      update();
+      section.append(row);
+      return row;
     };
-    const addCheckbox = (label: string, value: () => boolean, set: (value: boolean) => void) => {
-      const row = document.createElement("label"); row.className = "control-row checkbox-row";
+    const addCheckbox = (
+      label: string,
+      value: () => boolean,
+      set: (value: boolean) => void,
+    ) => {
+      const row = document.createElement("label");
+      row.className = "control-row checkbox-row";
       row.innerHTML = `<span>${label}</span><input type="checkbox">`;
-      const input = row.querySelector<HTMLInputElement>("input")!; input.checked = value();
-      updateControls.add(() => { input.checked = value(); });
-      input.addEventListener("change", () => set(input.checked), { signal: this.shutdownSignal }); section.append(row); return row;
+      const input = row.querySelector<HTMLInputElement>("input")!;
+      input.checked = value();
+      updateControls.add(() => {
+        input.checked = value();
+      });
+      input.addEventListener("change", () => set(input.checked), {
+        signal: this.shutdownSignal,
+      });
+      section.append(row);
+      return row;
     };
-    const addActionButton = (label: string, action: () => void | Promise<void>) => {
-      const button = document.createElement("button"); button.className = "action-button"; button.textContent = label;
-      button.addEventListener("click", () => void action(), { signal: this.shutdownSignal }); actionsSection.append(button);
+    const addActionButton = (
+      label: string,
+      action: () => void | Promise<void>,
+    ) => {
+      const button = document.createElement("button");
+      button.className = "action-button";
+      button.textContent = label;
+      button.addEventListener("click", () => void action(), {
+        signal: this.shutdownSignal,
+      });
+      actionsSection.append(button);
     };
-    const texture = document.createElement("label"); texture.className = "control-row";
+    const texture = document.createElement("label");
+    texture.className = "control-row";
     texture.innerHTML = `<span>Texture Type</span><select><option value="auto">Auto</option><option value="bc">BC / S3TC</option><option value="etc2">ETC2</option><option value="rgba8">RGBA8</option></select>`;
-    const textureSelect = texture.querySelector<HTMLSelectElement>("select")!; textureSelect.value = settings.data.textureProfile;
-    textureSelect.addEventListener("change", () => { settings.data.textureProfile = settings.parseTextureProfilePreference(textureSelect.value); this.shutdown(); window.location.reload(); }, { signal: this.shutdownSignal }); section.append(texture);
+    const textureSelect = texture.querySelector<HTMLSelectElement>("select")!;
+    textureSelect.value = settings.data.textureProfile;
+    textureSelect.addEventListener(
+      "change",
+      () => {
+        settings.data.textureProfile = settings.parseTextureProfilePreference(
+          textureSelect.value,
+        );
+        this.shutdown();
+        window.location.reload();
+      },
+      { signal: this.shutdownSignal },
+    );
+    section.append(texture);
     const activeTexture = document.createElement("div");
     activeTexture.className = "control-row active-value";
     activeTexture.innerHTML = `<span>Active Texture Type</span><span>${this.#sceneGeometry.textureProfile}</span>`;
     section.append(activeTexture);
-    addRange("2D Object Min Zoom", () => settings.data.minZoomFor3DObjects, (v) => { settings.data.minZoomFor3DObjects = v; }, 0.05, 5, 0.05);
-    addCheckbox("Show Labels", () => settings.data.showLabels, (v) => { settings.data.showLabels = v; });
-    addCheckbox("Terrain Grid", () => settings.data.terrainGridEnabled, (v) => { settings.data.terrainGridEnabled = v; this.invalidate("input"); });
-    addRange("View Distance", () => settings.data.distanceLandblocks, (v) => { settings.data.distanceLandblocks = v; this.#updateFlyingFarPlane(); }, 3, 25, 1);
-    const moveSpeed = addRange("Move Speed", () => settings.data.moveSpeed, (v) => { settings.data.moveSpeed = v; }, 0.1, 2000, 0.1);
+    addRange(
+      "2D Object Min Zoom",
+      () => settings.data.minZoomFor3DObjects,
+      (v) => {
+        settings.data.minZoomFor3DObjects = v;
+      },
+      0.05,
+      5,
+      0.05,
+    );
+    addCheckbox(
+      "Show Labels",
+      () => settings.data.showLabels,
+      (v) => {
+        settings.data.showLabels = v;
+      },
+    );
+    addCheckbox(
+      "Terrain Grid",
+      () => settings.data.terrainGridEnabled,
+      (v) => {
+        settings.data.terrainGridEnabled = v;
+        this.invalidate("input");
+      },
+    );
+    addRange(
+      "View Distance",
+      () => settings.data.distanceLandblocks,
+      (v) => {
+        settings.data.distanceLandblocks = v;
+        this.#updateFlyingFarPlane();
+      },
+      3,
+      25,
+      1,
+    );
+    const moveSpeed = addRange(
+      "Move Speed",
+      () => settings.data.moveSpeed,
+      (v) => {
+        settings.data.moveSpeed = v;
+      },
+      0.1,
+      2000,
+      0.1,
+    );
     moveSpeed.classList.add("desktop-only-control");
     this.#updateMoveSpeedControl = () => {
       const input = moveSpeed.querySelector<HTMLInputElement>("input")!;
@@ -504,14 +683,47 @@ export class TerrainRenderer {
       input.value = String(settings.data.moveSpeed);
       output.value = input.value;
     };
-    const mobileMoveSensitivity = addRange("Touch Move Sensitivity", () => settings.data.mobileMoveSensitivity, (v) => { settings.data.mobileMoveSensitivity = v; }, 0, 200, 0.1);
-    const mobileLookSensitivity = addRange("Touch Look Sensitivity", () => settings.data.mobileLookSensitivity, (v) => { settings.data.mobileLookSensitivity = v; }, 0, 3, 0.01);
+    const mobileMoveSensitivity = addRange(
+      "Touch Move Sensitivity",
+      () => settings.data.mobileMoveSensitivity,
+      (v) => {
+        settings.data.mobileMoveSensitivity = v;
+      },
+      0,
+      200,
+      0.1,
+    );
+    const mobileLookSensitivity = addRange(
+      "Touch Look Sensitivity",
+      () => settings.data.mobileLookSensitivity,
+      (v) => {
+        settings.data.mobileLookSensitivity = v;
+      },
+      0,
+      3,
+      0.01,
+    );
     mobileMoveSensitivity.classList.add("mobile-only-control");
     mobileLookSensitivity.classList.add("mobile-only-control");
-    const mobileLookInvertY = addCheckbox("Invert Touch Look Vertical", () => settings.data.mobileLookInvertY, (v) => { settings.data.mobileLookInvertY = v; });
+    const mobileLookInvertY = addCheckbox(
+      "Invert Touch Look Vertical",
+      () => settings.data.mobileLookInvertY,
+      (v) => {
+        settings.data.mobileLookInvertY = v;
+      },
+    );
     mobileLookInvertY.classList.add("mobile-only-control");
     if (isTouchDevice()) document.documentElement.classList.add("touch-device");
-    addRange("Field of View", () => settings.data.fov, (v) => { settings.data.fov = v; }, 30, 120, 1);
+    addRange(
+      "Field of View",
+      () => settings.data.fov,
+      (v) => {
+        settings.data.fov = v;
+      },
+      30,
+      120,
+      1,
+    );
     const skyTime = document.createElement("label");
     skyTime.className = "control-row range-row";
     skyTime.innerHTML = `<span>Sky Time</span><input type="range" min="0" max="1" step="0.001"><output></output>`;
@@ -526,7 +738,10 @@ export class TerrainRenderer {
     const updateSkyControls = () => {
       const descriptor = this.#sceneGeometry.datClient.getRegionSkyDescriptor();
       const available = descriptor !== null;
-      const landscape = available && !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying;
+      const landscape =
+        available &&
+        !this.dungeonSelection &&
+        this.currentCameraMode === CameraMode.Flying;
       skyTime.hidden = !available;
       skyGroup.hidden = !available;
       skyTimeName.hidden = !available;
@@ -534,59 +749,95 @@ export class TerrainRenderer {
       skyGroupSelect.disabled = !landscape || this.#skyGroupRequest !== null;
       if (!available) return;
       if (skyGroupSelect.options.length !== descriptor.dayGroups.length) {
-        skyGroupSelect.replaceChildren(...descriptor.dayGroups.map((group, index) => {
-          const option = document.createElement("option");
-          option.value = String(index);
-          option.textContent = group.name || `Group ${index}`;
-          return option;
-        }));
+        skyGroupSelect.replaceChildren(
+          ...descriptor.dayGroups.map((group, index) => {
+            const option = document.createElement("option");
+            option.value = String(index);
+            option.textContent = group.name || `Group ${index}`;
+            return option;
+          }),
+        );
       }
       if (!this.#skyControlsInitialized) {
         this.#skyControlsInitialized = true;
-        const savedGroup = Number.isFinite(settings.data.skyGroupIndex) ? Math.trunc(settings.data.skyGroupIndex) : 0;
-        const requestedGroup = Math.max(0, Math.min(descriptor.dayGroups.length - 1, savedGroup));
-        const requestedTime = Number.isFinite(settings.data.skyTimeOfDay) ? settings.data.skyTimeOfDay : 0.5;
+        const savedGroup = Number.isFinite(settings.data.skyGroupIndex)
+          ? Math.trunc(settings.data.skyGroupIndex)
+          : 0;
+        const requestedGroup = Math.max(
+          0,
+          Math.min(descriptor.dayGroups.length - 1, savedGroup),
+        );
+        const requestedTime = Number.isFinite(settings.data.skyTimeOfDay)
+          ? settings.data.skyTimeOfDay
+          : 0.5;
         settings.data.skyGroupIndex = requestedGroup;
         settings.data.skyTimeOfDay = ((requestedTime % 1) + 1) % 1;
         this.#sceneGeometry.datClient.setSkyTime(settings.data.skyTimeOfDay);
-        if (requestedGroup !== this.#sceneGeometry.datClient.getSkyGroupIndex()) {
+        if (
+          requestedGroup !== this.#sceneGeometry.datClient.getSkyGroupIndex()
+        ) {
           this.#skyGroupRequest = requestedGroup;
-          void this.#sceneGeometry.datClient.setSkyGroup(requestedGroup).then(() => {
-            if (this.#skyGroupRequest === requestedGroup) this.#skyGroupRequest = null;
-            this.invalidate("resource publication");
-          }).catch((error) => {
-            if (this.#skyGroupRequest === requestedGroup) this.#skyGroupRequest = null;
-            this.throwError(`Unable to select sky group: ${error}`);
-          });
+          void this.#sceneGeometry.datClient
+            .setSkyGroup(requestedGroup)
+            .then(() => {
+              if (this.#skyGroupRequest === requestedGroup)
+                this.#skyGroupRequest = null;
+              this.invalidate("resource publication");
+            })
+            .catch((error) => {
+              if (this.#skyGroupRequest === requestedGroup)
+                this.#skyGroupRequest = null;
+              this.throwError(`Unable to select sky group: ${error}`);
+            });
         }
       }
       skyTimeInput.value = String(this.#sceneGeometry.datClient.getSkyTime());
       const activeTime = this.#sceneGeometry.datClient.getSkyTime();
-      const period = descriptor.timesOfDay.reduce((selected, candidate) => candidate.start <= activeTime ? candidate : selected, descriptor.timesOfDay[descriptor.timesOfDay.length - 1]);
+      const period = descriptor.timesOfDay.reduce(
+        (selected, candidate) =>
+          candidate.start <= activeTime ? candidate : selected,
+        descriptor.timesOfDay[descriptor.timesOfDay.length - 1],
+      );
       skyTimeOutput.value = `${Math.round(activeTime * 100)}%`;
       skyTimeName.textContent = period?.name ?? "";
-      if (this.#skyGroupRequest === null) skyGroupSelect.value = String(this.#sceneGeometry.datClient.getSkyGroupIndex());
+      if (this.#skyGroupRequest === null)
+        skyGroupSelect.value = String(
+          this.#sceneGeometry.datClient.getSkyGroupIndex(),
+        );
     };
     this.#updateSkyControls = updateSkyControls;
-    skyTimeInput.addEventListener("input", () => {
-      const value = Number(skyTimeInput.value);
-      this.#sceneGeometry.datClient.setSkyTime(value);
-      settings.data.skyTimeOfDay = value;
-      updateSkyControls();
-      this.invalidate("input");
-    }, { signal: this.shutdownSignal });
-    skyGroupSelect.addEventListener("change", () => {
-      const groupIndex = Number(skyGroupSelect.value);
-      settings.data.skyGroupIndex = groupIndex;
-      this.#skyGroupRequest = groupIndex;
-      void this.#sceneGeometry.datClient.setSkyGroup(groupIndex).then(() => {
-        if (this.#skyGroupRequest === groupIndex) this.#skyGroupRequest = null;
-        this.invalidate("resource publication");
-      }).catch((error) => {
-        if (this.#skyGroupRequest === groupIndex) this.#skyGroupRequest = null;
-        this.throwError(`Unable to select sky group: ${error}`);
-      });
-    }, { signal: this.shutdownSignal });
+    skyTimeInput.addEventListener(
+      "input",
+      () => {
+        const value = Number(skyTimeInput.value);
+        this.#sceneGeometry.datClient.setSkyTime(value);
+        settings.data.skyTimeOfDay = value;
+        updateSkyControls();
+        this.invalidate("input");
+      },
+      { signal: this.shutdownSignal },
+    );
+    skyGroupSelect.addEventListener(
+      "change",
+      () => {
+        const groupIndex = Number(skyGroupSelect.value);
+        settings.data.skyGroupIndex = groupIndex;
+        this.#skyGroupRequest = groupIndex;
+        void this.#sceneGeometry.datClient
+          .setSkyGroup(groupIndex)
+          .then(() => {
+            if (this.#skyGroupRequest === groupIndex)
+              this.#skyGroupRequest = null;
+            this.invalidate("resource publication");
+          })
+          .catch((error) => {
+            if (this.#skyGroupRequest === groupIndex)
+              this.#skyGroupRequest = null;
+            this.throwError(`Unable to select sky group: ${error}`);
+          });
+      },
+      { signal: this.shutdownSignal },
+    );
     this.#updateSkyControls();
     section.append(skyTime, skyTimeName, skyGroup);
     addActionButton("Clear Data Caches & Reload", async () => {
@@ -600,7 +851,8 @@ export class TerrainRenderer {
         window.location.reload();
       } catch (error) {
         this.shutdown();
-        this.loader.textContent = "Unable to clear data caches. Reload the page to try again.";
+        this.loader.textContent =
+          "Unable to clear data caches. Reload the page to try again.";
         document.body.classList.remove("loaded");
         console.error("Unable to clear ACTerrain data caches", error);
       }
@@ -614,7 +866,18 @@ export class TerrainRenderer {
       else window.location.assign(url.toString());
     });
     addActionButton("Reset Camera", () => this.#resetCamera());
-    document.querySelector<HTMLButtonElement>("#camera-toggle")!.addEventListener("click", () => this.switchCamera(this.currentCameraType === CameraMode.Camera2D ? CameraMode.Flying : CameraMode.Camera2D), { signal: this.shutdownSignal });
+    document
+      .querySelector<HTMLButtonElement>("#camera-toggle")!
+      .addEventListener(
+        "click",
+        () =>
+          this.switchCamera(
+            this.currentCameraType === CameraMode.Camera2D
+              ? CameraMode.Flying
+              : CameraMode.Camera2D,
+          ),
+        { signal: this.shutdownSignal },
+      );
     settings.subscribe(() => {
       this.#applySettings();
       textureSelect.value = settings.data.textureProfile;
@@ -622,43 +885,75 @@ export class TerrainRenderer {
       this.#updateSkyControls?.();
       for (const update of updateControls) update();
     });
-    const toggle = document.querySelector<HTMLButtonElement>("#settings-toggle")!;
+    const toggle =
+      document.querySelector<HTMLButtonElement>("#settings-toggle")!;
     const sidebar = document.querySelector<HTMLElement>("#sidebar")!;
-    const sidebarContent = document.querySelector<HTMLElement>(".sidebar-content")!;
+    const sidebarContent =
+      document.querySelector<HTMLElement>(".sidebar-content")!;
     const close = document.querySelector<HTMLButtonElement>("#sidebar-close")!;
-    const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".sidebar-tab"));
+    const tabs = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".sidebar-tab"),
+    );
     const selectTab = (selectedTab: HTMLButtonElement) => {
       for (const tab of tabs) {
         const selected = tab === selectedTab;
         tab.setAttribute("aria-selected", String(selected));
         tab.tabIndex = selected ? 0 : -1;
-        document.getElementById(tab.getAttribute("aria-controls")!)!.hidden = !selected;
+        document.getElementById(tab.getAttribute("aria-controls")!)!.hidden =
+          !selected;
       }
-      sidebarContent.classList.toggle("locations-active", selectedTab.id === "locations-tab");
+      sidebarContent.classList.toggle(
+        "locations-active",
+        selectedTab.id === "locations-tab",
+      );
     };
     for (const tab of tabs) {
-      tab.addEventListener("click", () => selectTab(tab), { signal: this.shutdownSignal });
-      tab.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault();
-        const offset = event.key === "ArrowRight" ? 1 : -1;
-        const nextTab = tabs[(tabs.indexOf(tab) + offset + tabs.length) % tabs.length];
-        selectTab(nextTab);
-        nextTab.focus();
-      }, { signal: this.shutdownSignal });
+      tab.addEventListener("click", () => selectTab(tab), {
+        signal: this.shutdownSignal,
+      });
+      tab.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const offset = event.key === "ArrowRight" ? 1 : -1;
+          const nextTab =
+            tabs[(tabs.indexOf(tab) + offset + tabs.length) % tabs.length];
+          selectTab(nextTab);
+          nextTab.focus();
+        },
+        { signal: this.shutdownSignal },
+      );
     }
     selectTab(tabs[0]);
-    const setOpen = (open: boolean) => { sidebar.classList.toggle("open", open); toggle.setAttribute("aria-expanded", String(open)); };
+    const setOpen = (open: boolean) => {
+      sidebar.classList.toggle("open", open);
+      toggle.setAttribute("aria-expanded", String(open));
+    };
     const releaseCameraInput = () => {
       if (document.pointerLockElement) document.exitPointerLock();
     };
-    toggle.addEventListener("pointerdown", releaseCameraInput, { signal: this.shutdownSignal });
-    sidebar.addEventListener("pointerdown", releaseCameraInput, { signal: this.shutdownSignal });
-    toggle.addEventListener("click", () => setOpen(!sidebar.classList.contains("open")), { signal: this.shutdownSignal });
-    close.addEventListener("click", () => setOpen(false), { signal: this.shutdownSignal });
-    window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") setOpen(false);
-    }, { signal: this.shutdownSignal });
+    toggle.addEventListener("pointerdown", releaseCameraInput, {
+      signal: this.shutdownSignal,
+    });
+    sidebar.addEventListener("pointerdown", releaseCameraInput, {
+      signal: this.shutdownSignal,
+    });
+    toggle.addEventListener(
+      "click",
+      () => setOpen(!sidebar.classList.contains("open")),
+      { signal: this.shutdownSignal },
+    );
+    close.addEventListener("click", () => setOpen(false), {
+      signal: this.shutdownSignal,
+    });
+    window.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape") setOpen(false);
+      },
+      { signal: this.shutdownSignal },
+    );
   }
 
   updateFlyingCameraControls(): void {
@@ -668,7 +963,10 @@ export class TerrainRenderer {
   async navigateToLocation(target: LocationTarget): Promise<void> {
     if (target.landblock !== undefined) {
       const request = this.dungeonRequest + 1;
-      await this.showDungeon({ landblock: target.landblock, cellId: target.cellId });
+      await this.showDungeon({
+        landblock: target.landblock,
+        cellId: target.cellId,
+      });
       if (request !== this.dungeonRequest || this.isShutdown) {
         return;
       }
@@ -680,7 +978,11 @@ export class TerrainRenderer {
       return;
     }
     if (target.zoom !== undefined) {
-      this.restoreCameraRoute({ mode: "2d", position: { ...position, z: 1 }, zoom: this.capCameraZoom(target.zoom) });
+      this.restoreCameraRoute({
+        mode: "2d",
+        position: { ...position, z: 1 },
+        zoom: this.capCameraZoom(target.zoom),
+      });
       return;
     }
     if (target.landblock === undefined && target.type && !target.rotation) {
@@ -690,21 +992,35 @@ export class TerrainRenderer {
     const camera = this.flyingCamera;
     if (target.rotation) {
       camera.Position = new Vector3(position.x, position.y, position.z);
-      camera.SetRotation(target.rotation.yaw, target.rotation.pitch, target.rotation.roll);
+      camera.SetRotation(
+        target.rotation.yaw,
+        target.rotation.pitch,
+        target.rotation.roll,
+      );
     } else {
       const focus = new Vector3(position.x, position.y, position.z + 1);
       camera.Position = new Vector3(position.x, position.y + 3, position.z + 2);
       camera.SetRotation(0, 0, 0);
       camera.LookAt(focus);
     }
-    this.restoreCameraRoute({ mode: "3d", position: camera.Position, yaw: camera.Yaw,
-      pitch: camera.Pitch, roll: camera.Roll });
+    this.restoreCameraRoute({
+      mode: "3d",
+      position: camera.Position,
+      yaw: camera.Yaw,
+      pitch: camera.Pitch,
+      roll: camera.Roll,
+    });
     this.canvas.dispatchEvent(new Event("locationchange"));
   }
 
-  focusLocation(x: number, y: number, type: "poi" | "npc" | "vendor" | "portal"): void {
+  focusLocation(
+    x: number,
+    y: number,
+    type: "poi" | "npc" | "vendor" | "portal",
+  ): void {
     this.showWorld();
-    if (this.currentCameraMode !== CameraMode.Camera2D) this.switchCamera(CameraMode.Camera2D, false);
+    if (this.currentCameraMode !== CameraMode.Camera2D)
+      this.switchCamera(CameraMode.Camera2D, false);
     this.camera2D.Zoom = this.capCameraZoom(type === "poi" ? 0.12 : 40);
     this.camera2D.CenterOnVec(new Vector3(x, y, 1));
     this.invalidate("input");
@@ -713,12 +1029,16 @@ export class TerrainRenderer {
   #updateMobileControlsVisibility(): void {
     document
       .getElementById("mobile-controls")
-      ?.classList.toggle("camera-2d", this.currentCameraMode === CameraMode.Camera2D);
+      ?.classList.toggle(
+        "camera-2d",
+        this.currentCameraMode === CameraMode.Camera2D,
+      );
     const hint = document.getElementById("camera-hint");
     if (hint && !isTouchDevice()) {
-      hint.textContent = this.currentCameraMode === CameraMode.Flying
-        ? "WASD to move · Right click + drag to look · Press 'C' to switch cameras"
-        : "Left or right click + drag to pan · Press 'C' to switch cameras";
+      hint.textContent =
+        this.currentCameraMode === CameraMode.Flying
+          ? "WASD to move · Right click + drag to look · Press 'C' to switch cameras"
+          : "Left or right click + drag to pan · Press 'C' to switch cameras";
     }
   }
 
@@ -726,7 +1046,8 @@ export class TerrainRenderer {
     if (this.cameraTransition && animate) {
       if (mode !== this.cameraTransition.mode) {
         this.cameraTransition.mode = mode;
-        this.cameraTransition.elapsed = CAMERA_TRANSITION_DURATION_MS - this.cameraTransition.elapsed;
+        this.cameraTransition.elapsed =
+          CAMERA_TRANSITION_DURATION_MS - this.cameraTransition.elapsed;
       }
       this.invalidate("input");
       return;
@@ -740,7 +1061,8 @@ export class TerrainRenderer {
 
     if (this.dungeonSelection) {
       this.currentCameraMode = mode;
-      this.currentCamera = mode === CameraMode.Camera2D ? this.camera2D : this.flyingCamera;
+      this.currentCamera =
+        mode === CameraMode.Camera2D ? this.camera2D : this.flyingCamera;
       this.currentCamera.ViewportSize.x = this.canvas.width;
       this.currentCamera.ViewportSize.y = this.canvas.height;
       this.#updateMobileControlsVisibility();
@@ -751,36 +1073,60 @@ export class TerrainRenderer {
     const camera = this.flyingCamera;
     camera.MapProjectionBlend = 0;
     if (mode === CameraMode.Camera2D) {
-      this.camera2D.CenterOnVec(new Vector3(camera.Position.x, camera.Position.y, 1));
-      const height = Math.max(1, camera.Position.z - this.cameraGroundHeightAt(camera.Position.x, camera.Position.y));
+      this.camera2D.CenterOnVec(
+        new Vector3(camera.Position.x, camera.Position.y, 1),
+      );
+      const height = Math.max(
+        1,
+        camera.Position.z -
+          this.cameraGroundHeightAt(camera.Position.x, camera.Position.y),
+      );
       this.camera2D.Zoom = this.capCameraZoom(this.zoomForFlyingHeight(height));
     } else {
       const position = this.camera2D.Position;
       camera.SetRotation(Math.PI, -(Math.PI / 2 - Math.PI / 18), 0);
-      const height = Math.min(this.flyingHeightForZoom(this.camera2D.Zoom),
-        settings.data.distanceLandblocks * LAND_BLOCK_SIZE * 0.8);
+      const height = Math.min(
+        this.flyingHeightForZoom(this.camera2D.Zoom),
+        settings.data.distanceLandblocks * LAND_BLOCK_SIZE * 0.8,
+      );
       camera.Position = new Vector3(
         position.x,
         position.y,
         Math.max(
           this.getTerrainClearanceHeightAt(position.x, position.y) + height,
-          this.getTerrainClearanceHeightInArea(position.x, position.y, height * 1.5) + 1,
+          this.getTerrainClearanceHeightInArea(
+            position.x,
+            position.y,
+            height * 1.5,
+          ) + 1,
         ),
       );
     }
 
     camera.MapProjectionZoom = this.camera2D.Zoom;
-    camera.MapProjectionHeight = Math.max(1, camera.Position.z - this.cameraGroundHeightAt(camera.Position.x, camera.Position.y));
+    camera.MapProjectionHeight = Math.max(
+      1,
+      camera.Position.z -
+        this.cameraGroundHeightAt(camera.Position.x, camera.Position.y),
+    );
     this.cameraTransition = {
       mode,
       elapsed: 0,
-      yaw: Math.PI + Math.atan2(Math.sin(camera.Yaw - Math.PI), Math.cos(camera.Yaw - Math.PI)),
+      yaw:
+        Math.PI +
+        Math.atan2(
+          Math.sin(camera.Yaw - Math.PI),
+          Math.cos(camera.Yaw - Math.PI),
+        ),
       pitch: camera.Pitch,
       roll: Math.atan2(Math.sin(camera.Roll), Math.cos(camera.Roll)),
     };
     this.currentCamera = camera;
     this.currentCameraMode = CameraMode.Flying;
-    if (animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (
+      animate &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
       this.updateCameraTransition(0);
     } else {
       this.finishCameraTransition();
@@ -792,9 +1138,13 @@ export class TerrainRenderer {
   private updateCameraTransition(dt: number): void {
     const transition = this.cameraTransition!;
     transition.elapsed += dt;
-    const progress = Math.min(1, transition.elapsed / CAMERA_TRANSITION_DURATION_MS);
+    const progress = Math.min(
+      1,
+      transition.elapsed / CAMERA_TRANSITION_DURATION_MS,
+    );
     const eased = progress * progress * (3 - 2 * progress);
-    const mapBlend = transition.mode === CameraMode.Camera2D ? eased : 1 - eased;
+    const mapBlend =
+      transition.mode === CameraMode.Camera2D ? eased : 1 - eased;
     this.flyingCamera.SetRotation(
       transition.yaw + (Math.PI - transition.yaw) * mapBlend,
       transition.pitch + (-Math.PI / 2 - transition.pitch) * mapBlend,
@@ -808,10 +1158,17 @@ export class TerrainRenderer {
 
   private finishCameraTransition(): void {
     const transition = this.cameraTransition!;
-    this.flyingCamera.SetRotation(transition.yaw, transition.pitch, transition.roll);
+    this.flyingCamera.SetRotation(
+      transition.yaw,
+      transition.pitch,
+      transition.roll,
+    );
     this.flyingCamera.MapProjectionBlend = 0;
     this.currentCameraMode = transition.mode;
-    this.currentCamera = transition.mode === CameraMode.Camera2D ? this.camera2D : this.flyingCamera;
+    this.currentCamera =
+      transition.mode === CameraMode.Camera2D
+        ? this.camera2D
+        : this.flyingCamera;
     this.currentCamera.ViewportSize.x = this.canvas.width;
     this.currentCamera.ViewportSize.y = this.canvas.height;
     this.cameraTransition = null;
@@ -852,9 +1209,10 @@ export class TerrainRenderer {
   }
 
   get animationActive(): boolean {
-    return this.cameraTransition !== null || (
-      this.currentCamera === this.flyingCamera &&
-      this.flyingCamera.hasActiveInput
+    return (
+      this.cameraTransition !== null ||
+      (this.currentCamera === this.flyingCamera &&
+        this.flyingCamera.hasActiveInput)
     );
   }
 
@@ -881,7 +1239,9 @@ export class TerrainRenderer {
   }
 
   private cameraGroundHeightAt(x: number, y: number): number {
-    return this.dungeonSelection ? this.dungeonCenter.z : this.getTerrainClearanceHeightAt(x, y);
+    return this.dungeonSelection
+      ? this.dungeonCenter.z
+      : this.getTerrainClearanceHeightAt(x, y);
   }
 
   private flyingHeightForZoom(zoom: number) {
@@ -978,9 +1338,7 @@ export class TerrainRenderer {
         sampleY++
       ) {
         const red =
-          this.#terrainHeightData[
-            (sampleY * TERRAIN_DATA_SIDE + sampleX) * 4
-          ];
+          this.#terrainHeightData[(sampleY * TERRAIN_DATA_SIDE + sampleX) * 4];
         height = Math.max(
           height,
           this.terrainHeightTable[
@@ -1012,62 +1370,102 @@ export class TerrainRenderer {
       window.clearTimeout(pickTimer);
       pickTimer = undefined;
     };
-    this.canvas.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      pointerId = event.pointerId;
-      pointerStartX = event.clientX;
-      pointerStartY = event.clientY;
-    }, { signal: this.shutdownSignal });
-    this.canvas.addEventListener("pointermove", (event) => {
-      if (event.pointerId === pointerId &&
-        Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > pickDistance) {
-        cancelPick();
-      }
-    }, { signal: this.shutdownSignal });
-    this.canvas.addEventListener("pointerup", (event) => {
-      if (event.pointerId !== pointerId) {
-        return;
-      }
-      pointerId = null;
-      const distance = Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY);
-      if (distance > pickDistance) {
-        return;
-      }
-      const now = performance.now();
-      const isDoubleTap = now - lastTapTime <= doubleTapWindow &&
-        Math.hypot(event.clientX - lastTapX, event.clientY - lastTapY) <= doubleTapDistance;
-      window.clearTimeout(pickTimer);
-      if (isDoubleTap && this.portalDestinationPath) {
-        pickTimer = undefined;
-        lastTapTime = 0;
-        void this.navigateToPortal(event.clientX, event.clientY);
-        return;
-      }
-      lastTapTime = now;
-      lastTapX = event.clientX;
-      lastTapY = event.clientY;
-      pickTimer = window.setTimeout(() => {
-        pickTimer = undefined;
-        void this.pickServerObject(event.clientX, event.clientY);
-      }, doubleTapWindow);
-    }, { signal: this.shutdownSignal });
-    this.canvas.addEventListener("pointercancel", cancelPick, { signal: this.shutdownSignal });
-    window.addEventListener("blur", cancelPick, { signal: this.shutdownSignal });
-    document.addEventListener("visibilitychange", cancelPick, { signal: this.shutdownSignal });
+    this.canvas.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.button !== 0) return;
+        pointerId = event.pointerId;
+        pointerStartX = event.clientX;
+        pointerStartY = event.clientY;
+      },
+      { signal: this.shutdownSignal },
+    );
+    this.canvas.addEventListener(
+      "pointermove",
+      (event) => {
+        if (
+          event.pointerId === pointerId &&
+          Math.hypot(
+            event.clientX - pointerStartX,
+            event.clientY - pointerStartY,
+          ) > pickDistance
+        ) {
+          cancelPick();
+        }
+      },
+      { signal: this.shutdownSignal },
+    );
+    this.canvas.addEventListener(
+      "pointerup",
+      (event) => {
+        if (event.pointerId !== pointerId) {
+          return;
+        }
+        pointerId = null;
+        const distance = Math.hypot(
+          event.clientX - pointerStartX,
+          event.clientY - pointerStartY,
+        );
+        if (distance > pickDistance) {
+          return;
+        }
+        const now = performance.now();
+        const isDoubleTap =
+          now - lastTapTime <= doubleTapWindow &&
+          Math.hypot(event.clientX - lastTapX, event.clientY - lastTapY) <=
+            doubleTapDistance;
+        window.clearTimeout(pickTimer);
+        if (isDoubleTap && this.portalDestinationPath) {
+          pickTimer = undefined;
+          lastTapTime = 0;
+          void this.navigateToPortal(event.clientX, event.clientY);
+          return;
+        }
+        lastTapTime = now;
+        lastTapX = event.clientX;
+        lastTapY = event.clientY;
+        pickTimer = window.setTimeout(() => {
+          pickTimer = undefined;
+          void this.pickServerObject(event.clientX, event.clientY);
+        }, doubleTapWindow);
+      },
+      { signal: this.shutdownSignal },
+    );
+    this.canvas.addEventListener("pointercancel", cancelPick, {
+      signal: this.shutdownSignal,
+    });
+    window.addEventListener("blur", cancelPick, {
+      signal: this.shutdownSignal,
+    });
+    document.addEventListener("visibilitychange", cancelPick, {
+      signal: this.shutdownSignal,
+    });
 
-    this.canvas.addEventListener("pointerdown", () => {
-      this.canvas.focus({ preventScroll: true });
-    }, { signal: this.shutdownSignal });
+    this.canvas.addEventListener(
+      "pointerdown",
+      () => {
+        this.canvas.focus({ preventScroll: true });
+      },
+      { signal: this.shutdownSignal },
+    );
 
-    window.addEventListener("resize", () => {
-      this.#handleResize();
-      this.invalidate("resize");
-    }, { signal: this.shutdownSignal });
+    window.addEventListener(
+      "resize",
+      () => {
+        this.#handleResize();
+        this.invalidate("resize");
+      },
+      { signal: this.shutdownSignal },
+    );
 
-    window.addEventListener("mousemove", (event) => {
-      this.mousePos.x = event.clientX;
-      this.mousePos.y = event.clientY;
-    }, { signal: this.shutdownSignal });
+    window.addEventListener(
+      "mousemove",
+      (event) => {
+        this.mousePos.x = event.clientX;
+        this.mousePos.y = event.clientY;
+      },
+      { signal: this.shutdownSignal },
+    );
     for (const eventName of [
       "pointerdown",
       "pointermove",
@@ -1079,89 +1477,148 @@ export class TerrainRenderer {
       "touchmove",
       "touchend",
     ]) {
-      window.addEventListener(eventName, () => this.invalidate("input"), { signal: this.shutdownSignal });
+      window.addEventListener(eventName, () => this.invalidate("input"), {
+        signal: this.shutdownSignal,
+      });
     }
 
     // Add keyboard shortcut for quick camera switching
-    window.addEventListener("keydown", (event) => {
-      if (isTextEditingTarget(event.target)) return;
-      if (event.key === "c" || event.key === "C") {
-        const newMode =
-          this.currentCameraType === CameraMode.Camera2D
-            ? CameraMode.Flying
-            : CameraMode.Camera2D;
-        this.switchCamera(newMode);
-      }
-    }, { signal: this.shutdownSignal });
+    window.addEventListener(
+      "keydown",
+      (event) => {
+        if (isTextEditingTarget(event.target)) return;
+        if (event.key === "c" || event.key === "C") {
+          const newMode =
+            this.currentCameraType === CameraMode.Camera2D
+              ? CameraMode.Flying
+              : CameraMode.Camera2D;
+          this.switchCamera(newMode);
+        }
+      },
+      { signal: this.shutdownSignal },
+    );
 
-    document.addEventListener("visibilitychange", () =>
-      this.invalidate("visibility"), { signal: this.shutdownSignal },
+    document.addEventListener(
+      "visibilitychange",
+      () => this.invalidate("visibility"),
+      { signal: this.shutdownSignal },
     );
   }
 
-  private async pickServerObject(clientX: number, clientY: number, examine = true): Promise<IndexedPlacement | null> {
+  private async pickServerObject(
+    clientX: number,
+    clientY: number,
+    examine = true,
+  ): Promise<IndexedPlacement | null> {
     const generation = ++this.serverPickGeneration;
     if (!this.#serverGeometry || this.cameraTransition) {
       return null;
     }
     const rect = this.canvas.getBoundingClientRect();
-    const ray = this.currentCameraMode === CameraMode.Camera2D
-      ? this.camera2D.ScreenToWorldRay(clientX, clientY)
-      : this.flyingCamera.ScreenToWorldRay(clientX, clientY);
-    const placement = this.currentCameraMode === CameraMode.Camera2D
-      ? await this.#serverGeometry.pickServerSpawn2D(ray)
-      : (await this.#serverGeometry.pickServerSpawn3D(ray))?.placement ?? null;
-    if (generation !== this.serverPickGeneration || this.shutdownSignal.aborted) {
+    const ray =
+      this.currentCameraMode === CameraMode.Camera2D
+        ? this.camera2D.ScreenToWorldRay(clientX, clientY)
+        : this.flyingCamera.ScreenToWorldRay(clientX, clientY);
+    const placement =
+      this.currentCameraMode === CameraMode.Camera2D
+        ? await this.#serverGeometry.pickServerSpawn2D(ray)
+        : ((await this.#serverGeometry.pickServerSpawn3D(ray))?.placement ??
+          null);
+    if (
+      generation !== this.serverPickGeneration ||
+      this.shutdownSignal.aborted
+    ) {
       return null;
     }
     this.selectedServerObjectValue = placement;
     if (examine && placement?.objectGuid !== undefined) {
-      window.dispatchEvent(new CustomEvent("ac-examine-object", {
-        detail: {
-          guid: placement.objectGuid,
-          modelIndex: placement.modelIndex,
-          rotation: placement.rotation,
-          scale: placement.scale,
-        },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("ac-examine-object", {
+          detail: {
+            guid: placement.objectGuid,
+            modelIndex: placement.modelIndex,
+            rotation: placement.rotation,
+            scale: placement.scale,
+          },
+        }),
+      );
     }
     this.invalidate("input");
     return placement;
   }
 
-  private async navigateToPortal(clientX: number, clientY: number): Promise<void> {
+  private async navigateToPortal(
+    clientX: number,
+    clientY: number,
+  ): Promise<void> {
     try {
       const placement = await this.pickServerObject(clientX, clientY, false);
-      if (placement?.objectGuid === undefined || !this.portalDestinationPath || this.shutdownSignal.aborted) return;
-      const response = await fetch(`${this.portalDestinationPath}/${placement.objectGuid}/destination`, {
-        signal: this.shutdownSignal,
-      });
+      if (
+        placement?.objectGuid === undefined ||
+        !this.portalDestinationPath ||
+        this.shutdownSignal.aborted
+      )
+        return;
+      const response = await fetch(
+        `${this.portalDestinationPath}/${placement.objectGuid}/destination`,
+        {
+          signal: this.shutdownSignal,
+        },
+      );
       if (!response.ok || this.shutdownSignal.aborted) return;
-      const destination = await response.json() as {
-        cellId: number; x: number; y: number; z: number;
-        w: number; rotationX: number; rotationY: number; rotationZ: number;
+      const destination = (await response.json()) as {
+        cellId: number;
+        x: number;
+        y: number;
+        z: number;
+        w: number;
+        rotationX: number;
+        rotationY: number;
+        rotationZ: number;
         seenOutside?: boolean;
       };
       const cellId = Number(destination.cellId);
-      const position = { x: Number(destination.x), y: Number(destination.y), z: Number(destination.z) };
-      const quaternion = [destination.w, destination.rotationX, destination.rotationY, destination.rotationZ].map(Number);
-      if (!Number.isFinite(cellId) || !Object.values(position).every(Number.isFinite) ||
-          !quaternion.every(Number.isFinite) || Math.hypot(...quaternion) === 0) return;
-      const interior = !destination.seenOutside &&
-        (cellId & 0xffff) >= 0x100 && (cellId & 0xffff) < 0xfffe;
+      const position = {
+        x: Number(destination.x),
+        y: Number(destination.y),
+        z: Number(destination.z),
+      };
+      const quaternion = [
+        destination.w,
+        destination.rotationX,
+        destination.rotationY,
+        destination.rotationZ,
+      ].map(Number);
+      if (
+        !Number.isFinite(cellId) ||
+        !Object.values(position).every(Number.isFinite) ||
+        !quaternion.every(Number.isFinite) ||
+        Math.hypot(...quaternion) === 0
+      )
+        return;
+      const interior =
+        !destination.seenOutside &&
+        (cellId & 0xffff) >= 0x100 &&
+        (cellId & 0xffff) < 0xfffe;
       await this.navigateToLocation({
         text: "Portal destination",
         landblock: interior ? cellId >>> 16 : undefined,
         cellId: interior ? cellId : undefined,
         position: interior
           ? { x: position.x, y: -position.y, z: position.z + 1.6 }
-          : { x: (cellId >>> 24) * LAND_BLOCK_SIZE + position.x,
-              y: MAP_SIZE - ((cellId >>> 16 & 0xff) * LAND_BLOCK_SIZE + position.y), z: position.z + 1.6 },
+          : {
+              x: (cellId >>> 24) * LAND_BLOCK_SIZE + position.x,
+              y:
+                MAP_SIZE -
+                (((cellId >>> 16) & 0xff) * LAND_BLOCK_SIZE + position.y),
+              z: position.z + 1.6,
+            },
         rotation: rotation(quaternion),
       });
       pushCameraRoute(this.cameraRoute);
     } catch (error) {
-      if (!this.shutdownSignal.aborted) console.warn("Unable to navigate to portal destination", error);
+      if (!this.shutdownSignal.aborted)
+        console.warn("Unable to navigate to portal destination", error);
     }
   }
 
@@ -1540,18 +1997,26 @@ export class TerrainRenderer {
   update(dt: number) {
     if (this.#isShutdown) return;
     this.#invalidated = false;
-    const skyEnabled = !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying;
+    const skyEnabled =
+      !this.dungeonSelection && this.currentCameraMode === CameraMode.Flying;
     this.#updateSkyControls?.();
-    if (skyEnabled !== this.skyRequested || skyEnabled !== this.#sceneGeometry.datClient.isSkyActive) {
+    if (
+      skyEnabled !== this.skyRequested ||
+      skyEnabled !== this.#sceneGeometry.datClient.isSkyActive
+    ) {
       this.skyRequested = skyEnabled;
       if (!skyEnabled) {
         this.skyboxRenderer.clear();
       }
-      void this.#sceneGeometry.datClient.setSkyActive(skyEnabled).then(() => {
-        if (!this.#isShutdown) this.invalidate("resource publication");
-      }).catch((error) => {
-        if (!this.#isShutdown) this.throwError(`Unable to activate sky: ${error}`);
-      });
+      void this.#sceneGeometry.datClient
+        .setSkyActive(skyEnabled)
+        .then(() => {
+          if (!this.#isShutdown) this.invalidate("resource publication");
+        })
+        .catch((error) => {
+          if (!this.#isShutdown)
+            this.throwError(`Unable to activate sky: ${error}`);
+        });
     }
 
     // Update current camera's viewport size
@@ -1568,11 +2033,15 @@ export class TerrainRenderer {
       this.#updateFlyingFarPlane();
     }
     this.currentCamera.prepareFrame();
-    const regionSkyDescriptor = this.#sceneGeometry.datClient.getRegionSkyDescriptor();
-    const regionLighting = !this.dungeonSelection && regionSkyDescriptor !== null
-      ? this.#sceneGeometry.datClient.getRegionLighting()
-      : null;
-    const sky = this.skyboxRenderer.select(skyEnabled ? this.#sceneGeometry.datClient.getRegionSky() : null);
+    const regionSkyDescriptor =
+      this.#sceneGeometry.datClient.getRegionSkyDescriptor();
+    const regionLighting =
+      !this.dungeonSelection && regionSkyDescriptor !== null
+        ? this.#sceneGeometry.datClient.getRegionLighting()
+        : null;
+    const sky = this.skyboxRenderer.select(
+      skyEnabled ? this.#sceneGeometry.datClient.getRegionSky() : null,
+    );
     this.sceneSky = sky;
     this.sceneView = createSceneView(
       this.currentCamera,
@@ -1593,8 +2062,12 @@ export class TerrainRenderer {
     sky: ReturnType<AcDatClient["getRegionSky"]>,
     regionLighting: ReturnType<AcDatClient["getRegionLighting"]> | null = null,
   ): SceneLighting {
-    const { directionX, directionY, directionZ, lightIntensity: intensity } =
-      settings.data;
+    const {
+      directionX,
+      directionY,
+      directionZ,
+      lightIntensity: intensity,
+    } = settings.data;
     const length = Math.hypot(directionX, directionY, directionZ);
     const direction =
       length > 0
@@ -1604,17 +2077,23 @@ export class TerrainRenderer {
             number,
           ])
         : ([0, 0, 1] as [number, number, number]);
-    const lighting = regionLighting ?? sky?.lighting ?? {
-      direction: [0, 0, 1] as [number, number, number],
-      sunlight: [1, 1, 1] as [number, number, number],
-      ambient: [0.25, 0.25, 0.25] as [number, number, number],
-    };
+    const lighting = regionLighting ??
+      sky?.lighting ?? {
+        direction: [0, 0, 1] as [number, number, number],
+        sunlight: [1, 1, 1] as [number, number, number],
+        ambient: [0.25, 0.25, 0.25] as [number, number, number],
+      };
     return {
       // DAT supplies the vector toward the light; shaders consume the
       // direction the light travels and negate it for the surface vector.
-      direction: regionLighting || sky
-        ? [-lighting.direction[0], lighting.direction[1], -lighting.direction[2]] as [number, number, number]
-        : direction,
+      direction:
+        regionLighting || sky
+          ? ([
+              -lighting.direction[0],
+              lighting.direction[1],
+              -lighting.direction[2],
+            ] as [number, number, number])
+          : direction,
       sunlight: lighting.sunlight.map((value) => value * intensity) as [
         number,
         number,
@@ -1625,7 +2104,10 @@ export class TerrainRenderer {
   }
 
   #getFog(sky: ReturnType<AcDatClient["getRegionSky"]>) {
-    if (!this.dungeonSelection && this.currentCameraMode === CameraMode.Flying) {
+    if (
+      !this.dungeonSelection &&
+      this.currentCameraMode === CameraMode.Flying
+    ) {
       const distanceEnd = settings.data.distanceLandblocks * LAND_BLOCK_SIZE;
       const distanceStart = Math.max(0, distanceEnd - LAND_BLOCK_SIZE);
       if (sky?.worldFog.enabled) {
@@ -1636,9 +2118,19 @@ export class TerrainRenderer {
           enabled: true,
         };
       }
-      return { color: [29 / 255, 34 / 255, 60 / 255] as [number, number, number], start: distanceStart, end: distanceEnd, enabled: true };
+      return {
+        color: [29 / 255, 34 / 255, 60 / 255] as [number, number, number],
+        start: distanceStart,
+        end: distanceEnd,
+        enabled: true,
+      };
     }
-    return { color: [29 / 255, 34 / 255, 60 / 255] as [number, number, number], start: 0, end: 0, enabled: false };
+    return {
+      color: [29 / 255, 34 / 255, 60 / 255] as [number, number, number],
+      start: 0,
+      end: 0,
+      enabled: false,
+    };
   }
 
   #ensureTerrainInstanceCapacity(count: number) {
@@ -1665,7 +2157,8 @@ export class TerrainRenderer {
           )
         : settings.data.minZoomForTextures;
     this.#terrainMinZoomForTextures = minZoomForTextures;
-    this.#terrainCameraMode = this.currentCameraMode === CameraMode.Camera2D ? 0 : 1;
+    this.#terrainCameraMode =
+      this.currentCameraMode === CameraMode.Camera2D ? 0 : 1;
     if (this.currentCameraMode === CameraMode.Camera2D) {
       // 2D camera specific uniforms
       const camera2D = this.currentCamera as Camera2D;
@@ -1717,7 +2210,8 @@ export class TerrainRenderer {
       const centerY = mapYToLandBlock(this.flyingCamera.Position.y);
       const radius = settings.data.distanceLandblocks;
       const frustum = this.currentCamera.FrameFrustum;
-      const instanceCountLimit = (Math.min(254, centerX + radius) - Math.max(0, centerX - radius) + 1) *
+      const instanceCountLimit =
+        (Math.min(254, centerX + radius) - Math.max(0, centerX - radius) + 1) *
         (Math.min(254, centerY + radius) - Math.max(0, centerY - radius) + 1);
       const frustumKey = frustum ? [...frustum].join(",") : "";
       const key = `3d:${centerX},${centerY},${radius},${this.maxTerrainHeight},${frustumKey}`;
@@ -1788,7 +2282,9 @@ export class TerrainRenderer {
       this.#lastOverlayKey = overlayKey;
       this.#loadingSpinner?.classList.toggle("visible", isLoading);
       if (this.#loadingDetails) {
-        this.#loadingDetails.textContent = isLoading ? "Loading scene resources…" : "Nothing pending";
+        this.#loadingDetails.textContent = isLoading
+          ? "Loading scene resources…"
+          : "Nothing pending";
       }
       if (this.#sceneGeometry.sceneLoadState === "error") {
         this.loader.textContent = `Unable to load terrain: ${this.#sceneGeometry.sceneLoadError}`;
@@ -1813,8 +2309,16 @@ export class TerrainRenderer {
     if (this.dungeonSelection) {
       const submissions = this.#submissions;
       submissions.length = 0;
-      this.#sceneGeometry.renderDungeon(this.currentCamera, this.currentCameraMode, submission => submissions.push(submission));
-      this.#serverGeometry?.renderDungeon(this.currentCamera, this.currentCameraMode, submission => submissions.push(submission));
+      this.#sceneGeometry.renderDungeon(
+        this.currentCamera,
+        this.currentCameraMode,
+        (submission) => submissions.push(submission),
+      );
+      this.#serverGeometry?.renderDungeon(
+        this.currentCamera,
+        this.currentCameraMode,
+        (submission) => submissions.push(submission),
+      );
       this.sceneRenderer.render(this.sceneView, submissions);
       this.#labels?.update(this.currentCamera);
       this.#updateOverlay();
@@ -1832,7 +2336,10 @@ export class TerrainRenderer {
     const submissions = this.#submissions;
     submissions.length = 0;
     const sky = this.sceneSky;
-    if (sky && this.currentCameraMode === CameraMode.Flying) this.skyboxRenderer.submit(sky, submission => submissions.push(submission));
+    if (sky && this.currentCameraMode === CameraMode.Flying)
+      this.skyboxRenderer.submit(sky, (submission) =>
+        submissions.push(submission),
+      );
     this.#sceneGeometry.render(
       this.currentCamera,
       this.currentCameraMode,
@@ -1842,7 +2349,11 @@ export class TerrainRenderer {
         : undefined,
       (submission) => submissions.push(submission),
       sky && this.currentCameraMode === CameraMode.Flying
-        ? this.skyboxRenderer.particles(sky, [this.currentCamera.Position.x, this.currentCamera.Position.y, this.currentCamera.Position.z])
+        ? this.skyboxRenderer.particles(sky, [
+            this.currentCamera.Position.x,
+            this.currentCamera.Position.y,
+            this.currentCamera.Position.z,
+          ])
         : [],
     );
     this.#serverGeometry?.render(
@@ -1878,7 +2389,9 @@ export class TerrainRenderer {
     );
 
     this.#updateOverlay();
-    if (this.#geometries().some((geometry) => geometry.pendingApiRequestCount > 0)) {
+    if (
+      this.#geometries().some((geometry) => geometry.pendingApiRequestCount > 0)
+    ) {
       this.invalidate("resource publication");
     }
   }
@@ -1903,7 +2416,8 @@ export class TerrainRenderer {
       !this.#alphaTextureArray
     )
       return;
-    const useOverview = view.cameraMode === CameraMode.Camera2D && this.#useTerrainOverview();
+    const useOverview =
+      view.cameraMode === CameraMode.Camera2D && this.#useTerrainOverview();
     const gl = this.gl;
     if (useOverview) {
       this.#drawTerrainOverview(view);
@@ -1913,15 +2427,18 @@ export class TerrainRenderer {
     gl.useProgram(this.program);
     gl.uniformMatrix4fv(this.#xWorldLoc, false, view.viewProjection);
     gl.uniform1f(this.#scaleLoc, this.#terrainScale);
-    gl.uniform1i(
-      this.#cameraMode,
-      this.#terrainCameraMode,
-    );
+    gl.uniform1i(this.#cameraMode, this.#terrainCameraMode);
     gl.uniform1f(this.#minZoomForTexturesLoc, this.#terrainMinZoomForTextures);
     gl.uniform4f(this.#renderViewLoc, ...this.#terrainRenderView);
-    gl.uniform1i(this.#terrainGridEnabledLoc, settings.data.terrainGridEnabled ? 1 : 0);
+    gl.uniform1i(
+      this.#terrainGridEnabledLoc,
+      settings.data.terrainGridEnabled ? 1 : 0,
+    );
     if (this.#hasTerrainTextureDirty) {
-      gl.uniform1fv(this.#hasTerrainTextureLoc, new Float32Array(this.hasTerrainTexture));
+      gl.uniform1fv(
+        this.#hasTerrainTextureLoc,
+        new Float32Array(this.hasTerrainTexture),
+      );
       this.#hasTerrainTextureDirty = false;
     }
     gl.uniform3f(this.#cameraPositionLoc, ...view.cameraPosition);
@@ -2028,7 +2545,9 @@ export class TerrainRenderer {
       // far plane just beyond the dungeon's bounding sphere so the 24-bit
       // depth buffer retains useful precision for close floor surfaces.
       // Outside the sphere, move the near plane up to its closest extent.
-      const distance = this.flyingCamera.Position.clone().subtract(this.dungeonCenter).len();
+      const distance = this.flyingCamera.Position.clone()
+        .subtract(this.dungeonCenter)
+        .len();
       this.flyingCamera.Near = Math.max(1, distance - this.dungeonRadius - 1);
       this.flyingCamera.Far = Math.max(10, distance + this.dungeonRadius + 1);
       return;

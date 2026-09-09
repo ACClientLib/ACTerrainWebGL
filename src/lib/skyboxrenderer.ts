@@ -1,4 +1,8 @@
-import type { AcDatClient, ObjectMaterial, ParticleEmitterDescriptor } from "./acdatclient";
+import type {
+  AcDatClient,
+  ObjectMaterial,
+  ParticleEmitterDescriptor,
+} from "./acdatclient";
 import type { EvaluatedRegionSky, EvaluatedSkyObject } from "./regionsky";
 import type { ScenePass, SceneSubmissionSink } from "./scenesubmission";
 import type { SceneView } from "./sceneview";
@@ -80,9 +84,24 @@ export class SkyboxRenderer {
     }
     this.program = program;
     this.uniforms.clear();
-    for (const name of ["xWorld", "skyOrigin", "skyRotation", "uvOffset", "buildingTexture",
-      "diffuseAmount", "luminosity", "opacity", "alphaCutoff", "alphaMode", "renderPass",
-      "cameraPosition", "fogEnabled", "lightDirection", "sunlightColor", "ambientColor"]) {
+    for (const name of [
+      "xWorld",
+      "skyOrigin",
+      "skyRotation",
+      "uvOffset",
+      "buildingTexture",
+      "diffuseAmount",
+      "luminosity",
+      "opacity",
+      "alphaCutoff",
+      "alphaMode",
+      "renderPass",
+      "cameraPosition",
+      "fogEnabled",
+      "lightDirection",
+      "sunlightColor",
+      "ambientColor",
+    ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
     }
   }
@@ -113,7 +132,10 @@ export class SkyboxRenderer {
       return;
     }
     const now = performance.now();
-    const delta = Math.max(0, Math.min((now - this.lastFrameTime) / 1000, 0.25));
+    const delta = Math.max(
+      0,
+      Math.min((now - this.lastFrameTime) / 1000, 0.25),
+    );
     this.lastFrameTime = now;
     this.effectSeconds += delta;
     this.effects.advance(delta);
@@ -124,14 +146,20 @@ export class SkyboxRenderer {
       const batches = this.batches.get(item.meshResourceId) ?? [];
       for (let index = 0; index < batches.length; index++) {
         const batch = batches[index];
-        const renderClass = batch.material.alphaMode === "additive" ? "additive" : "sourceOver";
+        const renderClass =
+          batch.material.alphaMode === "additive" ? "additive" : "sourceOver";
         submit({
-          skyPass: (item.object.properties & 1) !== 0 ? "foreground" : "background",
+          skyPass:
+            (item.object.properties & 1) !== 0 ? "foreground" : "background",
           skyObjectIndex: item.object.objectIndex,
           key: {
-            renderClass, programVariant: "sky", cullState: batch.material.cullState,
-            meshBatch: index, material: item.meshResourceId,
-            sampler: batch.material.samplerMode, parity: false,
+            renderClass,
+            programVariant: "sky",
+            cullState: batch.material.cullState,
+            meshBatch: index,
+            material: item.meshResourceId,
+            sampler: batch.material.samplerMode,
+            parity: false,
           },
           instanceCount: 1,
           draw: (view, pass) => this.draw(view, item, batch, pass),
@@ -140,7 +168,10 @@ export class SkyboxRenderer {
     }
   }
 
-  particles(sky: EvaluatedRegionSky, cameraOrigin: [number, number, number]): SkyParticleInput[] {
+  particles(
+    sky: EvaluatedRegionSky,
+    cameraOrigin: [number, number, number],
+  ): SkyParticleInput[] {
     if (!this.ready) {
       return [];
     }
@@ -149,40 +180,68 @@ export class SkyboxRenderer {
       if (!item.visible) {
         continue;
       }
-      if (item.object.defaultPesObjectId === null && item.meshResourceId !== null) {
+      if (
+        item.object.defaultPesObjectId === null &&
+        item.meshResourceId !== null
+      ) {
         const batches = this.particleBatches.get(item.meshResourceId) ?? [];
         for (let index = 0; index < batches.length; index++) {
           const batch = batches[index];
           const offset = this.rotate([0, 0, -500], this.rotation(item));
-          const origin: [number, number, number] = [cameraOrigin[0] + offset[0], cameraOrigin[1] + offset[1], cameraOrigin[2] + offset[2]];
+          const origin: [number, number, number] = [
+            cameraOrigin[0] + offset[0],
+            cameraOrigin[1] + offset[1],
+            cameraOrigin[2] + offset[2],
+          ];
           result.push({
             key: `sky:${this.groupIndex}:${item.object.objectIndex}:setup:${item.meshResourceId}:${index}`,
-            material: batch.material, particles: batch.particles, origin,
-            rotation: this.rotation(item), scale: [1, 1, 1], emitting: true,
-            skyPass: (item.object.properties & 1) !== 0 ? "foreground" : "background",
+            material: batch.material,
+            particles: batch.particles,
+            origin,
+            rotation: this.rotation(item),
+            scale: [1, 1, 1],
+            emitting: true,
+            skyPass:
+              (item.object.properties & 1) !== 0 ? "foreground" : "background",
             objectIndex: item.object.objectIndex,
           });
         }
       }
-      for (const active of this.effects.activeParticles(item.object.objectIndex)) {
-        const effect = item.object.effects.find(value => value.scriptId === active.scriptId);
+      for (const active of this.effects.activeParticles(
+        item.object.objectIndex,
+      )) {
+        const effect = item.object.effects.find(
+          (value) => value.scriptId === active.scriptId,
+        );
         if (!effect || effect.particleResourceId === null) {
           continue;
         }
-        const batches = this.particleBatches.get(effect.particleResourceId) ?? [];
+        const batches =
+          this.particleBatches.get(effect.particleResourceId) ?? [];
         for (let index = 0; index < batches.length; index++) {
           const batch = batches[index];
-          const particles = batch.particles.filter(particle => particle.hookIndex === active.createIndex);
+          const particles = batch.particles.filter(
+            (particle) => particle.hookIndex === active.createIndex,
+          );
           if (particles.length === 0) {
             continue;
           }
           const offset = this.rotate([0, 0, -500], this.rotation(item));
-          const origin: [number, number, number] = [cameraOrigin[0] + offset[0], cameraOrigin[1] + offset[1], cameraOrigin[2] + offset[2]];
+          const origin: [number, number, number] = [
+            cameraOrigin[0] + offset[0],
+            cameraOrigin[1] + offset[1],
+            cameraOrigin[2] + offset[2],
+          ];
           result.push({
             key: `sky:${this.groupIndex}:${active.invocation}:${index}`,
-            material: batch.material, particles, origin, rotation: this.rotation(item), scale: [1, 1, 1],
+            material: batch.material,
+            particles,
+            origin,
+            rotation: this.rotation(item),
+            scale: [1, 1, 1],
             emitting: active.emitting,
-            skyPass: (item.object.properties & 1) !== 0 ? "foreground" : "background",
+            skyPass:
+              (item.object.properties & 1) !== 0 ? "foreground" : "background",
             objectIndex: item.object.objectIndex,
           });
         }
@@ -221,18 +280,25 @@ export class SkyboxRenderer {
     this.destroyed = true;
     this.clear();
     this.gl.canvas.removeEventListener("webglcontextlost", this.onContextLost);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.onContextRestored);
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.onContextRestored,
+    );
     this.gl.deleteProgram(this.program);
   }
 
-  private async loadGroup(sky: EvaluatedRegionSky, generation: number): Promise<void> {
+  private async loadGroup(
+    sky: EvaluatedRegionSky,
+    generation: number,
+  ): Promise<void> {
     const loadedBatches = new Map<number, SkyBatch[]>();
     const loadedParticles = new Map<number, SkyParticleBatch[]>();
     const materialIds: number[] = [];
     const meshLeases: ReturnType<LegacyMeshGpuOwner["acquire"]>[] = [];
     let installed = false;
     try {
-      const group = this.dats.getRegionSkyDescriptor()!.dayGroups[sky.groupIndex];
+      const group =
+        this.dats.getRegionSkyDescriptor()!.dayGroups[sky.groupIndex];
       const meshIds = new Set<number>();
       for (const object of group.objects) {
         if (object.defaultMeshResourceId !== null) {
@@ -253,10 +319,12 @@ export class SkyboxRenderer {
       }
       for (const id of meshIds) {
         const mesh = await this.dats.meshResource(id);
-        const materials = await Promise.all(mesh.batches.map(batch => {
-          materialIds.push(batch.materialResourceId);
-          return this.dats.material(batch.materialResourceId);
-        }));
+        const materials = await Promise.all(
+          mesh.batches.map((batch) => {
+            materialIds.push(batch.materialResourceId);
+            return this.dats.material(batch.materialResourceId);
+          }),
+        );
         if (generation !== this.generation || this.destroyed) {
           return;
         }
@@ -279,10 +347,14 @@ export class SkyboxRenderer {
             // Preserve the batch's UV addressing mode. Non-tiled cube faces
             // need edge clamping, while clouds and other sky effects may use
             // tiled/out-of-range UVs.
-            samplerMode: source.samplerMode ?? (source.hasWrappingUVs === true ? "repeat" : "clamp"),
+            samplerMode:
+              source.samplerMode ??
+              (source.hasWrappingUVs === true ? "repeat" : "clamp"),
           };
           if (source.particles) {
-            loadedParticles.get(id)!.push({ material, particles: source.particles });
+            loadedParticles
+              .get(id)!
+              .push({ material, particles: source.particles });
           }
           if (!source.vertices || !source.indices) {
             continue;
@@ -348,8 +420,8 @@ export class SkyboxRenderer {
 
   private rotation(item: EvaluatedSkyObject): [number, number, number, number] {
     // AC applies heading about negative Z, then global rotation about negative Y.
-    const heading = -item.heading * Math.PI / 360;
-    const rotation = -item.angle * Math.PI / 360;
+    const heading = (-item.heading * Math.PI) / 360;
+    const rotation = (-item.angle * Math.PI) / 360;
     return [
       Math.sin(rotation) * Math.sin(heading),
       Math.sin(rotation) * Math.cos(heading),
@@ -358,14 +430,34 @@ export class SkyboxRenderer {
     ];
   }
 
-  private rotate(value: [number, number, number], quaternion: [number, number, number, number]): [number, number, number] {
+  private rotate(
+    value: [number, number, number],
+    quaternion: [number, number, number, number],
+  ): [number, number, number] {
     const [x, y, z, w] = quaternion;
-    const cross1: [number, number, number] = [y * value[2] - z * value[1], z * value[0] - x * value[2], x * value[1] - y * value[0]];
-    const cross2: [number, number, number] = [y * cross1[2] - z * cross1[1], z * cross1[0] - x * cross1[2], x * cross1[1] - y * cross1[0]];
-    return [value[0] + 2 * (w * cross1[0] + cross2[0]), value[1] + 2 * (w * cross1[1] + cross2[1]), value[2] + 2 * (w * cross1[2] + cross2[2])];
+    const cross1: [number, number, number] = [
+      y * value[2] - z * value[1],
+      z * value[0] - x * value[2],
+      x * value[1] - y * value[0],
+    ];
+    const cross2: [number, number, number] = [
+      y * cross1[2] - z * cross1[1],
+      z * cross1[0] - x * cross1[2],
+      x * cross1[1] - y * cross1[0],
+    ];
+    return [
+      value[0] + 2 * (w * cross1[0] + cross2[0]),
+      value[1] + 2 * (w * cross1[1] + cross2[1]),
+      value[2] + 2 * (w * cross1[2] + cross2[2]),
+    ];
   }
 
-  private draw(view: SceneView, item: EvaluatedSkyObject, batch: SkyBatch, pass: ScenePass): void {
+  private draw(
+    view: SceneView,
+    item: EvaluatedSkyObject,
+    batch: SkyBatch,
+    pass: ScenePass,
+  ): void {
     const gl = this.gl;
     const uniform = (name: string) => this.uniforms.get(name) ?? null;
     invalidateSceneDrawState(gl);
@@ -373,7 +465,9 @@ export class SkyboxRenderer {
     gl.bindVertexArray(batch.vao);
     // Keep the camera's projection, mirrored axes and rotation intact. Composing
     // its position cancels view translation without editing a projected matrix.
-    const matrix = view.viewProjection.clone().translate([...view.cameraPosition]);
+    const matrix = view.viewProjection
+      .clone()
+      .translate([...view.cameraPosition]);
     gl.uniformMatrix4fv(uniform("xWorld"), false, matrix);
     gl.uniform3f(uniform("cameraPosition"), 0, 0, 0);
     gl.uniform3f(uniform("skyOrigin"), 0, 0, 0);
@@ -391,9 +485,22 @@ export class SkyboxRenderer {
     // makes the cube's directional-light discontinuities visible as seams.
     gl.uniform1f(uniform("diffuseAmount"), 0);
     gl.uniform1f(uniform("luminosity"), 1);
-    gl.uniform1f(uniform("opacity"), batch.material.opacity * (item.transparent >= 0 ? 1 - item.transparent * 0.01 : 1));
+    gl.uniform1f(
+      uniform("opacity"),
+      batch.material.opacity *
+        (item.transparent >= 0 ? 1 - item.transparent * 0.01 : 1),
+    );
     gl.uniform1f(uniform("alphaCutoff"), batch.material.alphaCutoff);
-    gl.uniform1i(uniform("alphaMode"), batch.material.alphaMode === "cutout" ? 1 : batch.material.alphaMode === "blended" ? 2 : batch.material.alphaMode === "additive" ? 3 : 0);
+    gl.uniform1i(
+      uniform("alphaMode"),
+      batch.material.alphaMode === "cutout"
+        ? 1
+        : batch.material.alphaMode === "blended"
+          ? 2
+          : batch.material.alphaMode === "additive"
+            ? 3
+            : 0,
+    );
     gl.uniform1i(uniform("renderPass"), pass === "additive" ? 1 : 3);
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, batch.material.texture);

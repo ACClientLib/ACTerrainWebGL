@@ -18,7 +18,12 @@ import {
   selectTextureProfile,
   type TextureCapabilities,
 } from "./textureprofile";
-import { evaluateRegionSky, parseRegionSky, type EvaluatedRegionSky, type RegionSkyDescriptor } from "./regionsky";
+import {
+  evaluateRegionSky,
+  parseRegionSky,
+  type EvaluatedRegionSky,
+  type RegionSkyDescriptor,
+} from "./regionsky";
 import { DatImageClient } from "./datimageclient";
 
 function readFloat16(view: DataView, offset: number): number {
@@ -60,24 +65,54 @@ export interface IndexedPlacement {
   attached?: boolean;
 }
 
-function rotateVector(q: [number, number, number, number], v: [number, number, number]): [number, number, number] {
+function rotateVector(
+  q: [number, number, number, number],
+  v: [number, number, number],
+): [number, number, number] {
   const [x, y, z, w] = q;
   const tx = 2 * (y * v[2] - z * v[1]);
   const ty = 2 * (z * v[0] - x * v[2]);
   const tz = 2 * (x * v[1] - y * v[0]);
-  return [v[0] + w * tx + y * tz - z * ty, v[1] + w * ty + z * tx - x * tz, v[2] + w * tz + x * ty - y * tx];
+  return [
+    v[0] + w * tx + y * tz - z * ty,
+    v[1] + w * ty + z * tx - x * tz,
+    v[2] + w * tz + x * ty - y * tx,
+  ];
 }
 
-function multiplyQuaternion(a: [number, number, number, number], b: [number, number, number, number]): [number, number, number, number] {
-  return [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+function multiplyQuaternion(
+  a: [number, number, number, number],
+  b: [number, number, number, number],
+): [number, number, number, number] {
+  return [
+    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+    a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+    a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+  ];
 }
 
-export interface WorldObjectVector3 { x: number; y: number; z: number; }
-export interface WorldObjectQuaternion { x: number; y: number; z: number; w: number; }
+export interface WorldObjectVector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+export interface WorldObjectQuaternion {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
 // Property map keys are Chorizite.Common enum names (PascalCase); unknown values use numeric strings.
-export type WorldObjectScalarProperties = Record<string, number | string | boolean | null>;
+export type WorldObjectScalarProperties = Record<
+  string,
+  number | string | boolean | null
+>;
 export type WorldObjectInt64Properties = Record<string, number | string | null>;
-export type WorldObjectCompositeProperties = Record<string, Record<string, number | boolean | string | null>>;
+export type WorldObjectCompositeProperties = Record<
+  string,
+  Record<string, number | boolean | string | null>
+>;
 export interface ServerObjectRenderReady {
   status: "ready";
   sourceSetupId: number;
@@ -97,8 +132,7 @@ export interface ServerObjectRenderUnavailable {
   scale: number | null;
 }
 export type ServerObjectRenderData =
-  | ServerObjectRenderReady
-  | ServerObjectRenderUnavailable;
+  ServerObjectRenderReady | ServerObjectRenderUnavailable;
 export interface WorldObjectData {
   guid: number;
   classId: number;
@@ -239,7 +273,10 @@ export interface Mesh {
 export interface LoadedModelBatch {
   mesh: MeshBatch;
   material: ObjectMaterial;
-  particlePlacement?: Pick<V3AttachedItemView, "offset" | "orientation" | "scale">;
+  particlePlacement?: Pick<
+    V3AttachedItemView,
+    "offset" | "orientation" | "scale"
+  >;
 }
 export interface LoadedServerObjectModel {
   object: WorldObjectData;
@@ -249,8 +286,7 @@ export interface LoadedServerObjectModel {
 }
 
 export type ServerObjectModelLoadPhase =
-  | "loading object"
-  | "loading model resources";
+  "loading object" | "loading model resources";
 interface CachedMaterial {
   promise: Promise<ObjectMaterial>;
   material?: ObjectMaterial;
@@ -576,15 +612,26 @@ export class AcDatClient {
   async dungeon(landblock: number): Promise<import("./dungeons").DungeonData> {
     await this.ensureReady();
     if (!this.descriptor.dungeonsUrl) {
-      throw new Error("This dataset needs to be repacked with dungeon support.");
+      throw new Error(
+        "This dataset needs to be repacked with dungeon support.",
+      );
     }
-    const response = await this.request(this.descriptor.dungeonsUrl.replace("{landblock}", landblock.toString(16).padStart(4, "0")));
+    const response = await this.request(
+      this.descriptor.dungeonsUrl.replace(
+        "{landblock}",
+        landblock.toString(16).padStart(4, "0"),
+      ),
+    );
     return response.json();
   }
 
-  async getServerObject(guid: number | string, signal?: AbortSignal): Promise<WorldObjectData> {
+  async getServerObject(
+    guid: number | string,
+    signal?: AbortSignal,
+  ): Promise<WorldObjectData> {
     await this.ensureReady();
-    if (!this.serverId) throw new Error("Server object lookup requires a server dataset");
+    if (!this.serverId)
+      throw new Error("Server object lookup requires a server dataset");
     const response = await this.request(
       `v3/servers/${encodeURIComponent(this.serverId)}/${encodeURIComponent(this.descriptor.version)}/objects/${encodeURIComponent(String(guid))}`,
       { signal },
@@ -614,9 +661,13 @@ export class AcDatClient {
     const mesh = await this.meshResource(object.render.meshResourceId, signal);
     const batches = await this.loadModelBatches(mesh, signal, includeParticles);
     try {
-      const chunk = this.chunks.get(object.cellId) ?? this.chunk(object.cellId >>> 24, (object.cellId >>> 16) & 0xff);
+      const chunk =
+        this.chunks.get(object.cellId) ??
+        this.chunk(object.cellId >>> 24, (object.cellId >>> 16) & 0xff);
       if (chunk?.placementResourceId !== undefined) {
-        const placements = parseV3PlacementChunk(await this.decodeResource(chunk.placementResourceId, 6));
+        const placements = parseV3PlacementChunk(
+          await this.decodeResource(chunk.placementResourceId, 6),
+        );
         for (const item of placements.attachedItems) {
           if (item.parentSourceId !== object.guid) {
             continue;
@@ -648,22 +699,38 @@ export class AcDatClient {
               return { ...batch, vertices };
             }),
           };
-          const attachedBatches = await this.loadModelBatches(transformedMesh, signal, includeParticles);
+          const attachedBatches = await this.loadModelBatches(
+            transformedMesh,
+            signal,
+            includeParticles,
+          );
           for (const batch of attachedBatches) {
-            batches.push(batch.mesh.particles ? { ...batch, particlePlacement: item } : batch);
+            batches.push(
+              batch.mesh.particles
+                ? { ...batch, particlePlacement: item }
+                : batch,
+            );
           }
         }
       }
       signal?.throwIfAborted();
       return { object, render: object.render, mesh, batches };
     } catch (error) {
-      await Promise.all(batches.map((batch) => this.releaseMaterial(batch.mesh.materialResourceId)));
+      await Promise.all(
+        batches.map((batch) =>
+          this.releaseMaterial(batch.mesh.materialResourceId),
+        ),
+      );
       this.beginFrame();
       throw error;
     }
   }
 
-  async loadModelBatches(mesh: Mesh, signal?: AbortSignal, includeParticles = true): Promise<LoadedModelBatch[]> {
+  async loadModelBatches(
+    mesh: Mesh,
+    signal?: AbortSignal,
+    includeParticles = true,
+  ): Promise<LoadedModelBatch[]> {
     const batches: LoadedModelBatch[] = [];
     try {
       for (const batch of mesh.batches) {
@@ -677,9 +744,11 @@ export class AcDatClient {
       signal?.throwIfAborted();
       return batches;
     } catch (error) {
-      await Promise.all(batches.map((batch) =>
-        this.releaseMaterial(batch.mesh.materialResourceId),
-      ));
+      await Promise.all(
+        batches.map((batch) =>
+          this.releaseMaterial(batch.mesh.materialResourceId),
+        ),
+      );
       this.beginFrame();
       throw error;
     }
@@ -796,7 +865,9 @@ export class AcDatClient {
   }
 
   serverSpawnsForChunk(chunk: IndexedChunk): IndexedPlacement[] {
-    return this.placementsForChunk(chunk, SERVER_SPAWNS).filter((placement) => !placement.attached);
+    return this.placementsForChunk(chunk, SERVER_SPAWNS).filter(
+      (placement) => !placement.attached,
+    );
   }
 
   model(modelIndex: number): IndexedModel | undefined {
@@ -820,7 +891,11 @@ export class AcDatClient {
     if (!promise) {
       let created!: Promise<Mesh>;
       // A selection may be cancelled while another caller is awaiting the same mesh.
-      created = this.decodeMesh(resourceId, 1, this.lifecycleController.signal).catch((error) => {
+      created = this.decodeMesh(
+        resourceId,
+        1,
+        this.lifecycleController.signal,
+      ).catch((error) => {
         if (this.meshesByResourceId.get(resourceId) === created)
           this.meshesByResourceId.delete(resourceId);
         throw error;
@@ -1006,7 +1081,9 @@ export class AcDatClient {
         readFloat16(view, 18),
         readFloat16(view, 20),
       ],
-      ...(view.getUint32(24, true) === 0 ? {} : { objectGuid: view.getUint32(24, true) }),
+      ...(view.getUint32(24, true) === 0
+        ? {}
+        : { objectGuid: view.getUint32(24, true) }),
     };
   }
 
@@ -1067,7 +1144,9 @@ export class AcDatClient {
           ),
     );
     const parentsByGuid = new Map<number, IndexedPlacement>();
-    for (const placement of placements) if (placement.objectGuid !== undefined) parentsByGuid.set(placement.objectGuid, placement);
+    for (const placement of placements)
+      if (placement.objectGuid !== undefined)
+        parentsByGuid.set(placement.objectGuid, placement);
     for (const item of parsed.attachedItems) {
       const parent = parentsByGuid.get(item.parentSourceId);
       if (parent) placements.push(this.decodeAttachedPlacement(parent, item));
@@ -1075,16 +1154,31 @@ export class AcDatClient {
     this.decodedPlacements.set(chunkId, placements);
   }
 
-  private decodeAttachedPlacement(parent: IndexedPlacement, item: V3AttachedItemView): IndexedPlacement {
-    const scaledOffset: [number, number, number] = [item.offset[0] * parent.scale[0], item.offset[1] * parent.scale[1], item.offset[2] * parent.scale[2]];
+  private decodeAttachedPlacement(
+    parent: IndexedPlacement,
+    item: V3AttachedItemView,
+  ): IndexedPlacement {
+    const scaledOffset: [number, number, number] = [
+      item.offset[0] * parent.scale[0],
+      item.offset[1] * parent.scale[1],
+      item.offset[2] * parent.scale[2],
+    ];
     const worldOffset = rotateVector(parent.rotation, scaledOffset);
     return {
       category: parent.category,
       geometryPath: 0,
       modelIndex: item.modelIndex,
-      origin: [parent.origin[0] + worldOffset[0], parent.origin[1] + worldOffset[1], parent.origin[2] + worldOffset[2]],
+      origin: [
+        parent.origin[0] + worldOffset[0],
+        parent.origin[1] + worldOffset[1],
+        parent.origin[2] + worldOffset[2],
+      ],
       rotation: multiplyQuaternion(parent.rotation, item.orientation),
-      scale: [parent.scale[0] * item.scale[0], parent.scale[1] * item.scale[1], parent.scale[2] * item.scale[2]],
+      scale: [
+        parent.scale[0] * item.scale[0],
+        parent.scale[1] * item.scale[1],
+        parent.scale[2] * item.scale[2],
+      ],
       attached: true,
     };
   }
@@ -1180,8 +1274,14 @@ export class AcDatClient {
     this.visibleController?.abort();
     this.preloadController?.abort();
     this.processor.shutdown();
-    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.gl.canvas.removeEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+    );
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+    );
     for (const material of this.materials.values()) {
       material.lease?.release();
       material.material = undefined;
@@ -1233,7 +1333,10 @@ export class AcDatClient {
       typeof descriptor.sceneIndexUrl !== "string" ||
       typeof descriptor.resourceIndexUrl !== "string" ||
       typeof descriptor.resourcesUrl !== "string" ||
-      !(typeof descriptor.terrainDataUrl === "string" || descriptor.terrainDataUrl === null) ||
+      !(
+        typeof descriptor.terrainDataUrl === "string" ||
+        descriptor.terrainDataUrl === null
+      ) ||
       !Number.isFinite(descriptor.placementElevationOrigin) ||
       !Number.isFinite(descriptor.placementElevationScale) ||
       descriptor.placementElevationScale <= 0 ||
@@ -1245,8 +1348,15 @@ export class AcDatClient {
       ] !== "number"
     )
       throw new Error("Invalid ACTerrain dataset descriptor");
-    const regionSky = descriptor.regionSky == null ? undefined : parseRegionSky(descriptor.regionSky);
-    if (descriptor.contentKind === "server" ? regionSky !== undefined : regionSky === undefined) {
+    const regionSky =
+      descriptor.regionSky == null
+        ? undefined
+        : parseRegionSky(descriptor.regionSky);
+    if (
+      descriptor.contentKind === "server"
+        ? regionSky !== undefined
+        : regionSky === undefined
+    ) {
       throw new Error("Invalid ACTerrain dataset sky ownership");
     }
     this.descriptor = descriptor;
@@ -1268,7 +1378,8 @@ export class AcDatClient {
     this.lifecycleController.signal.throwIfAborted();
     this.parseV3SceneDirectory(sceneIndex);
     this.parseResourceCatalog(resourceIndex);
-    if (descriptor.contentKind !== "server") await this.cache.removeLegacyCaches();
+    if (descriptor.contentKind !== "server")
+      await this.cache.removeLegacyCaches();
   }
 
   getRegionLighting(timeOfDay = this.skyTimeOfDay) {
@@ -1299,7 +1410,10 @@ export class AcDatClient {
     if (active) {
       await this.ensureReady();
     }
-    if (active === this.skyActive && (!active || this.evaluatedSky || this.skyLoad)) {
+    if (
+      active === this.skyActive &&
+      (!active || this.evaluatedSky || this.skyLoad)
+    ) {
       await this.skyLoad;
       return;
     }
@@ -1329,7 +1443,11 @@ export class AcDatClient {
       return;
     }
     const request = ++this.skyActivation;
-    const loading = this.loadSkyGroup(groupIndex, signal ?? this.lifecycleController.signal, request);
+    const loading = this.loadSkyGroup(
+      groupIndex,
+      signal ?? this.lifecycleController.signal,
+      request,
+    );
     this.skyLoad = loading;
     try {
       await loading;
@@ -1341,7 +1459,8 @@ export class AcDatClient {
   }
 
   setSkyTime(timeOfDay: number): EvaluatedRegionSky {
-    if (!this.descriptor?.regionSky) throw new Error("ACTerrain region sky is unavailable");
+    if (!this.descriptor?.regionSky)
+      throw new Error("ACTerrain region sky is unavailable");
     if (!Number.isFinite(timeOfDay)) {
       throw new Error("Sky time must be finite");
     }
@@ -1349,15 +1468,24 @@ export class AcDatClient {
     if (this.evaluatedSky?.timeOfDay === this.skyTimeOfDay) {
       return this.evaluatedSky;
     }
-    const evaluated = evaluateRegionSky(this.descriptor.regionSky, this.skyGroupIndex, this.skyTimeOfDay);
+    const evaluated = evaluateRegionSky(
+      this.descriptor.regionSky,
+      this.skyGroupIndex,
+      this.skyTimeOfDay,
+    );
     if (this.evaluatedSky) {
       this.evaluatedSky = evaluated;
     }
     return evaluated;
   }
 
-  private async loadSkyGroup(groupIndex: number, signal: AbortSignal, request: number): Promise<void> {
-    if (!this.descriptor?.regionSky) throw new Error("ACTerrain region sky is unavailable");
+  private async loadSkyGroup(
+    groupIndex: number,
+    signal: AbortSignal,
+    request: number,
+  ): Promise<void> {
+    if (!this.descriptor?.regionSky)
+      throw new Error("ACTerrain region sky is unavailable");
     const group = this.descriptor.regionSky.dayGroups[groupIndex];
     if (!group) throw new Error(`Unknown ACTerrain sky group ${groupIndex}`);
     await this.loadResourceIds([...group.resourceIds], 0, signal);
@@ -1382,7 +1510,11 @@ export class AcDatClient {
     }
     this.skyGroupLeases = leases;
     this.skyGroupIndex = groupIndex;
-    this.evaluatedSky = evaluateRegionSky(this.descriptor.regionSky, groupIndex, this.skyTimeOfDay);
+    this.evaluatedSky = evaluateRegionSky(
+      this.descriptor.regionSky,
+      groupIndex,
+      this.skyTimeOfDay,
+    );
   }
 
   private parseV3SceneDirectory(source: ArrayBuffer): void {

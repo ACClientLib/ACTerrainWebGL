@@ -132,11 +132,18 @@ async function decodeMesh(resource: EncodedDatResource): Promise<Mesh> {
         buffer.slice(offset, offset + indexBytes),
       );
       offset += indexBytes;
-      batches.push({ materialResourceId, hasWrappingUVs: (batchFlags & 0x01) !== 0, vertices, indices });
+      batches.push({
+        materialResourceId,
+        hasWrappingUVs: (batchFlags & 0x01) !== 0,
+        vertices,
+        indices,
+      });
       vertexCountTotal += vertexCount;
       indexCountTotal += indexCount;
     } else if (batchKind === 1) {
-      throw new Error(`Legacy sampled particle resources are unsupported; repack resource ${resource.id} as v3.17`);
+      throw new Error(
+        `Legacy sampled particle resources are unsupported; repack resource ${resource.id} as v3.17`,
+      );
     } else throw new Error(`Invalid ACTerrain mesh batch kind ${batchKind}`);
   }
   if (offset !== buffer.byteLength)
@@ -152,7 +159,11 @@ async function decodeMesh(resource: EncodedDatResource): Promise<Mesh> {
 function decodeV3Mesh(buffer: ArrayBuffer, resourceId: number): Mesh {
   try {
     const source = parseV3Mesh(buffer);
-    const vertexView = new DataView(source.vertexData.buffer, source.vertexData.byteOffset, source.vertexData.byteLength);
+    const vertexView = new DataView(
+      source.vertexData.buffer,
+      source.vertexData.byteOffset,
+      source.vertexData.byteLength,
+    );
     const vertexCount = source.vertexData.byteLength / 24;
     const vertices = new Float32Array(vertexCount * 8);
     for (let i = 0; i < vertexCount; i++) {
@@ -164,16 +175,28 @@ function decodeV3Mesh(buffer: ArrayBuffer, resourceId: number): Mesh {
       vertices[output + 3] = vertexView.getInt16(input + 12, true) / 32767;
       vertices[output + 4] = vertexView.getInt16(input + 14, true) / 32767;
       vertices[output + 5] = vertexView.getInt16(input + 16, true) / 32767;
-      vertices[output + 6] = readFloat16(vertexView.getUint16(input + 20, true));
-      vertices[output + 7] = readFloat16(vertexView.getUint16(input + 22, true));
+      vertices[output + 6] = readFloat16(
+        vertexView.getUint16(input + 20, true),
+      );
+      vertices[output + 7] = readFloat16(
+        vertexView.getUint16(input + 22, true),
+      );
     }
-    const indexView = new DataView(source.indexData.buffer, source.indexData.byteOffset, source.indexData.byteLength);
+    const indexView = new DataView(
+      source.indexData.buffer,
+      source.indexData.byteOffset,
+      source.indexData.byteLength,
+    );
     const allIndices = new Uint32Array(source.indexData.byteLength / 4);
-    for (let i = 0; i < allIndices.length; i++) allIndices[i] = indexView.getUint32(i * 4, true);
+    for (let i = 0; i < allIndices.length; i++)
+      allIndices[i] = indexView.getUint32(i * 4, true);
     const batches: MeshBatch[] = source.batches.map((batch) => ({
       materialResourceId: batch.materialResourceId,
       vertices,
-      indices: allIndices.slice(batch.firstIndex / 4, batch.firstIndex / 4 + batch.indexCount),
+      indices: allIndices.slice(
+        batch.firstIndex / 4,
+        batch.firstIndex / 4 + batch.indexCount,
+      ),
       hasWrappingUVs: batch.samplerMode === "repeat",
       cullState: batch.cullState,
       samplerMode: batch.samplerMode,
@@ -182,14 +205,72 @@ function decodeV3Mesh(buffer: ArrayBuffer, resourceId: number): Mesh {
       const particles = [];
       for (let i = 0; i < batch.particleCount; i++) {
         const offset = (batch.firstParticle + i) * 240;
-        const view = new DataView(source.particleData.buffer, source.particleData.byteOffset + offset, 240);
-        const vector = (at: number) => [view.getFloat32(at, true), view.getFloat32(at + 4, true), view.getFloat32(at + 8, true)] as [number, number, number];
-        const quaternion = (at: number) => [view.getFloat32(at, true), view.getFloat32(at + 4, true), view.getFloat32(at + 8, true), view.getFloat32(at + 12, true)] as [number, number, number, number];
-        particles.push({ emitterType: view.getInt32(0, true), particleType: view.getInt32(4, true), parentLocal: view.getUint8(8) !== 0, representation: view.getUint8(9), seed: view.getUint32(12, true), hookIndex: view.getInt32(16, true), parentOrigin: vector(20), parentOrientation: quaternion(32), offset: vector(48), offsetDirection: vector(60), minOffset: view.getFloat32(72, true), maxOffset: view.getFloat32(76, true), a: vector(80), minA: view.getFloat32(92, true), maxA: view.getFloat32(96, true), b: vector(100), minB: view.getFloat32(112, true), maxB: view.getFloat32(116, true), c: vector(120), minC: view.getFloat32(132, true), maxC: view.getFloat32(136, true), birthrate: view.getFloat32(140, true), maxParticles: view.getInt32(144, true), initialParticles: view.getInt32(148, true), totalParticles: view.getInt32(152, true), totalSeconds: view.getFloat32(156, true), lifespan: view.getFloat32(160, true), lifespanRandom: view.getFloat32(164, true), startScale: view.getFloat32(168, true), finalScale: view.getFloat32(172, true), scaleRandom: view.getFloat32(176, true), startTranslucency: view.getFloat32(180, true), finalTranslucency: view.getFloat32(184, true), translucencyRandom: view.getFloat32(188, true), dimensions: vector(192), centerOffset: vector(204), planeOrientation: quaternion(216) });
+        const view = new DataView(
+          source.particleData.buffer,
+          source.particleData.byteOffset + offset,
+          240,
+        );
+        const vector = (at: number) =>
+          [
+            view.getFloat32(at, true),
+            view.getFloat32(at + 4, true),
+            view.getFloat32(at + 8, true),
+          ] as [number, number, number];
+        const quaternion = (at: number) =>
+          [
+            view.getFloat32(at, true),
+            view.getFloat32(at + 4, true),
+            view.getFloat32(at + 8, true),
+            view.getFloat32(at + 12, true),
+          ] as [number, number, number, number];
+        particles.push({
+          emitterType: view.getInt32(0, true),
+          particleType: view.getInt32(4, true),
+          parentLocal: view.getUint8(8) !== 0,
+          representation: view.getUint8(9),
+          seed: view.getUint32(12, true),
+          hookIndex: view.getInt32(16, true),
+          parentOrigin: vector(20),
+          parentOrientation: quaternion(32),
+          offset: vector(48),
+          offsetDirection: vector(60),
+          minOffset: view.getFloat32(72, true),
+          maxOffset: view.getFloat32(76, true),
+          a: vector(80),
+          minA: view.getFloat32(92, true),
+          maxA: view.getFloat32(96, true),
+          b: vector(100),
+          minB: view.getFloat32(112, true),
+          maxB: view.getFloat32(116, true),
+          c: vector(120),
+          minC: view.getFloat32(132, true),
+          maxC: view.getFloat32(136, true),
+          birthrate: view.getFloat32(140, true),
+          maxParticles: view.getInt32(144, true),
+          initialParticles: view.getInt32(148, true),
+          totalParticles: view.getInt32(152, true),
+          totalSeconds: view.getFloat32(156, true),
+          lifespan: view.getFloat32(160, true),
+          lifespanRandom: view.getFloat32(164, true),
+          startScale: view.getFloat32(168, true),
+          finalScale: view.getFloat32(172, true),
+          scaleRandom: view.getFloat32(176, true),
+          startTranslucency: view.getFloat32(180, true),
+          finalTranslucency: view.getFloat32(184, true),
+          translucencyRandom: view.getFloat32(188, true),
+          dimensions: vector(192),
+          centerOffset: vector(204),
+          planeOrientation: quaternion(216),
+        });
       }
       batches.push({ materialResourceId: batch.materialResourceId, particles });
     }
-    return { bounds: source.bounds, batches, vertexCount, indexCount: allIndices.length };
+    return {
+      bounds: source.bounds,
+      batches,
+      vertexCount,
+      indexCount: allIndices.length,
+    };
   } catch (error) {
     throw new Error(`Invalid ACTerrain mesh resource ${resourceId}`);
   }

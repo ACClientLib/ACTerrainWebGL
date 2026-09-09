@@ -1,5 +1,11 @@
 import type { SceneView } from "./sceneview";
-import { createDepthBucketQueue, probeTransparency, type DepthBucketQueue, type TransparencyCapabilities, type TransparencyTier } from "./scenetransparency";
+import {
+  createDepthBucketQueue,
+  probeTransparency,
+  type DepthBucketQueue,
+  type TransparencyCapabilities,
+  type TransparencyTier,
+} from "./scenetransparency";
 import type { ScenePass, SceneSubmission } from "./scenesubmission";
 import { SourceOverVertSource } from "../shaders/sourceover.vert";
 import { SceneCompositeFragSource } from "../shaders/scenecomposite.frag";
@@ -20,7 +26,13 @@ interface SceneTargets {
 export class SceneRenderer {
   capabilities: TransparencyCapabilities;
   private readonly drawBuffersIndexed: {
-    blendFuncSeparateiOES?(buf: number, srcRGB: number, dstRGB: number, srcAlpha: number, dstAlpha: number): void;
+    blendFuncSeparateiOES?(
+      buf: number,
+      srcRGB: number,
+      dstRGB: number,
+      srcAlpha: number,
+      dstAlpha: number,
+    ): void;
     blendFunciOES?(buf: number, src: number, dst: number): void;
   } | null;
   private targets: SceneTargets | undefined;
@@ -36,7 +48,8 @@ export class SceneRenderer {
   private repeatSampler: WebGLSampler | undefined;
   private currentCullState: "none" | "front" | "back" | null = null;
   private currentSampler: "clamp" | "repeat" | null = null;
-  private readonly tierCQueue: DepthBucketQueue<number> = createDepthBucketQueue(16);
+  private readonly tierCQueue: DepthBucketQueue<number> =
+    createDepthBucketQueue(16);
   private readonly contextLostHandler = (event: Event) => {
     event.preventDefault();
     invalidateSceneDrawState(this.gl);
@@ -63,13 +76,27 @@ export class SceneRenderer {
   constructor(private readonly gl: WebGL2RenderingContext) {
     this.capabilities = probeTransparency(gl);
     this.drawBuffersIndexed = gl.getExtension("OES_draw_buffers_indexed") as {
-      blendFuncSeparateiOES?(buf: number, srcRGB: number, dstRGB: number, srcAlpha: number, dstAlpha: number): void;
+      blendFuncSeparateiOES?(
+        buf: number,
+        srcRGB: number,
+        dstRGB: number,
+        srcAlpha: number,
+        dstAlpha: number,
+      ): void;
     } | null;
     this.createCompositeResources();
     this.createSamplers();
     gl.frontFace(gl.CCW);
-    gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
-    gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
+    gl.canvas.addEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+      false,
+    );
+    gl.canvas.addEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+      false,
+    );
     this.resize(gl.canvas.width, gl.canvas.height);
   }
 
@@ -77,7 +104,8 @@ export class SceneRenderer {
     const gl = this.gl;
     const vertex = this.compile(gl.VERTEX_SHADER, SourceOverVertSource);
     const fragment = this.compile(gl.FRAGMENT_SHADER, SceneCompositeFragSource);
-    this.compositeProgram = vertex && fragment ? this.link(vertex, fragment) : undefined;
+    this.compositeProgram =
+      vertex && fragment ? this.link(vertex, fragment) : undefined;
     if (vertex) gl.deleteShader(vertex);
     if (fragment) gl.deleteShader(fragment);
     this.compositeVao = gl.createVertexArray() ?? undefined;
@@ -85,38 +113,71 @@ export class SceneRenderer {
     if (this.compositeVao && this.compositeBuffer) {
       gl.bindVertexArray(this.compositeVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.compositeBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+        gl.STATIC_DRAW,
+      );
       gl.enableVertexAttribArray(0);
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       gl.bindVertexArray(null);
     }
-    this.compositeOpaqueLoc = this.compositeProgram ? gl.getUniformLocation(this.compositeProgram, "opaqueTexture") : null;
-    this.compositeAccumulationLoc = this.compositeProgram ? gl.getUniformLocation(this.compositeProgram, "accumulationTexture") : null;
-    this.compositeRevealageLoc = this.compositeProgram ? gl.getUniformLocation(this.compositeProgram, "revealageTexture") : null;
+    this.compositeOpaqueLoc = this.compositeProgram
+      ? gl.getUniformLocation(this.compositeProgram, "opaqueTexture")
+      : null;
+    this.compositeAccumulationLoc = this.compositeProgram
+      ? gl.getUniformLocation(this.compositeProgram, "accumulationTexture")
+      : null;
+    this.compositeRevealageLoc = this.compositeProgram
+      ? gl.getUniformLocation(this.compositeProgram, "revealageTexture")
+      : null;
     const presentVertex = this.compile(gl.VERTEX_SHADER, SourceOverVertSource);
-    const presentFragment = this.compile(gl.FRAGMENT_SHADER, ScenePresentFragSource);
-    this.presentProgram = presentVertex && presentFragment ? this.link(presentVertex, presentFragment) : undefined;
+    const presentFragment = this.compile(
+      gl.FRAGMENT_SHADER,
+      ScenePresentFragSource,
+    );
+    this.presentProgram =
+      presentVertex && presentFragment
+        ? this.link(presentVertex, presentFragment)
+        : undefined;
     if (presentVertex) gl.deleteShader(presentVertex);
     if (presentFragment) gl.deleteShader(presentFragment);
-    this.presentSceneLoc = this.presentProgram ? gl.getUniformLocation(this.presentProgram, "sceneTexture") : null;
+    this.presentSceneLoc = this.presentProgram
+      ? gl.getUniformLocation(this.presentProgram, "sceneTexture")
+      : null;
   }
 
   private createSamplers(): void {
     const gl = this.gl;
     this.clampSampler = gl.createSampler() ?? undefined;
     this.repeatSampler = gl.createSampler() ?? undefined;
-    if (!this.clampSampler || !this.repeatSampler) throw new Error("Unable to allocate scene samplers");
+    if (!this.clampSampler || !this.repeatSampler)
+      throw new Error("Unable to allocate scene samplers");
     for (const sampler of [this.clampSampler, this.repeatSampler]) {
-      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.samplerParameteri(
+        sampler,
+        gl.TEXTURE_MIN_FILTER,
+        gl.LINEAR_MIPMAP_LINEAR,
+      );
       gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     }
-    gl.samplerParameteri(this.clampSampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.samplerParameteri(this.clampSampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.samplerParameteri(
+      this.clampSampler,
+      gl.TEXTURE_WRAP_S,
+      gl.CLAMP_TO_EDGE,
+    );
+    gl.samplerParameteri(
+      this.clampSampler,
+      gl.TEXTURE_WRAP_T,
+      gl.CLAMP_TO_EDGE,
+    );
     gl.samplerParameteri(this.repeatSampler, gl.TEXTURE_WRAP_S, gl.REPEAT);
     gl.samplerParameteri(this.repeatSampler, gl.TEXTURE_WRAP_T, gl.REPEAT);
   }
 
-  get tier(): TransparencyTier { return this.capabilities.tier; }
+  get tier(): TransparencyTier {
+    return this.capabilities.tier;
+  }
 
   resize(width: number, height: number): void {
     if (width <= 0 || height <= 0) return;
@@ -127,10 +188,18 @@ export class SceneRenderer {
     const opaque = this.createColorTexture(width, height, gl.RGBA8);
     const composition = this.createColorTexture(width, height, gl.RGBA8);
     const depth = gl.createRenderbuffer();
-    if (!framebuffer || !opaque || !composition || !depth) throw new Error("Unable to allocate scene targets");
+    if (!framebuffer || !opaque || !composition || !depth)
+      throw new Error("Unable to allocate scene targets");
     gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
-    const targets: SceneTargets = { width, height, opaque, composition, depth, framebuffer };
+    const targets: SceneTargets = {
+      width,
+      height,
+      opaque,
+      composition,
+      depth,
+      framebuffer,
+    };
     if (this.capabilities.tier !== "C") {
       targets.accumulation = this.createColorTexture(width, height, gl.RGBA16F);
       targets.revealage = this.createColorTexture(width, height, gl.R16F);
@@ -145,15 +214,14 @@ export class SceneRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  render(
-    view: SceneView,
-    submissions: readonly SceneSubmission[],
-  ): void {
+  render(view: SceneView, submissions: readonly SceneSubmission[]): void {
     const targets = this.targets;
     if (!targets) return;
     const gl = this.gl;
     invalidateSceneDrawState(gl);
-    const ordered = submissions.filter(submission => !submission.skyPass).sort((a, b) => this.compareKeys(a.key, b.key));
+    const ordered = submissions
+      .filter((submission) => !submission.skyPass)
+      .sort((a, b) => this.compareKeys(a.key, b.key));
     this.currentCullState = null;
     this.currentSampler = null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, targets.framebuffer);
@@ -187,8 +255,14 @@ export class SceneRenderer {
   }
 
   destroy(): void {
-    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.gl.canvas.removeEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+    );
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+    );
     this.destroyTargets();
     if (this.compositeProgram) this.gl.deleteProgram(this.compositeProgram);
     if (this.compositeVao) this.gl.deleteVertexArray(this.compositeVao);
@@ -204,19 +278,30 @@ export class SceneRenderer {
     this.repeatSampler = undefined;
   }
 
-  private drawSky(submissions: readonly SceneSubmission[], skyPass: "background" | "foreground", view: SceneView): void {
+  private drawSky(
+    submissions: readonly SceneSubmission[],
+    skyPass: "background" | "foreground",
+    view: SceneView,
+  ): void {
     const gl = this.gl;
     gl.disable(gl.DEPTH_TEST);
     gl.depthMask(false);
-    const sky = submissions.filter(submission => submission.skyPass === skyPass)
+    const sky = submissions
+      .filter((submission) => submission.skyPass === skyPass)
       .sort((a, b) => (a.skyObjectIndex ?? 0) - (b.skyObjectIndex ?? 0));
     for (const submission of sky) {
       const additive = submission.key.renderClass === "additive";
       gl.enable(gl.BLEND);
-      gl.blendFunc(additive && submission.key.programVariant === "particle" ? gl.ONE : gl.SRC_ALPHA,
-        additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+      gl.blendFunc(
+        additive && submission.key.programVariant === "particle"
+          ? gl.ONE
+          : gl.SRC_ALPHA,
+        additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA,
+      );
       this.applyCullState(submission.key.cullState);
-      this.applySampler(submission.key.sampler === "repeat" ? "repeat" : "clamp");
+      this.applySampler(
+        submission.key.sampler === "repeat" ? "repeat" : "clamp",
+      );
       submission.draw(view, additive ? "additive" : "fallback");
     }
     invalidateSceneDrawState(gl);
@@ -237,21 +322,30 @@ export class SceneRenderer {
   ): void {
     for (const submission of submissions) {
       if (submission.key.renderClass !== renderClass) continue;
-      if (excludeParticles && submission.key.programVariant === "particle") continue;
+      if (excludeParticles && submission.key.programVariant === "particle")
+        continue;
       this.applyCullState(submission.key.cullState);
-      this.applySampler(submission.key.sampler === "repeat" ? "repeat" : "clamp");
+      this.applySampler(
+        submission.key.sampler === "repeat" ? "repeat" : "clamp",
+      );
       submission.draw(view, pass);
     }
   }
 
-  private compareKeys(a: SceneSubmission["key"], b: SceneSubmission["key"]): number {
-    return (Number(b.programVariant === "terrain") - Number(a.programVariant === "terrain")) ||
+  private compareKeys(
+    a: SceneSubmission["key"],
+    b: SceneSubmission["key"],
+  ): number {
+    return (
+      Number(b.programVariant === "terrain") -
+        Number(a.programVariant === "terrain") ||
       a.programVariant.localeCompare(b.programVariant) ||
       a.cullState.localeCompare(b.cullState) ||
       a.meshBatch - b.meshBatch ||
       a.material - b.material ||
       a.sampler.localeCompare(b.sampler) ||
-      Number(a.parity) - Number(b.parity);
+      Number(a.parity) - Number(b.parity)
+    );
   }
 
   private applyCullState(cullState: "none" | "front" | "back"): void {
@@ -269,7 +363,12 @@ export class SceneRenderer {
   private applySampler(sampler: "clamp" | "repeat"): void {
     if (this.currentSampler === sampler) return;
     this.currentSampler = sampler;
-    this.gl.bindSampler(3, sampler === "repeat" ? this.repeatSampler ?? null : this.clampSampler ?? null);
+    this.gl.bindSampler(
+      3,
+      sampler === "repeat"
+        ? (this.repeatSampler ?? null)
+        : (this.clampSampler ?? null),
+    );
   }
 
   private drawTransparency(
@@ -288,16 +387,43 @@ export class SceneRenderer {
       return;
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, targets.framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targets.accumulation!, 0);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, targets.revealage!, 0);
-    gl.drawBuffers(this.capabilities.tier === "A" ? [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1] : [gl.COLOR_ATTACHMENT0]);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      targets.accumulation!,
+      0,
+    );
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT1,
+      gl.TEXTURE_2D,
+      targets.revealage!,
+      0,
+    );
+    gl.drawBuffers(
+      this.capabilities.tier === "A"
+        ? [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]
+        : [gl.COLOR_ATTACHMENT0],
+    );
     gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
-    if (this.capabilities.tier === "A") gl.clearBufferfv(gl.COLOR, 1, [1, 1, 1, 1]);
+    if (this.capabilities.tier === "A")
+      gl.clearBufferfv(gl.COLOR, 1, [1, 1, 1, 1]);
     gl.depthMask(false);
     gl.enable(gl.BLEND);
     if (this.capabilities.tier === "A") {
-      this.drawBuffersIndexed?.blendFuncSeparateiOES?.(0, gl.ONE, gl.ONE, gl.ONE, gl.ONE);
-      this.drawBuffersIndexed?.blendFunciOES?.(1, gl.ZERO, gl.ONE_MINUS_SRC_COLOR);
+      this.drawBuffersIndexed?.blendFuncSeparateiOES?.(
+        0,
+        gl.ONE,
+        gl.ONE,
+        gl.ONE,
+        gl.ONE,
+      );
+      this.drawBuffersIndexed?.blendFunciOES?.(
+        1,
+        gl.ZERO,
+        gl.ONE_MINUS_SRC_COLOR,
+      );
     } else {
       gl.blendFunc(gl.ONE, gl.ONE);
     }
@@ -329,7 +455,9 @@ export class SceneRenderer {
       for (let offset = start; offset < end; offset++) {
         const submission = submissions[this.tierCQueue.values[offset]];
         this.applyCullState(submission.key.cullState);
-        this.applySampler(submission.key.sampler === "repeat" ? "repeat" : "clamp");
+        this.applySampler(
+          submission.key.sampler === "repeat" ? "repeat" : "clamp",
+        );
         submission.draw(view, "fallback");
       }
     }
@@ -345,7 +473,10 @@ export class SceneRenderer {
     gl.useProgram(this.presentProgram);
     gl.bindVertexArray(this.compositeVao);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.capabilities.tier === "C" ? targets.opaque : targets.composition);
+    gl.bindTexture(
+      gl.TEXTURE_2D,
+      this.capabilities.tier === "C" ? targets.opaque : targets.composition,
+    );
     gl.uniform1i(this.presentSceneLoc, 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -354,7 +485,13 @@ export class SceneRenderer {
 
   private drawComposite(targets: SceneTargets): void {
     const gl = this.gl;
-    if (!this.compositeProgram || !this.compositeVao || !targets.accumulation || !targets.revealage) return;
+    if (
+      !this.compositeProgram ||
+      !this.compositeVao ||
+      !targets.accumulation ||
+      !targets.revealage
+    )
+      return;
     invalidateSceneDrawState(gl);
     gl.useProgram(this.compositeProgram);
     gl.bindVertexArray(this.compositeVao);
@@ -382,13 +519,34 @@ export class SceneRenderer {
 
   private attachColorTarget(targets: SceneTargets, color: WebGLTexture): void {
     const gl = this.gl;
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, null, 0);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, targets.depth);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      color,
+      0,
+    );
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT1,
+      gl.TEXTURE_2D,
+      null,
+      0,
+    );
+    gl.framebufferRenderbuffer(
+      gl.FRAMEBUFFER,
+      gl.DEPTH_STENCIL_ATTACHMENT,
+      gl.RENDERBUFFER,
+      targets.depth,
+    );
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
   }
 
-  private createColorTexture(width: number, height: number, format: number): WebGLTexture | undefined {
+  private createColorTexture(
+    width: number,
+    height: number,
+    format: number,
+  ): WebGLTexture | undefined {
     const gl = this.gl;
     const texture = gl.createTexture();
     if (!texture) return undefined;
@@ -416,10 +574,12 @@ export class SceneRenderer {
     const targets = this.targets;
     if (!targets) return;
     const gl = this.gl;
-    gl.deleteTexture(targets.opaque); gl.deleteTexture(targets.composition);
+    gl.deleteTexture(targets.opaque);
+    gl.deleteTexture(targets.composition);
     if (targets.accumulation) gl.deleteTexture(targets.accumulation);
     if (targets.revealage) gl.deleteTexture(targets.revealage);
-    gl.deleteRenderbuffer(targets.depth); gl.deleteFramebuffer(targets.framebuffer);
+    gl.deleteRenderbuffer(targets.depth);
+    gl.deleteFramebuffer(targets.framebuffer);
     this.targets = undefined;
   }
 
@@ -435,7 +595,10 @@ export class SceneRenderer {
     return shader;
   }
 
-  private link(vertex: WebGLShader, fragment: WebGLShader): WebGLProgram | undefined {
+  private link(
+    vertex: WebGLShader,
+    fragment: WebGLShader,
+  ): WebGLProgram | undefined {
     const program = this.gl.createProgram();
     if (!program) return undefined;
     this.gl.attachShader(program, vertex);

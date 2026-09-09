@@ -1,8 +1,5 @@
 import { ExamineParticleRenderer } from "./examineparticlerenderer";
-import {
-  type AcDatClient,
-  type LoadedModelBatch,
-} from "../lib/acdatclient";
+import { type AcDatClient, type LoadedModelBatch } from "../lib/acdatclient";
 import { ExamineObjectLoader } from "./examineobjectloader";
 import { createExamineCamera, type ExamineCamera } from "./examinecamera";
 import { ExamineFragmentShader } from "../shaders/examine.frag";
@@ -15,9 +12,16 @@ type RenderBatch = LoadedModelBatch & {
   indexCount: number;
   order: number;
 };
-type PlacementTransform = { rotation: [number, number, number, number]; scale: [number, number, number] };
+type PlacementTransform = {
+  rotation: [number, number, number, number];
+  scale: [number, number, number];
+};
 
-function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+function compile(
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("Unable to create examine shader");
   gl.shaderSource(shader, source);
@@ -68,13 +72,13 @@ export class ExamineObjectRenderer {
   private particleBatches: LoadedModelBatch[] = [];
   private readonly particles: ExamineParticleRenderer;
   private animationFrame: number | null = null;
-  private bounds: { minimum: [number, number, number]; maximum: [number, number, number] } | null = null;
+  private bounds: {
+    minimum: [number, number, number];
+    maximum: [number, number, number];
+  } | null = null;
   private camera: ExamineCamera | null = null;
   private modelMatrix = new Float32Array([
-    0.9063, 0, -0.4226, 0,
-    0, 1, 0, 0,
-    0.4226, 0, 0.9063, 0,
-    0, 0, 0, 1,
+    0.9063, 0, -0.4226, 0, 0, 1, 0, 0, 0.4226, 0, 0.9063, 0, 0, 0, 0, 1,
   ]);
   private loadController: AbortController | null = null;
   private generation = 0;
@@ -96,12 +100,17 @@ export class ExamineObjectRenderer {
     const vao = gl.createVertexArray();
     const clampSampler = gl.createSampler();
     const repeatSampler = gl.createSampler();
-    if (!vao || !clampSampler || !repeatSampler) throw new Error("Unable to create examine GPU resources");
+    if (!vao || !clampSampler || !repeatSampler)
+      throw new Error("Unable to create examine GPU resources");
     this.vao = vao;
     this.clampSampler = clampSampler;
     this.repeatSampler = repeatSampler;
     for (const sampler of [clampSampler, repeatSampler]) {
-      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.samplerParameteri(
+        sampler,
+        gl.TEXTURE_MIN_FILTER,
+        gl.LINEAR_MIPMAP_LINEAR,
+      );
       gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     }
     gl.samplerParameteri(clampSampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -111,22 +120,35 @@ export class ExamineObjectRenderer {
     this.projectionLocation = gl.getUniformLocation(this.program, "projection");
     this.viewLocation = gl.getUniformLocation(this.program, "view");
     this.modelLocation = gl.getUniformLocation(this.program, "model");
-    this.textureLocation = gl.getUniformLocation(this.program, "materialTexture");
+    this.textureLocation = gl.getUniformLocation(
+      this.program,
+      "materialTexture",
+    );
     this.opacityLocation = gl.getUniformLocation(this.program, "opacity");
     this.luminosityLocation = gl.getUniformLocation(this.program, "luminosity");
     this.diffuseLocation = gl.getUniformLocation(this.program, "diffuse");
-    this.alphaCutoffLocation = gl.getUniformLocation(this.program, "alphaCutoff");
+    this.alphaCutoffLocation = gl.getUniformLocation(
+      this.program,
+      "alphaCutoff",
+    );
     this.alphaModeLocation = gl.getUniformLocation(this.program, "alphaMode");
     this.resize();
   }
 
-  get lastError(): Error | null { return this.error; }
+  get lastError(): Error | null {
+    return this.error;
+  }
   get loadedObject(): import("../lib/acdatclient").WorldObjectData {
     if (!this.loaded) throw new Error("No examine object is loaded");
     return this.loaded;
   }
 
-  async loadObject(guid: number | string, signal?: AbortSignal, modelIndex?: number, _placement?: PlacementTransform): Promise<void> {
+  async loadObject(
+    guid: number | string,
+    signal?: AbortSignal,
+    modelIndex?: number,
+    _placement?: PlacementTransform,
+  ): Promise<void> {
     if (this.destroyed) throw new Error("Examine renderer has been destroyed");
     this.loadController?.abort();
     this.releaseBatches();
@@ -141,19 +163,37 @@ export class ExamineObjectRenderer {
     this.error = null;
     this.loaded = null;
     try {
-      const loaded = await this.loader.load(guid, controller.signal, (phase) => {
-        if (generation === this.generation && !controller.signal.aborted && !this.destroyed) {
-          this.onState?.(phase);
-        }
-      }, modelIndex);
-      if (generation !== this.generation || controller.signal.aborted || this.destroyed) {
+      const loaded = await this.loader.load(
+        guid,
+        controller.signal,
+        (phase) => {
+          if (
+            generation === this.generation &&
+            !controller.signal.aborted &&
+            !this.destroyed
+          ) {
+            this.onState?.(phase);
+          }
+        },
+        modelIndex,
+      );
+      if (
+        generation !== this.generation ||
+        controller.signal.aborted ||
+        this.destroyed
+      ) {
         this.loader.release(loaded);
         return;
       }
       this.releaseBatches();
       this.loaded = loaded.object;
       this.bounds = this.renderedBounds(loaded.batches, loaded.mesh.bounds);
-      this.camera = createExamineCamera(this.bounds, this.canvas.width, this.canvas.height, 1);
+      this.camera = createExamineCamera(
+        this.bounds,
+        this.canvas.width,
+        this.canvas.height,
+        1,
+      );
       this.updateModelMatrix();
       try {
         for (const [order, batch] of loaded.batches.entries()) {
@@ -166,7 +206,10 @@ export class ExamineObjectRenderer {
       } catch (cause) {
         const uploadedCount = this.batches.length + this.particleBatches.length;
         this.releaseBatches();
-        this.loader.release({ ...loaded, batches: loaded.batches.slice(uploadedCount) });
+        this.loader.release({
+          ...loaded,
+          batches: loaded.batches.slice(uploadedCount),
+        });
         throw cause;
       }
       this.particles.setBatches(this.particleBatches);
@@ -198,12 +241,19 @@ export class ExamineObjectRenderer {
 
   resize(): void {
     if (this.destroyed) return;
-    const width = Math.max(1, Math.floor(this.canvas.clientWidth * devicePixelRatio));
-    const height = Math.max(1, Math.floor(this.canvas.clientHeight * devicePixelRatio));
+    const width = Math.max(
+      1,
+      Math.floor(this.canvas.clientWidth * devicePixelRatio),
+    );
+    const height = Math.max(
+      1,
+      Math.floor(this.canvas.clientHeight * devicePixelRatio),
+    );
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
     this.gl.viewport(0, 0, width, height);
-    if (this.bounds) this.camera = createExamineCamera(this.bounds, width, height, 1);
+    if (this.bounds)
+      this.camera = createExamineCamera(this.bounds, width, height, 1);
   }
 
   render(): void {
@@ -229,7 +279,12 @@ export class ExamineObjectRenderer {
       }
     }
     gl.bindVertexArray(null);
-    this.particles.render(this.camera, this.modelMatrix, this.clampSampler, this.repeatSampler);
+    this.particles.render(
+      this.camera,
+      this.modelMatrix,
+      this.clampSampler,
+      this.repeatSampler,
+    );
   }
 
   private startAnimation(): void {
@@ -261,7 +316,8 @@ export class ExamineObjectRenderer {
   private uploadBatch(batch: LoadedModelBatch, order: number): RenderBatch {
     const vertices = batch.mesh.vertices;
     const indices = batch.mesh.indices;
-    if (!vertices || !indices) throw new Error("Examine mesh batch has no indexed geometry");
+    if (!vertices || !indices)
+      throw new Error("Examine mesh batch has no indexed geometry");
     const vertexBuffer = this.gl.createBuffer();
     const indexBuffer = this.gl.createBuffer();
     if (!vertexBuffer || !indexBuffer) {
@@ -273,14 +329,24 @@ export class ExamineObjectRenderer {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.STATIC_DRAW);
     this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indices, this.gl.STATIC_DRAW);
+    this.gl.bufferData(
+      this.gl.ELEMENT_ARRAY_BUFFER,
+      indices,
+      this.gl.STATIC_DRAW,
+    );
     this.gl.enableVertexAttribArray(0);
     this.gl.enableVertexAttribArray(1);
     this.gl.enableVertexAttribArray(2);
     this.gl.vertexAttribPointer(0, 3, this.gl.FLOAT, false, 32, 0);
     this.gl.vertexAttribPointer(1, 3, this.gl.FLOAT, false, 32, 12);
     this.gl.vertexAttribPointer(2, 2, this.gl.FLOAT, false, 32, 24);
-    return { ...batch, vertexBuffer, indexBuffer, indexCount: indices.length, order };
+    return {
+      ...batch,
+      vertexBuffer,
+      indexBuffer,
+      indexCount: indices.length,
+      order,
+    };
   }
 
   private drawBatch(batch: RenderBatch): void {
@@ -301,13 +367,21 @@ export class ExamineObjectRenderer {
     } else gl.disable(gl.BLEND);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, material.texture);
-    const samplerMode = batch.mesh.samplerMode ?? (batch.mesh.hasWrappingUVs ? "repeat" : material.samplerMode);
-    gl.bindSampler(0, samplerMode === "repeat" ? this.repeatSampler : this.clampSampler);
+    const samplerMode =
+      batch.mesh.samplerMode ??
+      (batch.mesh.hasWrappingUVs ? "repeat" : material.samplerMode);
+    gl.bindSampler(
+      0,
+      samplerMode === "repeat" ? this.repeatSampler : this.clampSampler,
+    );
     gl.uniform1f(this.opacityLocation, material.opacity);
     gl.uniform1f(this.luminosityLocation, material.luminosity);
     gl.uniform1f(this.diffuseLocation, material.diffuse);
     gl.uniform1f(this.alphaCutoffLocation, material.alphaCutoff);
-    gl.uniform1i(this.alphaModeLocation, material.alphaMode === "cutout" ? 1 : 0);
+    gl.uniform1i(
+      this.alphaModeLocation,
+      material.alphaMode === "cutout" ? 1 : 0,
+    );
     gl.bindBuffer(gl.ARRAY_BUFFER, batch.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, batch.indexBuffer);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0);
@@ -326,11 +400,15 @@ export class ExamineObjectRenderer {
     for (const batch of this.batches) {
       this.gl.deleteBuffer(batch.vertexBuffer);
       this.gl.deleteBuffer(batch.indexBuffer);
-      releases.push(this.datClient.releaseMaterial(batch.mesh.materialResourceId));
+      releases.push(
+        this.datClient.releaseMaterial(batch.mesh.materialResourceId),
+      );
     }
     this.batches = [];
     for (const batch of this.particleBatches) {
-      releases.push(this.datClient.releaseMaterial(batch.mesh.materialResourceId));
+      releases.push(
+        this.datClient.releaseMaterial(batch.mesh.materialResourceId),
+      );
     }
     this.particleBatches = [];
     // Flush this client's deferred texture deletions after material releases finish.
@@ -342,13 +420,18 @@ export class ExamineObjectRenderer {
 
   private updateModelMatrix(): void {
     if (!this.bounds) return;
-    const center = this.bounds.minimum.map((value, index) =>
-      (value + this.bounds!.maximum[index]) * 0.5,
+    const center = this.bounds.minimum.map(
+      (value, index) => (value + this.bounds!.maximum[index]) * 0.5,
     );
     const display = [0, 1, 0, 0] as [number, number, number, number];
     // ACTerrain meshes use Z-up. The examine camera uses Y-up, so convert
     // AC (X, Y, Z) into examine (X, Z, -Y) before applying display rotation.
-    const acToExamine = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2] as [number, number, number, number];
+    const acToExamine = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2] as [
+      number,
+      number,
+      number,
+      number,
+    ];
     const q = this.multiplyQuaternion(display, acToExamine);
     const rotation = this.quaternionMatrix(q);
     const [cx, cy, cz] = center;
@@ -356,16 +439,31 @@ export class ExamineObjectRenderer {
     const ty = -(rotation[1] * cx + rotation[5] * cy + rotation[9] * cz);
     const tz = -(rotation[2] * cx + rotation[6] * cy + rotation[10] * cz);
     this.modelMatrix = new Float32Array([
-      rotation[0], rotation[1], rotation[2], 0,
-      rotation[4], rotation[5], rotation[6], 0,
-      rotation[8], rotation[9], rotation[10], 0,
-      tx, ty, tz, 1,
+      rotation[0],
+      rotation[1],
+      rotation[2],
+      0,
+      rotation[4],
+      rotation[5],
+      rotation[6],
+      0,
+      rotation[8],
+      rotation[9],
+      rotation[10],
+      0,
+      tx,
+      ty,
+      tz,
+      1,
     ]);
   }
 
   private renderedBounds(
     batches: LoadedModelBatch[],
-    fallback: { minimum: [number, number, number]; maximum: [number, number, number] },
+    fallback: {
+      minimum: [number, number, number];
+      maximum: [number, number, number];
+    },
   ): { minimum: [number, number, number]; maximum: [number, number, number] } {
     const minimum: [number, number, number] = [Infinity, Infinity, Infinity];
     const maximum: [number, number, number] = [-Infinity, -Infinity, -Infinity];
@@ -387,7 +485,10 @@ export class ExamineObjectRenderer {
     return vertexCount > 0 ? { minimum, maximum } : fallback;
   }
 
-  private multiplyQuaternion(a: [number, number, number, number], b: [number, number, number, number]): [number, number, number, number] {
+  private multiplyQuaternion(
+    a: [number, number, number, number],
+    b: [number, number, number, number],
+  ): [number, number, number, number] {
     return [
       a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
       a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
@@ -399,11 +500,22 @@ export class ExamineObjectRenderer {
   private quaternionMatrix(q: [number, number, number, number]): number[] {
     const [x, y, z, w] = q;
     return [
-      1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0,
-      2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0,
-      2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0,
-      0, 0, 0, 1,
+      1 - 2 * (y * y + z * z),
+      2 * (x * y + z * w),
+      2 * (x * z - y * w),
+      0,
+      2 * (x * y - z * w),
+      1 - 2 * (x * x + z * z),
+      2 * (y * z + x * w),
+      0,
+      2 * (x * z + y * w),
+      2 * (y * z - x * w),
+      1 - 2 * (x * x + y * y),
+      0,
+      0,
+      0,
+      0,
+      1,
     ];
   }
 }
-

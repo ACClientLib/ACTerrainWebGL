@@ -50,10 +50,14 @@ export class DatProcessor {
         this.handleMessage(index, event.data as DatProcessorResponse),
       );
       worker.addEventListener("error", (event) =>
-        this.failAll(new Error(event.message || "ACTerrain data worker failed")),
+        this.failAll(
+          new Error(event.message || "ACTerrain data worker failed"),
+        ),
       );
       worker.addEventListener("messageerror", () =>
-        this.failAll(new Error("Unable to read ACTerrain data worker response")),
+        this.failAll(
+          new Error("Unable to read ACTerrain data worker response"),
+        ),
       );
       this.workers.push(worker);
     }
@@ -100,7 +104,10 @@ export class DatProcessor {
           this.activeRequests--;
           if (request.workerIndex !== undefined) {
             this.busyWorkers.delete(request.workerIndex);
-            this.workers[request.workerIndex].postMessage({ id, operation: "cancel" });
+            this.workers[request.workerIndex].postMessage({
+              id,
+              operation: "cancel",
+            });
           }
         } else {
         }
@@ -124,7 +131,10 @@ export class DatProcessor {
     });
   }
 
-  private handleMessage(workerIndex: number, response: DatProcessorResponse): void {
+  private handleMessage(
+    workerIndex: number,
+    response: DatProcessorResponse,
+  ): void {
     const pending = this.pending.get(response.id);
     if (!pending) return;
     this.pending.delete(response.id);

@@ -32,9 +32,15 @@ export class SkyEffectController {
     this.stop();
     this.groupIndex = groupIndex;
     for (const object of objects) {
-      const effects = new Map(object.effects.map(effect => [effect.scriptId, effect]));
+      const effects = new Map(
+        object.effects.map((effect) => [effect.scriptId, effect]),
+      );
       const visiting = new Set<number>();
-      const append = (scriptId: number, start: number, invocation: string): void => {
+      const append = (
+        scriptId: number,
+        start: number,
+        invocation: string,
+      ): void => {
         const effect = effects.get(scriptId);
         if (!effect) {
           throw new Error(`Missing sky script ${scriptId}`);
@@ -51,7 +57,14 @@ export class SkyEffectController {
             if (hook.type === "call" && hook.calledScriptId !== null) {
               append(hook.calledScriptId, time, `${invocation}:call${index}`);
             } else {
-              this.timeline.push({ objectIndex: object.objectIndex, scriptId, hook, createIndex, time, invocation: `${invocation}:${index}` });
+              this.timeline.push({
+                objectIndex: object.objectIndex,
+                scriptId,
+                hook,
+                createIndex,
+                time,
+                invocation: `${invocation}:${index}`,
+              });
             }
             if (hook.type === "create") {
               createIndex++;
@@ -62,7 +75,11 @@ export class SkyEffectController {
         }
       };
       if (object.defaultPesObjectId !== null) {
-        append(object.defaultPesObjectId, 0, `${object.objectIndex}:${object.defaultPesObjectId}`);
+        append(
+          object.defaultPesObjectId,
+          0,
+          `${object.objectIndex}:${object.defaultPesObjectId}`,
+        );
       }
     }
     this.timeline.sort((a, b) => a.time - b.time);
@@ -70,7 +87,10 @@ export class SkyEffectController {
 
   advance(deltaSeconds: number): void {
     this.elapsed += Math.max(0, Math.min(deltaSeconds, 0.25));
-    while (this.cursor < this.timeline.length && this.timeline[this.cursor].time <= this.elapsed) {
+    while (
+      this.cursor < this.timeline.length &&
+      this.timeline[this.cursor].time <= this.elapsed
+    ) {
       const event = this.timeline[this.cursor++];
       const key = `${event.objectIndex}:${event.hook.emitterId}`;
       if (event.hook.type === "create") {
@@ -101,6 +121,8 @@ export class SkyEffectController {
   }
 
   activeParticles(objectIndex: number): ActiveSkyEmitter[] {
-    return [...this.active.values()].filter(value => value.objectIndex === objectIndex);
+    return [...this.active.values()].filter(
+      (value) => value.objectIndex === objectIndex,
+    );
   }
 }

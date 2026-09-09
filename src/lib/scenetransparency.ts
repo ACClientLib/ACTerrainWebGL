@@ -17,8 +17,11 @@ export interface DepthBucketQueue<T> {
   finish(): void;
 }
 
-export function probeTransparency(gl: WebGL2RenderingContext): TransparencyCapabilities {
-  const drawBuffersIndexed = gl.getExtension("OES_draw_buffers_indexed") !== null;
+export function probeTransparency(
+  gl: WebGL2RenderingContext,
+): TransparencyCapabilities {
+  const drawBuffersIndexed =
+    gl.getExtension("OES_draw_buffers_indexed") !== null;
   const colorBufferFloat = gl.getExtension("EXT_color_buffer_float") !== null;
   const floatBlend = gl.getExtension("EXT_float_blend") !== null;
   const framebuffer = gl.createFramebuffer();
@@ -27,14 +30,47 @@ export function probeTransparency(gl: WebGL2RenderingContext): TransparencyCapab
   let complete = false;
   if (framebuffer && accumulation && revealage && colorBufferFloat) {
     gl.bindTexture(gl.TEXTURE_2D, accumulation);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, 1, 1, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA16F,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.HALF_FLOAT,
+      null,
+    );
     gl.bindTexture(gl.TEXTURE_2D, revealage);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, 1, 1, 0, gl.RED, gl.HALF_FLOAT, null);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.R16F,
+      1,
+      1,
+      0,
+      gl.RED,
+      gl.HALF_FLOAT,
+      null,
+    );
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumulation, 0);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, revealage, 0);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      accumulation,
+      0,
+    );
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT1,
+      gl.TEXTURE_2D,
+      revealage,
+      0,
+    );
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    complete =
+      gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     if (complete) {
       gl.viewport(0, 0, 1, 1);
       gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
@@ -48,11 +84,18 @@ export function probeTransparency(gl: WebGL2RenderingContext): TransparencyCapab
   if (accumulation) gl.deleteTexture(accumulation);
   if (revealage) gl.deleteTexture(revealage);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  const tier: TransparencyTier = complete && drawBuffersIndexed && floatBlend ? "A" : complete && floatBlend ? "B" : "C";
+  const tier: TransparencyTier =
+    complete && drawBuffersIndexed && floatBlend
+      ? "A"
+      : complete && floatBlend
+        ? "B"
+        : "C";
   return { tier, drawBuffersIndexed, colorBufferFloat, floatBlend };
 }
 
-export function createDepthBucketQueue<T = number>(bucketCount = 16): DepthBucketQueue<T> {
+export function createDepthBucketQueue<T = number>(
+  bucketCount = 16,
+): DepthBucketQueue<T> {
   const counts = new Uint32Array(bucketCount);
   const offsets = new Uint32Array(bucketCount + 1);
   const cursors = new Uint32Array(bucketCount + 1);
@@ -65,7 +108,11 @@ export function createDepthBucketQueue<T = number>(bucketCount = 16): DepthBucke
     counts,
     offsets,
     values,
-    clear() { counts.fill(0); offsets.fill(0); length = 0; },
+    clear() {
+      counts.fill(0);
+      offsets.fill(0);
+      length = 0;
+    },
     add(bucket, value) {
       if (length === staging.length) {
         const next = new Uint32Array(staging.length * 2);
@@ -84,7 +131,8 @@ export function createDepthBucketQueue<T = number>(bucketCount = 16): DepthBucke
     },
     finish() {
       offsets[0] = 0;
-      for (let i = 0; i < bucketCount; i++) offsets[i + 1] = offsets[i] + counts[i];
+      for (let i = 0; i < bucketCount; i++)
+        offsets[i + 1] = offsets[i] + counts[i];
       cursors.set(offsets);
       for (let i = 0; i < length; i++) {
         const bucket = stagingBuckets[i];

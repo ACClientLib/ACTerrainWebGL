@@ -9,20 +9,28 @@ export class DatImageClient {
   private readonly baseUrl: string;
 
   constructor(baseUrl = import.meta.env.VITE_ACTERRAIN_API_URL ?? "") {
-    this.baseUrl = baseUrl.endsWith("/") || baseUrl.length === 0 ? baseUrl : `${baseUrl}/`;
+    this.baseUrl =
+      baseUrl.endsWith("/") || baseUrl.length === 0 ? baseUrl : `${baseUrl}/`;
   }
 
-  url(descriptor: DatImageDescriptor, imageId: number | string, layers: {
-    underlay?: number | string;
-    overlay?: number | string;
-    overlaySecondary?: number | string;
-  } = {}): string {
+  url(
+    descriptor: DatImageDescriptor,
+    imageId: number | string,
+    layers: {
+      underlay?: number | string;
+      overlay?: number | string;
+      overlaySecondary?: number | string;
+    } = {},
+  ): string {
     const template = descriptor.imagesUrl ?? "";
     if (!template) return FALLBACK_IMAGE;
     const canonicalImage = this.canonical(imageId);
     if (canonicalImage === "invalid") return FALLBACK_IMAGE;
     const path = template.replace("{imageId}", canonicalImage);
-    const url = new URL(path.replace(/^\//, ""), new URL(this.baseUrl || window.location.origin + "/"));
+    const url = new URL(
+      path.replace(/^\//, ""),
+      new URL(this.baseUrl || window.location.origin + "/"),
+    );
     for (const [name, value] of Object.entries(layers))
       if (value !== undefined) {
         const canonical = this.canonical(value);
@@ -32,7 +40,11 @@ export class DatImageClient {
     return url.toString();
   }
 
-  async load(descriptor: DatImageDescriptor, imageId: number | string, layers?: Parameters<DatImageClient["url"]>[2]): Promise<HTMLImageElement> {
+  async load(
+    descriptor: DatImageDescriptor,
+    imageId: number | string,
+    layers?: Parameters<DatImageClient["url"]>[2],
+  ): Promise<HTMLImageElement> {
     const image = new Image();
     image.decoding = "async";
     image.src = this.url(descriptor, imageId, layers);
@@ -50,10 +62,16 @@ export class DatImageClient {
   private canonical(value: number | string): string {
     let parsed: bigint;
     if (typeof value === "number") {
-      if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) return "invalid";
+      if (!Number.isInteger(value) || value < 0 || value > 0xffffffff)
+        return "invalid";
       parsed = BigInt(value);
     } else {
-      if (value.length === 0 || value.trim() !== value || !/^(?:\d+|0[xX][0-9a-fA-F]+)$/.test(value)) return "invalid";
+      if (
+        value.length === 0 ||
+        value.trim() !== value ||
+        !/^(?:\d+|0[xX][0-9a-fA-F]+)$/.test(value)
+      )
+        return "invalid";
       try {
         parsed = BigInt(value);
       } catch {

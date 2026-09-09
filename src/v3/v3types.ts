@@ -32,10 +32,17 @@ export interface V3MeshBatchView {
   samplerMode: V3SamplerMode;
 }
 
-export interface V3ParticleBatchView { materialResourceId: number; firstParticle: number; particleCount: number; }
+export interface V3ParticleBatchView {
+  materialResourceId: number;
+  firstParticle: number;
+  particleCount: number;
+}
 
 export interface V3MeshView {
-  bounds: { minimum: [number, number, number]; maximum: [number, number, number] };
+  bounds: {
+    minimum: [number, number, number];
+    maximum: [number, number, number];
+  };
   batches: V3MeshBatchView[];
   particleBatches: V3ParticleBatchView[];
   vertexData: Uint8Array;
@@ -62,19 +69,29 @@ export interface V3AttachedItemView {
   scale: [number, number, number];
 }
 
-export interface V3PlacementChunkView { chunkId: number; groups: V3PlacementGroupView[]; attachedItems: V3AttachedItemView[]; }
+export interface V3PlacementChunkView {
+  chunkId: number;
+  groups: V3PlacementGroupView[];
+  attachedItems: V3AttachedItemView[];
+}
 
 export interface V3SceneModelView {
   originalModelId: number;
   meshResourceId: number;
   dependencyStart: number;
   dependencyCount: number;
-  bounds: { minimum: [number, number, number]; maximum: [number, number, number] };
+  bounds: {
+    minimum: [number, number, number];
+    maximum: [number, number, number];
+  };
 }
 
 export interface V3SceneChunkView {
   id: number;
-  bounds: { minimum: [number, number, number]; maximum: [number, number, number] };
+  bounds: {
+    minimum: [number, number, number];
+    maximum: [number, number, number];
+  };
   placementResourceId: number;
   placementCount: number;
   rangeCount: number;

@@ -16,7 +16,12 @@ export interface TerrainLabel {
   cellId?: number;
 }
 
-interface LabelTile { tileX: number; tileY: number; tileSize: number; labels: TerrainLabel[]; }
+interface LabelTile {
+  tileX: number;
+  tileY: number;
+  tileSize: number;
+  labels: TerrainLabel[];
+}
 
 const TILE_SIZE = 4096;
 const CACHE_NAME = "acterrain-labels-v2";
@@ -43,19 +48,28 @@ export class LabelsClient {
     private readonly overlay: HTMLElement,
     private readonly revision = "legacy",
   ) {
-    this.cachePromise = typeof caches === "undefined"
-      ? null
-      : caches.open(CACHE_NAME).then(async (cache) => {
-          const endpointUrl = new URL(this.endpoint);
-          const entries = await cache.keys();
-          await Promise.all(entries.filter((entry) => {
-            const url = new URL(entry.url);
-            return url.origin === endpointUrl.origin &&
-              (url.pathname === endpointUrl.pathname || url.pathname === `${endpointUrl.pathname}/pois` || url.pathname === `${endpointUrl.pathname}/dungeon`) &&
-              url.searchParams.get("labelsRevision") !== this.revision;
-          }).map((entry) => cache.delete(entry)));
-          return cache;
-        });
+    this.cachePromise =
+      typeof caches === "undefined"
+        ? null
+        : caches.open(CACHE_NAME).then(async (cache) => {
+            const endpointUrl = new URL(this.endpoint);
+            const entries = await cache.keys();
+            await Promise.all(
+              entries
+                .filter((entry) => {
+                  const url = new URL(entry.url);
+                  return (
+                    url.origin === endpointUrl.origin &&
+                    (url.pathname === endpointUrl.pathname ||
+                      url.pathname === `${endpointUrl.pathname}/pois` ||
+                      url.pathname === `${endpointUrl.pathname}/dungeon`) &&
+                    url.searchParams.get("labelsRevision") !== this.revision
+                  );
+                })
+                .map((entry) => cache.delete(entry)),
+            );
+            return cache;
+          });
   }
 
   setEnabled(enabled: boolean): void {
@@ -74,11 +88,13 @@ export class LabelsClient {
   }
 
   loadPois(): void {
-    const promise = this.loadAllPois().catch((error) => {
-      if (!this.lifecycleController.signal.aborted) {
-        console.warn("Unable to load ACTerrain POIs", error);
-      }
-    }).finally(() => this.pending.delete("all-poi"));
+    const promise = this.loadAllPois()
+      .catch((error) => {
+        if (!this.lifecycleController.signal.aborted) {
+          console.warn("Unable to load ACTerrain POIs", error);
+        }
+      })
+      .finally(() => this.pending.delete("all-poi"));
     this.pending.set("all-poi", promise);
   }
 
@@ -99,7 +115,10 @@ export class LabelsClient {
     this.elements.clear();
     this.layoutRevision++;
     this.lastDrawKey = "";
-    if (typeof caches !== "undefined") await Promise.all([CACHE_NAME, ...LEGACY_CACHE_NAMES].map((name) => caches.delete(name)));
+    if (typeof caches !== "undefined")
+      await Promise.all(
+        [CACHE_NAME, ...LEGACY_CACHE_NAMES].map((name) => caches.delete(name)),
+      );
   }
 
   update(camera: BaseCamera, maximum3DDistance?: number): void {
@@ -107,7 +126,10 @@ export class LabelsClient {
     this.maximum3DDistance = maximum3DDistance ?? Number.POSITIVE_INFINITY;
     if (this.dungeonKey !== null) {
       const key = this.dungeonKey;
-      this.loadUrl(key, `${this.endpoint}/dungeon?landblock=${key.split("/")[1]}`);
+      this.loadUrl(
+        key,
+        `${this.endpoint}/dungeon?landblock=${key.split("/")[1]}`,
+      );
       this.draw(camera);
       return;
     }
@@ -132,36 +154,66 @@ export class LabelsClient {
       const centerTileY = Math.floor(camera.Position.y / TILE_SIZE);
       for (let tileY = centerTileY - 1; tileY <= centerTileY + 1; tileY++) {
         for (let tileX = centerTileX - 1; tileX <= centerTileX + 1; tileX++) {
-          if (tileX >= 0 && tileX <= 63 && tileY >= 0 && tileY <= 63) this.load(tileX, tileY, types);
+          if (tileX >= 0 && tileX <= 63 && tileY >= 0 && tileY <= 63)
+            this.load(tileX, tileY, types);
         }
       }
     } else {
       const camera2D = camera as Camera2D;
       const topLeft = camera2D.ScreenToWorld(new Vector3(0, 0, 1));
-      const bottomRight = camera2D.ScreenToWorld(new Vector3(camera2D.ViewportSize.x, camera2D.ViewportSize.y, 1));
-      const minX = Math.max(0, Math.floor(Math.min(topLeft.x, bottomRight.x) / TILE_SIZE));
-      const maxX = Math.min(63, Math.floor(Math.max(topLeft.x, bottomRight.x) / TILE_SIZE));
-      const minY = Math.max(0, Math.floor(Math.min(topLeft.y, bottomRight.y) / TILE_SIZE));
-      const maxY = Math.min(63, Math.floor(Math.max(topLeft.y, bottomRight.y) / TILE_SIZE));
-      for (let tileY = minY; tileY <= maxY; tileY++) for (let tileX = minX; tileX <= maxX; tileX++) this.load(tileX, tileY, types);
+      const bottomRight = camera2D.ScreenToWorld(
+        new Vector3(camera2D.ViewportSize.x, camera2D.ViewportSize.y, 1),
+      );
+      const minX = Math.max(
+        0,
+        Math.floor(Math.min(topLeft.x, bottomRight.x) / TILE_SIZE),
+      );
+      const maxX = Math.min(
+        63,
+        Math.floor(Math.max(topLeft.x, bottomRight.x) / TILE_SIZE),
+      );
+      const minY = Math.max(
+        0,
+        Math.floor(Math.min(topLeft.y, bottomRight.y) / TILE_SIZE),
+      );
+      const maxY = Math.min(
+        63,
+        Math.floor(Math.max(topLeft.y, bottomRight.y) / TILE_SIZE),
+      );
+      for (let tileY = minY; tileY <= maxY; tileY++)
+        for (let tileX = minX; tileX <= maxX; tileX++)
+          this.load(tileX, tileY, types);
     }
     this.draw(camera);
   }
 
   private async loadAllPois(): Promise<void> {
-    const url = this.withRevision(this.endpoint.replace(/\/labels$/, "/labels/pois"));
+    const url = this.withRevision(
+      this.endpoint.replace(/\/labels$/, "/labels/pois"),
+    );
     const cache = await this.cachePromise;
     let response = cache ? await cache.match(url) : undefined;
     this.lifecycleController.signal.throwIfAborted();
     if (!response) {
-      response = await fetch(url, { cache: "no-store", signal: this.lifecycleController.signal });
-      if (!response.ok) throw new Error(`POI labels returned HTTP ${response.status}`);
+      response = await fetch(url, {
+        cache: "no-store",
+        signal: this.lifecycleController.signal,
+      });
+      if (!response.ok)
+        throw new Error(`POI labels returned HTTP ${response.status}`);
       this.lifecycleController.signal.throwIfAborted();
       await cache?.put(url, response.clone());
     }
-    const body = (await response.json()) as LabelTile & { Labels?: TerrainLabel[] };
+    const body = (await response.json()) as LabelTile & {
+      Labels?: TerrainLabel[];
+    };
     this.lifecycleController.signal.throwIfAborted();
-    this.loaded.set("all-poi", (body.labels ?? body.Labels ?? []).map((value) => normalizeLabel(value as unknown as Record<string, unknown>)));
+    this.loaded.set(
+      "all-poi",
+      (body.labels ?? body.Labels ?? []).map((value) =>
+        normalizeLabel(value as unknown as Record<string, unknown>),
+      ),
+    );
     this.layoutRevision++;
     this.lastDrawKey = "";
     if (this.lastCamera) this.draw(this.lastCamera);
@@ -169,16 +221,21 @@ export class LabelsClient {
 
   private load(tileX: number, tileY: number, types: string): void {
     const key = `${tileX}/${tileY}/${types}`;
-    this.loadUrl(key, `${this.endpoint}?tileX=${tileX}&tileY=${tileY}&types=${encodeURIComponent(types)}`);
+    this.loadUrl(
+      key,
+      `${this.endpoint}?tileX=${tileX}&tileY=${tileY}&types=${encodeURIComponent(types)}`,
+    );
   }
 
   private loadUrl(key: string, url: string): void {
     if (this.loaded.has(key) || this.pending.has(key)) return;
-    const promise = this.read(key, url).catch((error) => {
-      if (!this.lifecycleController.signal.aborted) {
-        console.warn("Unable to load ACTerrain label tile", error);
-      }
-    }).finally(() => this.pending.delete(key));
+    const promise = this.read(key, url)
+      .catch((error) => {
+        if (!this.lifecycleController.signal.aborted) {
+          console.warn("Unable to load ACTerrain label tile", error);
+        }
+      })
+      .finally(() => this.pending.delete(key));
     this.pending.set(key, promise);
   }
 
@@ -188,14 +245,25 @@ export class LabelsClient {
     let response = cache ? await cache.match(url) : undefined;
     this.lifecycleController.signal.throwIfAborted();
     if (!response) {
-      response = await fetch(url, { cache: "no-store", signal: this.lifecycleController.signal });
-      if (!response.ok) throw new Error(`Label tile returned HTTP ${response.status}`);
+      response = await fetch(url, {
+        cache: "no-store",
+        signal: this.lifecycleController.signal,
+      });
+      if (!response.ok)
+        throw new Error(`Label tile returned HTTP ${response.status}`);
       this.lifecycleController.signal.throwIfAborted();
       await cache?.put(url, response.clone());
     }
-    const body = (await response.json()) as LabelTile & { Labels?: TerrainLabel[] };
+    const body = (await response.json()) as LabelTile & {
+      Labels?: TerrainLabel[];
+    };
     this.lifecycleController.signal.throwIfAborted();
-    this.loaded.set(key, (body.labels ?? body.Labels ?? []).map((value) => normalizeLabel(value as unknown as Record<string, unknown>)));
+    this.loaded.set(
+      key,
+      (body.labels ?? body.Labels ?? []).map((value) =>
+        normalizeLabel(value as unknown as Record<string, unknown>),
+      ),
+    );
     this.layoutRevision++;
     this.lastDrawKey = "";
     if (this.lastCamera) this.draw(this.lastCamera);
@@ -215,7 +283,9 @@ export class LabelsClient {
     const flyingCamera = camera instanceof CameraFlying ? camera : null;
     const is3D = flyingCamera !== null;
     const mapBlend = flyingCamera ? flyingCamera.MapProjectionBlend : 1;
-    const mapZoom = flyingCamera ? flyingCamera.MapProjectionZoom : (camera as Camera2D).Zoom;
+    const mapZoom = flyingCamera
+      ? flyingCamera.MapProjectionZoom
+      : (camera as Camera2D).Zoom;
     const drawKey = [
       this.layoutRevision,
       this.dungeonKey,
@@ -236,7 +306,11 @@ export class LabelsClient {
     this.lastDrawKey = drawKey;
     const visible: TerrainLabel[] = [];
     for (const [key, labels] of this.loaded) {
-      if (this.dungeonKey !== null ? key !== this.dungeonKey : key.startsWith("dungeon/")) {
+      if (
+        this.dungeonKey !== null
+          ? key !== this.dungeonKey
+          : key.startsWith("dungeon/")
+      ) {
         continue;
       }
       for (const label of labels) {
@@ -245,7 +319,11 @@ export class LabelsClient {
         }
         if (mapBlend === 0 && label.type === "poi") continue;
         if (mapBlend === 1 && mapZoom < label.minZoom) continue;
-        visible.push(this.dungeonKey === null ? label : { ...label, y: label.y - MAP_SIZE });
+        visible.push(
+          this.dungeonKey === null
+            ? label
+            : { ...label, y: label.y - MAP_SIZE },
+        );
       }
     }
     visible.sort((a, b) => {
@@ -262,16 +340,19 @@ export class LabelsClient {
         );
         if (distanceA !== distanceB) return distanceA - distanceB;
       }
-      return labelPriority(a) - labelPriority(b) || a.minZoom - b.minZoom || a.text.localeCompare(b.text);
+      return (
+        labelPriority(a) - labelPriority(b) ||
+        a.minZoom - b.minZoom ||
+        a.text.localeCompare(b.text)
+      );
     });
-    const occupied: { x: number; y: number; width: number; height: number }[] = [];
+    const occupied: { x: number; y: number; width: number; height: number }[] =
+      [];
     const active = new Set<string>();
     const scaleX = this.overlay.clientWidth / camera.ViewportSize.x;
     const scaleY = this.overlay.clientHeight / camera.ViewportSize.y;
     for (const label of visible) {
-      const z = is3D
-        ? label.z + (label.type === "portal" ? 2.5 : 2)
-        : 1;
+      const z = is3D ? label.z + (label.type === "portal" ? 2.5 : 2) : 1;
       const worldPosition = new Vector3(label.x, label.y, z);
       const mapOpacity = mapZoom >= label.minZoom ? 1 : 0;
       let flyingOpacity = 0;
@@ -282,7 +363,11 @@ export class LabelsClient {
           worldPosition.z - camera.Position.z,
         );
         if (distance <= this.maximum3DDistance) {
-          const distanceRatio = Math.min(1, distance / Math.max(1, Math.min(flyingCamera.Far, this.maximum3DDistance)));
+          const distanceRatio = Math.min(
+            1,
+            distance /
+              Math.max(1, Math.min(flyingCamera.Far, this.maximum3DDistance)),
+          );
           flyingOpacity = 1 - distanceRatio * 0.9;
         }
       }
@@ -296,7 +381,9 @@ export class LabelsClient {
       const y = point.y * scaleY;
       const key = `${label.type}:${label.id}`;
       const width = Math.min(240, Math.max(32, label.text.length * 7 + 12));
-      const labelOffset = is3D ? 0 : Math.min(18, Math.max(4, (camera as Camera2D).Zoom * 24));
+      const labelOffset = is3D
+        ? 0
+        : Math.min(18, Math.max(4, (camera as Camera2D).Zoom * 24));
       const candidateOffsets = [
         [0, labelOffset],
         [0, -labelOffset],
@@ -307,20 +394,42 @@ export class LabelsClient {
         [width / 2 + LABEL_GAP, -labelOffset],
         [-width / 2 - LABEL_GAP, -labelOffset],
       ] as const;
-      let placement: { x: number; y: number; box: { x: number; y: number; width: number; height: number } } | undefined;
+      let placement:
+        | {
+            x: number;
+            y: number;
+            box: { x: number; y: number; width: number; height: number };
+          }
+        | undefined;
       for (const [offsetX, offsetY] of candidateOffsets) {
         const centerX = x + offsetX;
         const centerY = y + offsetY;
-        const box = { x: centerX - width / 2, y: centerY - LABEL_HEIGHT / 2, width, height: LABEL_HEIGHT };
-        const inBounds = box.x < this.overlay.clientWidth && box.x + box.width > 0 && box.y < this.overlay.clientHeight && box.y + box.height > 0;
-        const overlaps = occupied.some(item => item.x < box.x + box.width && item.x + item.width > box.x && item.y < box.y + box.height && item.y + item.height > box.y);
+        const box = {
+          x: centerX - width / 2,
+          y: centerY - LABEL_HEIGHT / 2,
+          width,
+          height: LABEL_HEIGHT,
+        };
+        const inBounds =
+          box.x < this.overlay.clientWidth &&
+          box.x + box.width > 0 &&
+          box.y < this.overlay.clientHeight &&
+          box.y + box.height > 0;
+        const overlaps = occupied.some(
+          (item) =>
+            item.x < box.x + box.width &&
+            item.x + item.width > box.x &&
+            item.y < box.y + box.height &&
+            item.y + item.height > box.y,
+        );
         if (inBounds && !overlaps) {
           placement = { x: centerX, y: centerY, box };
           break;
         }
       }
       if (!placement) continue;
-      occupied.push(placement.box); active.add(key);
+      occupied.push(placement.box);
+      active.add(key);
       let element = this.elements.get(key);
       if (!element) {
         element = document.createElement("div");
@@ -332,7 +441,11 @@ export class LabelsClient {
       element.style.transform = `translate3d(${placement.x}px, ${placement.y}px, 0) translate(-50%, -50%)`;
       element.style.opacity = String(opacity);
     }
-    for (const [key, element] of this.elements) if (!active.has(key)) { element.remove(); this.elements.delete(key); }
+    for (const [key, element] of this.elements)
+      if (!active.has(key)) {
+        element.remove();
+        this.elements.delete(key);
+      }
   }
 
   private removeElements(): void {
@@ -342,7 +455,10 @@ export class LabelsClient {
 }
 
 function labelPriority(label: TerrainLabel): number {
-  return label.insideEnvCell && (label.type === "npc" || label.type === "portal") ? 1 : 0;
+  return label.insideEnvCell &&
+    (label.type === "npc" || label.type === "portal")
+    ? 1
+    : 0;
 }
 
 function normalizeLabel(value: Record<string, unknown>): TerrainLabel {
@@ -355,6 +471,9 @@ function normalizeLabel(value: Record<string, unknown>): TerrainLabel {
     z: Number(value.z ?? value.Z),
     minZoom: Number(value.minZoom ?? value.MinZoom),
     insideEnvCell: Boolean(value.insideEnvCell ?? value.InsideEnvCell),
-    cellId: value.cellId === undefined && value.CellId === undefined ? undefined : Number(value.cellId ?? value.CellId),
+    cellId:
+      value.cellId === undefined && value.CellId === undefined
+        ? undefined
+        : Number(value.cellId ?? value.CellId),
   };
 }

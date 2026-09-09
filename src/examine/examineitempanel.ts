@@ -33,7 +33,9 @@ export class ExamineItemPanel {
       ".ac-examine-item-text",
     )!;
     this.appraisalScrollbar = new ExamineScrollbar(this.description, 0, 365);
-    this.root.querySelector(".ac-examine-item")!.append(this.appraisalScrollbar.root);
+    this.root
+      .querySelector(".ac-examine-item")!
+      .append(this.appraisalScrollbar.root);
     this.root
       .querySelector(".ac-examine-close")!
       .addEventListener("click", onClose);

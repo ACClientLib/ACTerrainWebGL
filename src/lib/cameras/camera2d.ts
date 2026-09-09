@@ -113,44 +113,70 @@ export class Camera2D extends BaseCamera {
   }
 
   private setupMouseEvents() {
-    this.canvas.addEventListener("mousedown", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      if (event.button === 0 || event.button === 2) {
-        this._mouseDown = true;
+    this.canvas.addEventListener(
+      "mousedown",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        if (event.button === 0 || event.button === 2) {
+          this._mouseDown = true;
+          event.preventDefault();
+        }
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
+
+    this.canvas.addEventListener(
+      "mouseup",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        if (event.button === 0 || event.button === 2) {
+          this._mouseDown = false;
+          event.preventDefault();
+        }
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
+
+    this.canvas.addEventListener(
+      "contextmenu",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
         event.preventDefault();
-      }
-    }, { signal: this.renderer.shutdownSignal });
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
-    this.canvas.addEventListener("mouseup", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      if (event.button === 0 || event.button === 2) {
-        this._mouseDown = false;
+    this.canvas.addEventListener(
+      "mousemove",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
         event.preventDefault();
-      }
-    }, { signal: this.renderer.shutdownSignal });
+        this.handleMove(event.clientX, event.clientY);
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
-    this.canvas.addEventListener("contextmenu", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-    }, { signal: this.renderer.shutdownSignal });
-
-    this.canvas.addEventListener("mousemove", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-      this.handleMove(event.clientX, event.clientY);
-    }, { signal: this.renderer.shutdownSignal });
-
-    this.canvas.addEventListener("wheel", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.handleWheel(event);
-    }, { signal: this.renderer.shutdownSignal });
+    this.canvas.addEventListener(
+      "wheel",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.handleWheel(event);
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
     const cancelInput = () => this.cancelPointerInput();
-    window.addEventListener("blur", cancelInput, { signal: this.renderer.shutdownSignal });
-    document.addEventListener("visibilitychange", cancelInput, { signal: this.renderer.shutdownSignal });
-    this.canvas.addEventListener("focusout", cancelInput, { signal: this.renderer.shutdownSignal });
+    window.addEventListener("blur", cancelInput, {
+      signal: this.renderer.shutdownSignal,
+    });
+    document.addEventListener("visibilitychange", cancelInput, {
+      signal: this.renderer.shutdownSignal,
+    });
+    this.canvas.addEventListener("focusout", cancelInput, {
+      signal: this.renderer.shutdownSignal,
+    });
   }
 
   private handlePinch(event: TouchEvent) {
@@ -290,7 +316,10 @@ export class Camera2D extends BaseCamera {
     return screenPosition.transform(this.TranslationMatrix.clone().invert());
   }
 
-  ScreenToWorldRay(screenX: number, screenY: number): { origin: Vector3; direction: Vector3 } {
+  ScreenToWorldRay(
+    screenX: number,
+    screenY: number,
+  ): { origin: Vector3; direction: Vector3 } {
     const clip = this.getClipSpaceMousePosition(screenX, screenY);
     const inverse = this.FrameInverseTransform;
     const origin = new Vector3(clip.x, clip.y, -1).transform(inverse);

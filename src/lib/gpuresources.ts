@@ -34,16 +34,51 @@ interface LegacyCpuMesh {
 export class LegacyMeshGpuOwner {
   readonly registry: ResourceRegistry<LegacyCpuMesh, LegacyGpuMesh>;
   private readonly gl: WebGL2RenderingContext;
-  private readonly restoring = new Set<import("./resourceRegistry").ResourceGeneration<LegacyCpuMesh, LegacyGpuMesh>>();
-  private readonly leases = new Map<number, import("./resourceRegistry").ResourceLease<LegacyCpuMesh, LegacyGpuMesh>>();
-  private readonly contextLostHandler = (event: Event) => { event.preventDefault(); this.registry.contextLost(); };
-  private readonly contextRestoredHandler = () => { this.registry.contextRestored(); };
+  private readonly restoring = new Set<
+    import("./resourceRegistry").ResourceGeneration<
+      LegacyCpuMesh,
+      LegacyGpuMesh
+    >
+  >();
+  private readonly leases = new Map<
+    number,
+    import("./resourceRegistry").ResourceLease<LegacyCpuMesh, LegacyGpuMesh>
+  >();
+  private readonly contextLostHandler = (event: Event) => {
+    event.preventDefault();
+    this.registry.contextLost();
+  };
+  private readonly contextRestoredHandler = () => {
+    this.registry.contextRestored();
+  };
 
-  constructor(gl: WebGL2RenderingContext, budgets = { encodedBytes: 0, decodedBytes: 256 * 1024 * 1024, gpuBytes: 256 * 1024 * 1024, uploadBytesPerFrame: 8 * 1024 * 1024 }) {
+  constructor(
+    gl: WebGL2RenderingContext,
+    budgets = {
+      encodedBytes: 0,
+      decodedBytes: 256 * 1024 * 1024,
+      gpuBytes: 256 * 1024 * 1024,
+      uploadBytesPerFrame: 8 * 1024 * 1024,
+    },
+  ) {
     this.gl = gl;
-    gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
-    gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
-    this.registry = new ResourceRegistry({ budgets, destroyGpu: (mesh) => this.destroy(mesh), contextRestored: (generation) => { this.restoring.add(generation); } });
+    gl.canvas.addEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+      false,
+    );
+    gl.canvas.addEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+      false,
+    );
+    this.registry = new ResourceRegistry({
+      budgets,
+      destroyGpu: (mesh) => this.destroy(mesh),
+      contextRestored: (generation) => {
+        this.restoring.add(generation);
+      },
+    });
   }
 
   get revision(): number {
@@ -58,7 +93,11 @@ export class LegacyMeshGpuOwner {
     }
   }
 
-  upload(id: number, source: LegacyMeshSource, indexed: boolean): LegacyGpuMesh {
+  upload(
+    id: number,
+    source: LegacyMeshSource,
+    indexed: boolean,
+  ): LegacyGpuMesh {
     const current = this.current(id);
     if (current) {
       if (!this.leases.has(id)) {
@@ -74,19 +113,36 @@ export class LegacyMeshGpuOwner {
     const bytes = this.decodedBytes(source);
     const reservation = this.registry.reserveUpload(bytes);
     if (!reservation) throw new Error("Legacy mesh upload budget exceeded");
-    try { this.allocate(cpu); } finally { reservation.release(); }
-    this.registry.publish(id, cpu, { encodedBytes: 0, decodedBytes: bytes }, target, target.gpuBytes);
+    try {
+      this.allocate(cpu);
+    } finally {
+      reservation.release();
+    }
+    this.registry.publish(
+      id,
+      cpu,
+      { encodedBytes: 0, decodedBytes: bytes },
+      target,
+      target.gpuBytes,
+    );
     this.leases.get(id)?.release();
     const lease = this.registry.acquire(id);
     if (lease) this.leases.set(id, lease);
     return target;
   }
 
-  retain(id: number): import("./resourceRegistry").ResourceLease<LegacyCpuMesh, LegacyGpuMesh> | undefined {
+  retain(
+    id: number,
+  ):
+    | import("./resourceRegistry").ResourceLease<LegacyCpuMesh, LegacyGpuMesh>
+    | undefined {
     return this.registry.acquire(id);
   }
 
-  acquire(id: number, source: LegacyMeshSource): import("./resourceRegistry").ResourceLease<LegacyCpuMesh, LegacyGpuMesh> {
+  acquire(
+    id: number,
+    source: LegacyMeshSource,
+  ): import("./resourceRegistry").ResourceLease<LegacyCpuMesh, LegacyGpuMesh> {
     const existing = this.current(id);
     if (!existing) {
       this.upload(id, source, true);
@@ -115,11 +171,21 @@ export class LegacyMeshGpuOwner {
     this.registry.remove(id);
   }
 
-  remove(id: number): void { this.leases.get(id)?.release(); this.leases.delete(id); this.registry.remove(id); }
+  remove(id: number): void {
+    this.leases.get(id)?.release();
+    this.leases.delete(id);
+    this.registry.remove(id);
+  }
 
   dispose(): void {
-    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.gl.canvas.removeEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+    );
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+    );
     for (const lease of this.leases.values()) {
       lease.release();
     }
@@ -139,17 +205,40 @@ export class LegacyMeshGpuOwner {
           vertexBuffer = vertexBuffers.get(item.vertices) ?? null;
           if (!vertexBuffer) {
             vertexBuffer = this.gl.createBuffer();
-            if (!vertexBuffer) throw new Error("Unable to allocate legacy mesh vertex buffer");
+            if (!vertexBuffer)
+              throw new Error("Unable to allocate legacy mesh vertex buffer");
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
-            this.gl.bufferData(this.gl.ARRAY_BUFFER, item.vertices, this.gl.STATIC_DRAW);
+            this.gl.bufferData(
+              this.gl.ARRAY_BUFFER,
+              item.vertices,
+              this.gl.STATIC_DRAW,
+            );
             vertexBuffers.set(item.vertices, vertexBuffer);
             bytes += item.vertices.byteLength;
           }
         }
-        const indexBuffer = cpu.indexed && item.indices ? this.gl.createBuffer() : null;
-        if (item.vertices && !vertexBuffer || cpu.indexed && item.indices && !indexBuffer) throw new Error("Unable to allocate legacy mesh buffer");
-        if (indexBuffer && item.indices) { this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer); this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, item.indices, this.gl.STATIC_DRAW); bytes += item.indices.byteLength; }
-        batches.push({ vertexBuffer, indexBuffer, vertexCount: item.vertices?.length ?? 0, indexCount: item.indices?.length ?? 0 });
+        const indexBuffer =
+          cpu.indexed && item.indices ? this.gl.createBuffer() : null;
+        if (
+          (item.vertices && !vertexBuffer) ||
+          (cpu.indexed && item.indices && !indexBuffer)
+        )
+          throw new Error("Unable to allocate legacy mesh buffer");
+        if (indexBuffer && item.indices) {
+          this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+          this.gl.bufferData(
+            this.gl.ELEMENT_ARRAY_BUFFER,
+            item.indices,
+            this.gl.STATIC_DRAW,
+          );
+          bytes += item.indices.byteLength;
+        }
+        batches.push({
+          vertexBuffer,
+          indexBuffer,
+          vertexCount: item.vertices?.length ?? 0,
+          indexCount: item.indices?.length ?? 0,
+        });
       }
       cpu.target.batches = batches;
       cpu.target.gpuBytes = bytes;
@@ -163,10 +252,22 @@ export class LegacyMeshGpuOwner {
     }
   }
 
-  private restore(generation: import("./resourceRegistry").ResourceGeneration<LegacyCpuMesh, LegacyGpuMesh>): void {
+  private restore(
+    generation: import("./resourceRegistry").ResourceGeneration<
+      LegacyCpuMesh,
+      LegacyGpuMesh
+    >,
+  ): void {
     try {
       this.allocate(generation.cpu);
-      if (!this.registry.attachGpu(generation, generation.cpu.target, generation.cpu.target.gpuBytes)) this.destroy(generation.cpu.target);
+      if (
+        !this.registry.attachGpu(
+          generation,
+          generation.cpu.target,
+          generation.cpu.target.gpuBytes,
+        )
+      )
+        this.destroy(generation.cpu.target);
     } catch {
       this.registry.markUploadPending(generation.id, false);
     }
@@ -218,21 +319,48 @@ export class GpuResourceOwner {
   readonly registry: ResourceRegistry<V3MeshView, GpuMesh>;
   private readonly gl: WebGL2RenderingContext;
   private readonly attributes: MeshAttributeLocations;
-  private readonly restoreQueue = new Set<import("./resourceRegistry").ResourceGeneration<V3MeshView, GpuMesh>>();
-  private readonly contextLostHandler = (event: Event) => { event.preventDefault(); this.contextLost(); };
+  private readonly restoreQueue = new Set<
+    import("./resourceRegistry").ResourceGeneration<V3MeshView, GpuMesh>
+  >();
+  private readonly contextLostHandler = (event: Event) => {
+    event.preventDefault();
+    this.contextLost();
+  };
   private readonly contextRestoredHandler = () => this.contextRestored();
 
-  constructor(gl: WebGL2RenderingContext, attributes: MeshAttributeLocations, budgets = { encodedBytes: 128 * 1024 * 1024, decodedBytes: 256 * 1024 * 1024, gpuBytes: 256 * 1024 * 1024, uploadBytesPerFrame: 8 * 1024 * 1024 }) {
+  constructor(
+    gl: WebGL2RenderingContext,
+    attributes: MeshAttributeLocations,
+    budgets = {
+      encodedBytes: 128 * 1024 * 1024,
+      decodedBytes: 256 * 1024 * 1024,
+      gpuBytes: 256 * 1024 * 1024,
+      uploadBytesPerFrame: 8 * 1024 * 1024,
+    },
+  ) {
     this.gl = gl;
     this.attributes = attributes;
-    gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
-    gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
-    this.samplers = { clamp: this.createSampler(), repeat: this.createSampler() };
+    gl.canvas.addEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+      false,
+    );
+    gl.canvas.addEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+      false,
+    );
+    this.samplers = {
+      clamp: this.createSampler(),
+      repeat: this.createSampler(),
+    };
     this.configureSamplers();
     this.registry = new ResourceRegistry({
       budgets,
       destroyGpu: (mesh) => this.destroyMesh(mesh),
-      contextRestored: (generation) => { this.restoreQueue.add(generation); },
+      contextRestored: (generation) => {
+        this.restoreQueue.add(generation);
+      },
     });
   }
 
@@ -269,7 +397,23 @@ export class GpuResourceOwner {
     }
     try {
       this.uploadMeshBuffers(mesh, indexData, vertexBuffer, indexBuffer, vao);
-      this.registry.publish(id, mesh, { encodedBytes, decodedBytes: mesh.vertexData.byteLength + mesh.indexData.byteLength }, { vertexBuffer, indexBuffer, vao, indexType: useShort ? this.gl.UNSIGNED_SHORT : this.gl.UNSIGNED_INT, indexCount, gpuBytes: uploadBytes }, uploadBytes);
+      this.registry.publish(
+        id,
+        mesh,
+        {
+          encodedBytes,
+          decodedBytes: mesh.vertexData.byteLength + mesh.indexData.byteLength,
+        },
+        {
+          vertexBuffer,
+          indexBuffer,
+          vao,
+          indexType: useShort ? this.gl.UNSIGNED_SHORT : this.gl.UNSIGNED_INT,
+          indexCount,
+          gpuBytes: uploadBytes,
+        },
+        uploadBytes,
+      );
       reservation.release();
       return true;
     } catch (error) {
@@ -295,8 +439,14 @@ export class GpuResourceOwner {
   }
 
   destroy(): void {
-    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.gl.canvas.removeEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+    );
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+    );
     this.registry.replaceDataset();
     this.gl.deleteSampler(this.samplers.clamp);
     this.gl.deleteSampler(this.samplers.repeat);
@@ -310,17 +460,40 @@ export class GpuResourceOwner {
 
   private configureSamplers(): void {
     const gl = this.gl;
-    gl.samplerParameteri(this.samplers.clamp, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.samplerParameteri(
+      this.samplers.clamp,
+      gl.TEXTURE_MIN_FILTER,
+      gl.LINEAR_MIPMAP_LINEAR,
+    );
     gl.samplerParameteri(this.samplers.clamp, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.samplerParameteri(this.samplers.clamp, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.samplerParameteri(this.samplers.clamp, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.samplerParameteri(this.samplers.repeat, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.samplerParameteri(this.samplers.repeat, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.samplerParameteri(
+      this.samplers.clamp,
+      gl.TEXTURE_WRAP_S,
+      gl.CLAMP_TO_EDGE,
+    );
+    gl.samplerParameteri(
+      this.samplers.clamp,
+      gl.TEXTURE_WRAP_T,
+      gl.CLAMP_TO_EDGE,
+    );
+    gl.samplerParameteri(
+      this.samplers.repeat,
+      gl.TEXTURE_MIN_FILTER,
+      gl.LINEAR_MIPMAP_LINEAR,
+    );
+    gl.samplerParameteri(
+      this.samplers.repeat,
+      gl.TEXTURE_MAG_FILTER,
+      gl.LINEAR,
+    );
     gl.samplerParameteri(this.samplers.repeat, gl.TEXTURE_WRAP_S, gl.REPEAT);
     gl.samplerParameteri(this.samplers.repeat, gl.TEXTURE_WRAP_T, gl.REPEAT);
   }
 
-  private createIndexData(mesh: V3MeshView, useShort: boolean): Uint16Array | Uint32Array {
+  private createIndexData(
+    mesh: V3MeshView,
+    useShort: boolean,
+  ): Uint16Array | Uint32Array {
     const indices = new Uint32Array(
       mesh.indexData.buffer,
       mesh.indexData.byteOffset,
@@ -338,15 +511,44 @@ export class GpuResourceOwner {
   ): void {
     this.gl.bindVertexArray(vao);
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, vertexBuffer);
-    this.gl.bufferData(this.gl.ARRAY_BUFFER, mesh.vertexData, this.gl.STATIC_DRAW);
+    this.gl.bufferData(
+      this.gl.ARRAY_BUFFER,
+      mesh.vertexData,
+      this.gl.STATIC_DRAW,
+    );
     this.gl.enableVertexAttribArray(this.attributes.position);
-    this.gl.vertexAttribPointer(this.attributes.position, 3, this.gl.FLOAT, false, 24, 0);
+    this.gl.vertexAttribPointer(
+      this.attributes.position,
+      3,
+      this.gl.FLOAT,
+      false,
+      24,
+      0,
+    );
     this.gl.enableVertexAttribArray(this.attributes.normal);
-    this.gl.vertexAttribPointer(this.attributes.normal, 4, this.gl.SHORT, true, 24, 12);
+    this.gl.vertexAttribPointer(
+      this.attributes.normal,
+      4,
+      this.gl.SHORT,
+      true,
+      24,
+      12,
+    );
     this.gl.enableVertexAttribArray(this.attributes.uv);
-    this.gl.vertexAttribPointer(this.attributes.uv, 2, this.gl.HALF_FLOAT, false, 24, 20);
+    this.gl.vertexAttribPointer(
+      this.attributes.uv,
+      2,
+      this.gl.HALF_FLOAT,
+      false,
+      24,
+      20,
+    );
     this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indexData, this.gl.STATIC_DRAW);
+    this.gl.bufferData(
+      this.gl.ELEMENT_ARRAY_BUFFER,
+      indexData,
+      this.gl.STATIC_DRAW,
+    );
     this.gl.bindVertexArray(null);
   }
 
@@ -356,7 +558,12 @@ export class GpuResourceOwner {
     this.gl.deleteBuffer(mesh.indexBuffer);
   }
 
-  private async restoreMesh(generation: import("./resourceRegistry").ResourceGeneration<V3MeshView, GpuMesh>): Promise<void> {
+  private async restoreMesh(
+    generation: import("./resourceRegistry").ResourceGeneration<
+      V3MeshView,
+      GpuMesh
+    >,
+  ): Promise<void> {
     const mesh = generation.cpu;
     const vertexCount = mesh.vertexData.byteLength / 24;
     const indexCount = mesh.indexData.byteLength / 4;
@@ -377,7 +584,28 @@ export class GpuResourceOwner {
     }
     try {
       this.uploadMeshBuffers(mesh, indexData, vertexBuffer, indexBuffer, vao);
-      if (!this.registry.attachGpu(generation, { vertexBuffer, indexBuffer, vao, indexType: useShort ? this.gl.UNSIGNED_SHORT : this.gl.UNSIGNED_INT, indexCount, gpuBytes: uploadBytes }, uploadBytes)) this.destroyMesh({ vertexBuffer, indexBuffer, vao, indexType: 0, indexCount, gpuBytes: uploadBytes });
+      if (
+        !this.registry.attachGpu(
+          generation,
+          {
+            vertexBuffer,
+            indexBuffer,
+            vao,
+            indexType: useShort ? this.gl.UNSIGNED_SHORT : this.gl.UNSIGNED_INT,
+            indexCount,
+            gpuBytes: uploadBytes,
+          },
+          uploadBytes,
+        )
+      )
+        this.destroyMesh({
+          vertexBuffer,
+          indexBuffer,
+          vao,
+          indexType: 0,
+          indexCount,
+          gpuBytes: uploadBytes,
+        });
       reservation.release();
     } catch (error) {
       this.gl.bindVertexArray(null);

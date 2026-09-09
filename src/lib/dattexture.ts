@@ -21,11 +21,18 @@ export interface TextureResourceEntry {
 export interface IndexedMaterialDefinition {
   imageResourceId: number;
   basePaletteResourceId: number;
-  patches: readonly { replacementPaletteResourceId: number; offset: number; length: number }[];
+  patches: readonly {
+    replacementPaletteResourceId: number;
+    offset: number;
+    length: number;
+  }[];
   clipMap: boolean;
 }
 
-export type ResourceLoader = (id: number, kind: number) => Promise<TextureResourceEntry>;
+export type ResourceLoader = (
+  id: number,
+  kind: number,
+) => Promise<TextureResourceEntry>;
 
 interface IndexedImage {
   width: number;
@@ -59,33 +66,63 @@ interface IndexedGpuCpu {
 const PAL8_MAGIC = 0x384c4150;
 const MATERIALIZATION_BUDGET_MS = 10;
 
-async function decodeTextureBytes(resource: TextureResourceEntry): Promise<ArrayBuffer> {
+async function decodeTextureBytes(
+  resource: TextureResourceEntry,
+): Promise<ArrayBuffer> {
   if (resource.encoding === 0) return resource.bytes;
-  if (resource.encoding !== 1) throw new Error(`Unsupported resource encoding ${resource.encoding}`);
-  return new Response(new Blob([resource.bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+  if (resource.encoding !== 1)
+    throw new Error(`Unsupported resource encoding ${resource.encoding}`);
+  return new Response(
+    new Blob([resource.bytes])
+      .stream()
+      .pipeThrough(new DecompressionStream("gzip")),
+  ).arrayBuffer();
 }
 
 function readIndexed(bytes: ArrayBuffer): IndexedImage {
   const view = new DataView(bytes);
-  if (view.getUint32(0, true) !== ATX8_MAGIC || view.getUint8(4) !== 2 || view.getUint8(5) !== 0 || view.getUint16(6, true) !== 0)
+  if (
+    view.getUint32(0, true) !== ATX8_MAGIC ||
+    view.getUint8(4) !== 2 ||
+    view.getUint8(5) !== 0 ||
+    view.getUint16(6, true) !== 0
+  )
     throw new Error("Invalid indexed ATX8 resource");
-  const width = view.getUint16(8, true), height = view.getUint16(10, true);
-  const componentType = view.getUint8(12), mappingCount = view.getUint16(14, true);
-  const pixelLength = view.getUint32(16, true), pixelOffset = 20;
-  const expected = componentType === 1 ? width * height : componentType === 2 ? width * height * 2 : 0;
-  if (!width || !height || pixelLength !== expected || pixelOffset + pixelLength + mappingCount * 2 !== bytes.byteLength || (componentType === 1 && (mappingCount < 1 || mappingCount > 256)) || (componentType === 2 && mappingCount !== 0))
+  const width = view.getUint16(8, true),
+    height = view.getUint16(10, true);
+  const componentType = view.getUint8(12),
+    mappingCount = view.getUint16(14, true);
+  const pixelLength = view.getUint32(16, true),
+    pixelOffset = 20;
+  const expected =
+    componentType === 1
+      ? width * height
+      : componentType === 2
+        ? width * height * 2
+        : 0;
+  if (
+    !width ||
+    !height ||
+    pixelLength !== expected ||
+    pixelOffset + pixelLength + mappingCount * 2 !== bytes.byteLength ||
+    (componentType === 1 && (mappingCount < 1 || mappingCount > 256)) ||
+    (componentType === 2 && mappingCount !== 0)
+  )
     throw new Error("Invalid indexed ATX8 body");
   const mapping = new Uint16Array(mappingCount);
-  for (let i = 0; i < mappingCount; i++) mapping[i] = view.getUint16(pixelOffset + pixelLength + i * 2, true);
-  const pixels = componentType === 1
-    ? new Uint8Array(bytes, pixelOffset, pixelLength)
-    : new Uint16Array(bytes, pixelOffset, pixelLength / 2);
+  for (let i = 0; i < mappingCount; i++)
+    mapping[i] = view.getUint16(pixelOffset + pixelLength + i * 2, true);
+  const pixels =
+    componentType === 1
+      ? new Uint8Array(bytes, pixelOffset, pixelLength)
+      : new Uint16Array(bytes, pixelOffset, pixelLength / 2);
   return { width, height, componentType, pixels, mapping };
 }
 
 function readPalette(bytes: ArrayBuffer): Palette {
   const view = new DataView(bytes);
-  if (view.getUint32(0, true) !== PAL8_MAGIC || view.getUint16(6, true) !== 0) throw new Error("Invalid PAL8 resource");
+  if (view.getUint32(0, true) !== PAL8_MAGIC || view.getUint16(6, true) !== 0)
+    throw new Error("Invalid PAL8 resource");
   const count = view.getUint16(4, true);
   if (8 + count * 4 !== bytes.byteLength) throw new Error("Invalid PAL8 body");
   return { colors: new Uint8Array(bytes, 8, count * 4) };
@@ -123,7 +160,10 @@ class PaletteTextureMaterializer {
   clear(): void {
     clearTimeout(this.timer);
     this.scheduled = false;
-    const error = new DOMException("Indexed texture materialization was cleared", "AbortError");
+    const error = new DOMException(
+      "Indexed texture materialization was cleared",
+      "AbortError",
+    );
     for (const request of this.pending) request.reject(error);
     this.pending = [];
   }
@@ -136,7 +176,11 @@ class PaletteTextureMaterializer {
     this.contextLost();
   }
 
-  materializeAsync(image: IndexedImage, plane: WebGLTexture, palette: WebGLTexture): Promise<WebGLTexture> {
+  materializeAsync(
+    image: IndexedImage,
+    plane: WebGLTexture,
+    palette: WebGLTexture,
+  ): Promise<WebGLTexture> {
     return new Promise((resolve, reject) => {
       this.pending.push({ image, plane, palette, resolve, reject });
       this.schedule();
@@ -152,7 +196,9 @@ class PaletteTextureMaterializer {
       while (this.pending.length > 0) {
         const request = this.pending.shift()!;
         try {
-          request.resolve(this.materialize(request.image, request.plane, request.palette));
+          request.resolve(
+            this.materialize(request.image, request.plane, request.palette),
+          );
         } catch (error) {
           request.reject(error);
         }
@@ -166,69 +212,158 @@ class PaletteTextureMaterializer {
     if (this.program) return;
     const compile = (type: number, source: string) => {
       const shader = this.gl.createShader(type)!;
-      this.gl.shaderSource(shader, source); this.gl.compileShader(shader);
-      if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) throw new Error(this.gl.getShaderInfoLog(shader) || "Palette shader compilation failed");
+      this.gl.shaderSource(shader, source);
+      this.gl.compileShader(shader);
+      if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS))
+        throw new Error(
+          this.gl.getShaderInfoLog(shader) ||
+            "Palette shader compilation failed",
+        );
       return shader;
     };
     const program = this.gl.createProgram()!;
     const vertex = compile(this.gl.VERTEX_SHADER, PaletteVertSource);
     const fragment = compile(this.gl.FRAGMENT_SHADER, PaletteFragSource);
-    this.gl.attachShader(program, vertex); this.gl.attachShader(program, fragment); this.gl.linkProgram(program);
-    this.gl.deleteShader(vertex); this.gl.deleteShader(fragment);
-    if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) throw new Error(this.gl.getProgramInfoLog(program) || "Palette shader link failed");
-    this.program = program; this.indexLocation = this.gl.getUniformLocation(program, "indexPlane"); this.paletteLocation = this.gl.getUniformLocation(program, "palette");
-    this.framebuffer = this.gl.createFramebuffer(); this.vao = this.gl.createVertexArray();
+    this.gl.attachShader(program, vertex);
+    this.gl.attachShader(program, fragment);
+    this.gl.linkProgram(program);
+    this.gl.deleteShader(vertex);
+    this.gl.deleteShader(fragment);
+    if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS))
+      throw new Error(
+        this.gl.getProgramInfoLog(program) || "Palette shader link failed",
+      );
+    this.program = program;
+    this.indexLocation = this.gl.getUniformLocation(program, "indexPlane");
+    this.paletteLocation = this.gl.getUniformLocation(program, "palette");
+    this.framebuffer = this.gl.createFramebuffer();
+    this.vao = this.gl.createVertexArray();
   }
 
-  materialize(image: IndexedImage, plane: WebGLTexture, palette: WebGLTexture): WebGLTexture {
+  materialize(
+    image: IndexedImage,
+    plane: WebGLTexture,
+    palette: WebGLTexture,
+  ): WebGLTexture {
     this.initialize();
-    const gl = this.gl, result = gl.createTexture();
+    const gl = this.gl,
+      result = gl.createTexture();
     if (!result) throw new Error("Unable to create materialized texture");
-    const oldFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+    const oldFramebuffer = gl.getParameter(
+      gl.FRAMEBUFFER_BINDING,
+    ) as WebGLFramebuffer | null;
     const oldViewport = gl.getParameter(gl.VIEWPORT) as Int32Array;
-    const oldProgram = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
-    const oldVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null;
+    const oldProgram = gl.getParameter(
+      gl.CURRENT_PROGRAM,
+    ) as WebGLProgram | null;
+    const oldVao = gl.getParameter(
+      gl.VERTEX_ARRAY_BINDING,
+    ) as WebGLVertexArrayObject | null;
     const oldBlend = gl.isEnabled(gl.BLEND);
     const oldDepthTest = gl.isEnabled(gl.DEPTH_TEST);
     const oldCullFace = gl.isEnabled(gl.CULL_FACE);
     const oldActive = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
     const oldUnpack = gl.getParameter(gl.UNPACK_ALIGNMENT) as number;
-    gl.activeTexture(gl.TEXTURE0); const oldTexture0 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
-    gl.activeTexture(gl.TEXTURE1); const oldTexture1 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
     gl.activeTexture(gl.TEXTURE0);
-    const oldSampler0 = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
+    const oldTexture0 = gl.getParameter(
+      gl.TEXTURE_BINDING_2D,
+    ) as WebGLTexture | null;
     gl.activeTexture(gl.TEXTURE1);
-    const oldSampler1 = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
+    const oldTexture1 = gl.getParameter(
+      gl.TEXTURE_BINDING_2D,
+    ) as WebGLTexture | null;
+    gl.activeTexture(gl.TEXTURE0);
+    const oldSampler0 = gl.getParameter(
+      gl.SAMPLER_BINDING,
+    ) as WebGLSampler | null;
+    gl.activeTexture(gl.TEXTURE1);
+    const oldSampler1 = gl.getParameter(
+      gl.SAMPLER_BINDING,
+    ) as WebGLSampler | null;
     // Allocate the result on unit 1, whose binding is restored below.
     try {
       // Integer index planes require nearest filtering, supplied by the textures.
       gl.bindSampler(0, null);
       gl.bindSampler(1, null);
       gl.disable(gl.CULL_FACE);
-      const mipLevels = Math.floor(Math.log2(Math.max(image.width, image.height))) + 1;
-      gl.bindTexture(gl.TEXTURE_2D, result); gl.texStorage2D(gl.TEXTURE_2D, mipLevels, gl.RGBA8, image.width, image.height);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, result, 0);
+      const mipLevels =
+        Math.floor(Math.log2(Math.max(image.width, image.height))) + 1;
+      gl.bindTexture(gl.TEXTURE_2D, result);
+      gl.texStorage2D(
+        gl.TEXTURE_2D,
+        mipLevels,
+        gl.RGBA8,
+        image.width,
+        image.height,
+      );
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        result,
+        0,
+      );
       if (!this.framebufferValidated) {
-        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
+        if (
+          gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
+        )
           throw new Error("Palette framebuffer is incomplete");
         this.framebufferValidated = true;
       }
-      gl.viewport(0, 0, image.width, image.height); gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.useProgram(this.program); gl.bindVertexArray(this.vao);
-      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, plane); gl.uniform1i(this.indexLocation, 0);
-      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, palette); gl.uniform1i(this.paletteLocation, 1);
+      gl.viewport(0, 0, image.width, image.height);
+      gl.disable(gl.BLEND);
+      gl.disable(gl.DEPTH_TEST);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(this.program);
+      gl.bindVertexArray(this.vao);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, plane);
+      gl.uniform1i(this.indexLocation, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, palette);
+      gl.uniform1i(this.paletteLocation, 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.bindTexture(gl.TEXTURE_2D, result); gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.bindTexture(gl.TEXTURE_2D, result);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      gl.texParameteri(
+        gl.TEXTURE_2D,
+        gl.TEXTURE_MIN_FILTER,
+        gl.LINEAR_MIPMAP_LINEAR,
+      );
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       return result;
-    } catch (error) { gl.deleteTexture(result); throw error; }
-    finally {
+    } catch (error) {
+      gl.deleteTexture(result);
+      throw error;
+    } finally {
       gl.bindSampler(0, oldSampler0);
       gl.bindSampler(1, oldSampler1);
       if (oldCullFace) {
         gl.enable(gl.CULL_FACE);
       }
-      gl.bindFramebuffer(gl.FRAMEBUFFER, oldFramebuffer); gl.viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]); if (!oldProgram || gl.isProgram(oldProgram)) gl.useProgram(oldProgram); gl.bindVertexArray(oldVao); if (oldBlend) gl.enable(gl.BLEND); else gl.disable(gl.BLEND); if (oldDepthTest) gl.enable(gl.DEPTH_TEST); else gl.disable(gl.DEPTH_TEST); gl.pixelStorei(gl.UNPACK_ALIGNMENT, oldUnpack); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, oldTexture0); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, oldTexture1); gl.activeTexture(oldActive);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, oldFramebuffer);
+      gl.viewport(
+        oldViewport[0],
+        oldViewport[1],
+        oldViewport[2],
+        oldViewport[3],
+      );
+      if (!oldProgram || gl.isProgram(oldProgram)) gl.useProgram(oldProgram);
+      gl.bindVertexArray(oldVao);
+      if (oldBlend) gl.enable(gl.BLEND);
+      else gl.disable(gl.BLEND);
+      if (oldDepthTest) gl.enable(gl.DEPTH_TEST);
+      else gl.disable(gl.DEPTH_TEST);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, oldUnpack);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, oldTexture0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, oldTexture1);
+      gl.activeTexture(oldActive);
     }
   }
 }
@@ -240,15 +375,40 @@ export class IndexedTextureLoader {
   private palettes = new Map<number, Promise<Palette>>();
   private materializer: PaletteTextureMaterializer;
   private readonly gpuRegistry: ResourceRegistry<IndexedGpuCpu, WebGLTexture>;
-  private readonly restoreQueue = new Set<import("./resourceRegistry").ResourceGeneration<IndexedGpuCpu, WebGLTexture>>();
-  private readonly contextLostHandler = (event: Event) => { event.preventDefault(); this.materializer.contextLost(); this.restoreQueue.clear(); this.gpuRegistry.contextLost(); };
-  private readonly contextRestoredHandler = () => this.gpuRegistry.contextRestored();
+  private readonly restoreQueue = new Set<
+    import("./resourceRegistry").ResourceGeneration<IndexedGpuCpu, WebGLTexture>
+  >();
+  private readonly contextLostHandler = (event: Event) => {
+    event.preventDefault();
+    this.materializer.contextLost();
+    this.restoreQueue.clear();
+    this.gpuRegistry.contextLost();
+  };
+  private readonly contextRestoredHandler = () =>
+    this.gpuRegistry.contextRestored();
 
   constructor(private gl: WebGL2RenderingContext) {
     this.materializer = new PaletteTextureMaterializer(gl);
-    this.gpuRegistry = new ResourceRegistry({ budgets: { encodedBytes: 0, decodedBytes: 256 * 1024 * 1024, gpuBytes: 256 * 1024 * 1024, uploadBytesPerFrame: 8 * 1024 * 1024 }, destroyGpu: (texture) => gl.deleteTexture(texture), contextRestored: (generation) => this.restoreQueue.add(generation) });
-    gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
-    gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
+    this.gpuRegistry = new ResourceRegistry({
+      budgets: {
+        encodedBytes: 0,
+        decodedBytes: 256 * 1024 * 1024,
+        gpuBytes: 256 * 1024 * 1024,
+        uploadBytesPerFrame: 8 * 1024 * 1024,
+      },
+      destroyGpu: (texture) => gl.deleteTexture(texture),
+      contextRestored: (generation) => this.restoreQueue.add(generation),
+    });
+    gl.canvas.addEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+      false,
+    );
+    gl.canvas.addEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+      false,
+    );
   }
 
   beginFrame(): void {
@@ -268,8 +428,9 @@ export class IndexedTextureLoader {
   }
 
   clear(): void {
-    const releases = [...this.finals.values(), ...this.planes.values()]
-      .map(cached => cached.promise.then(lease => lease.release()));
+    const releases = [...this.finals.values(), ...this.planes.values()].map(
+      (cached) => cached.promise.then((lease) => lease.release()),
+    );
     this.finals.clear();
     this.planes.clear();
     this.palettes.clear();
@@ -284,8 +445,14 @@ export class IndexedTextureLoader {
   shutdown(): void {
     this.lifecycleController.abort();
     this.materializer.shutdown();
-    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.gl.canvas.removeEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+    );
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+    );
     this.clear();
   }
 
@@ -293,58 +460,115 @@ export class IndexedTextureLoader {
     return this.gpuRegistry.current(this.finalKey(materialId))?.gpu;
   }
 
-  acquire(materialId: number, definition: IndexedMaterialDefinition, load: ResourceLoader): Promise<WebGLTexture> {
+  acquire(
+    materialId: number,
+    definition: IndexedMaterialDefinition,
+    load: ResourceLoader,
+  ): Promise<WebGLTexture> {
     let cached = this.finals.get(materialId);
     if (!cached) {
       const imageKey = String(definition.imageResourceId);
       let created!: IndexedFinalTexture;
-      const promise = this.create(materialId, definition, load).catch(error => { if (this.finals.get(materialId) === created) this.finals.delete(materialId); throw error; });
-      created = { promise, references: 0, imageKey }; cached = created; this.finals.set(materialId, cached);
+      const promise = this.create(materialId, definition, load).catch(
+        (error) => {
+          if (this.finals.get(materialId) === created)
+            this.finals.delete(materialId);
+          throw error;
+        },
+      );
+      created = { promise, references: 0, imageKey };
+      cached = created;
+      this.finals.set(materialId, cached);
     }
     cached.references++;
-    return cached.promise.then(lease => lease.value.gpu!);
+    return cached.promise.then((lease) => lease.value.gpu!);
   }
 
   release(materialId: number): void {
-    const cached = this.finals.get(materialId); if (!cached || --cached.references > 0) return;
-    void cached.promise.then(lease => {
-      if (cached.references || this.finals.get(materialId) !== cached) return;
-      this.finals.delete(materialId);
-      lease.release();
-      this.gpuRegistry.remove(this.finalKey(materialId));
-      this.releasePlane(Number(cached.imageKey));
-    }).catch(() => undefined);
+    const cached = this.finals.get(materialId);
+    if (!cached || --cached.references > 0) return;
+    void cached.promise
+      .then((lease) => {
+        if (cached.references || this.finals.get(materialId) !== cached) return;
+        this.finals.delete(materialId);
+        lease.release();
+        this.gpuRegistry.remove(this.finalKey(materialId));
+        this.releasePlane(Number(cached.imageKey));
+      })
+      .catch(() => undefined);
   }
 
-  private async create(materialId: number, definition: IndexedMaterialDefinition, load: ResourceLoader): Promise<ResourceLease<IndexedGpuCpu, WebGLTexture>> {
-    const imageResource = await load(definition.imageResourceId, 3), image = readIndexed(await decodeTextureBytes(imageResource));
+  private async create(
+    materialId: number,
+    definition: IndexedMaterialDefinition,
+    load: ResourceLoader,
+  ): Promise<ResourceLease<IndexedGpuCpu, WebGLTexture>> {
+    const imageResource = await load(definition.imageResourceId, 3),
+      image = readIndexed(await decodeTextureBytes(imageResource));
     this.lifecycleController.signal.throwIfAborted();
-    const plane = await this.acquirePlane(definition.imageResourceId, image, load);
+    const plane = await this.acquirePlane(
+      definition.imageResourceId,
+      image,
+      load,
+    );
     try {
       const base = await this.palette(definition.basePaletteResourceId, load);
-      const replacements = await Promise.all(definition.patches.map(p => this.palette(p.replacementPaletteResourceId, load)));
+      const replacements = await Promise.all(
+        definition.patches.map((p) =>
+          this.palette(p.replacementPaletteResourceId, load),
+        ),
+      );
       this.lifecycleController.signal.throwIfAborted();
-      const count = image.componentType === 1 ? image.mapping.length : base.colors.length / 4;
+      const count =
+        image.componentType === 1
+          ? image.mapping.length
+          : base.colors.length / 4;
       const colors = new Uint8Array(count * 4);
       for (let local = 0; local < count; local++) {
-        const source = image.componentType === 1 ? image.mapping[local] : local, color = source * 4;
-        if (color + 3 >= base.colors.length) throw new Error(`Palette index ${source} is out of range`);
+        const source = image.componentType === 1 ? image.mapping[local] : local,
+          color = source * 4;
+        if (color + 3 >= base.colors.length)
+          throw new Error(`Palette index ${source} is out of range`);
         let chosen = base.colors.subarray(color, color + 4);
-        definition.patches.forEach((patch, index) => { if (source >= patch.offset && source < patch.offset + patch.length) { const replacement = replacements[index].colors; if (color + 3 < replacement.length) chosen = replacement.subarray(color, color + 4); } });
+        definition.patches.forEach((patch, index) => {
+          if (source >= patch.offset && source < patch.offset + patch.length) {
+            const replacement = replacements[index].colors;
+            if (color + 3 < replacement.length)
+              chosen = replacement.subarray(color, color + 4);
+          }
+        });
         colors.set(chosen, local * 4);
-        if (definition.clipMap && source < 8) colors.fill(0, local * 4, local * 4 + 4);
+        if (definition.clipMap && source < 8)
+          colors.fill(0, local * 4, local * 4 + 4);
       }
       const paletteKey = this.paletteKey(materialId);
       const palette = this.uploadPalette(paletteKey, colors);
       try {
-        const texture = await this.materializer.materializeAsync(image, plane, palette.value.gpu!);
+        const texture = await this.materializer.materializeAsync(
+          image,
+          plane,
+          palette.value.gpu!,
+        );
         this.lifecycleController.signal.throwIfAborted();
-        return this.gpuRegistry.publishAndAcquire(this.finalKey(materialId), { image, palette: colors.slice(), planeId: definition.imageResourceId }, { encodedBytes: 0, decodedBytes: image.width * image.height * 4 }, texture, this.materializedBytes(image));
+        return this.gpuRegistry.publishAndAcquire(
+          this.finalKey(materialId),
+          {
+            image,
+            palette: colors.slice(),
+            planeId: definition.imageResourceId,
+          },
+          { encodedBytes: 0, decodedBytes: image.width * image.height * 4 },
+          texture,
+          this.materializedBytes(image),
+        );
       } finally {
         palette.release();
         this.gpuRegistry.remove(paletteKey);
       }
-    } catch (error) { this.releasePlane(definition.imageResourceId); throw error; }
+    } catch (error) {
+      this.releasePlane(definition.imageResourceId);
+      throw error;
+    }
   }
 
   private palette(id: number, load: ResourceLoader): Promise<Palette> {
@@ -356,7 +580,11 @@ export class IndexedTextureLoader {
     return cached;
   }
 
-  private async acquirePlane(id: number, image: IndexedImage, load: ResourceLoader): Promise<WebGLTexture> {
+  private async acquirePlane(
+    id: number,
+    image: IndexedImage,
+    load: ResourceLoader,
+  ): Promise<WebGLTexture> {
     let cached = this.planes.get(id);
     if (!cached) {
       const promise = Promise.resolve().then(() => {
@@ -374,44 +602,76 @@ export class IndexedTextureLoader {
       this.planes.set(id, cached);
     }
     cached.references++;
-    return cached.promise.then(lease => lease.value.gpu!);
+    return cached.promise.then((lease) => lease.value.gpu!);
   }
 
   private releasePlane(id: number): void {
     const cached = this.planes.get(id);
     if (!cached || --cached.references > 0) return;
-    void cached.promise.then(lease => {
-      if (cached.references || this.planes.get(id) !== cached) return;
-      this.planes.delete(id);
-      lease.release();
-      this.gpuRegistry.remove(this.planeKey(id));
-    }).catch(() => undefined);
+    void cached.promise
+      .then((lease) => {
+        if (cached.references || this.planes.get(id) !== cached) return;
+        this.planes.delete(id);
+        lease.release();
+        this.gpuRegistry.remove(this.planeKey(id));
+      })
+      .catch(() => undefined);
   }
 
-  private finalKey(id: number): number { return -1 - id * 2; }
-  private planeKey(id: number): number { return -2 - id * 2; }
-  private paletteKey(id: number): number { return -3000000000 - id; }
+  private finalKey(id: number): number {
+    return -1 - id * 2;
+  }
+  private planeKey(id: number): number {
+    return -2 - id * 2;
+  }
+  private paletteKey(id: number): number {
+    return -3000000000 - id;
+  }
   private materializedBytes(image: IndexedImage): number {
     let bytes = 0;
-    for (let width = image.width, height = image.height; ; width = Math.max(1, width >> 1), height = Math.max(1, height >> 1)) {
+    for (
+      let width = image.width, height = image.height;
+      ;
+      width = Math.max(1, width >> 1), height = Math.max(1, height >> 1)
+    ) {
       bytes += width * height * 4;
       if (width === 1 && height === 1) return bytes;
     }
   }
 
-  private uploadPalette(id: number, colors: Uint8Array): ResourceLease<IndexedGpuCpu, WebGLTexture> {
-    const texture = this.gl.createTexture(); if (!texture) throw new Error("Unable to create palette texture");
+  private uploadPalette(
+    id: number,
+    colors: Uint8Array,
+  ): ResourceLease<IndexedGpuCpu, WebGLTexture> {
+    const texture = this.gl.createTexture();
+    if (!texture) throw new Error("Unable to create palette texture");
     const gl = this.gl;
     try {
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, colors.length / 4, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, colors);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        colors.length / 4,
+        1,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        colors,
+      );
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      return this.gpuRegistry.publishAndAcquire(id, { palette: colors.slice() }, { encodedBytes: 0, decodedBytes: colors.byteLength }, texture, colors.byteLength);
+      return this.gpuRegistry.publishAndAcquire(
+        id,
+        { palette: colors.slice() },
+        { encodedBytes: 0, decodedBytes: colors.byteLength },
+        texture,
+        colors.byteLength,
+      );
     } catch (error) {
       gl.deleteTexture(texture);
       throw error;
@@ -419,29 +679,104 @@ export class IndexedTextureLoader {
   }
 
   private uploadPlane(image: IndexedImage): WebGLTexture {
-    const texture = this.gl.createTexture(); if (!texture) throw new Error("Unable to create indexed plane");
-    try { this.gl.activeTexture(this.gl.TEXTURE0); this.gl.bindTexture(this.gl.TEXTURE_2D, texture); this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1); const format = this.gl.RED_INTEGER; const type = image.componentType === 1 ? this.gl.UNSIGNED_BYTE : this.gl.UNSIGNED_SHORT; this.gl.texImage2D(this.gl.TEXTURE_2D, 0, image.componentType === 1 ? this.gl.R8UI : this.gl.R16UI, image.width, image.height, 0, format, type, image.pixels); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE); this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE); return texture; } catch (error) { this.gl.deleteTexture(texture); throw error; }
+    const texture = this.gl.createTexture();
+    if (!texture) throw new Error("Unable to create indexed plane");
+    try {
+      this.gl.activeTexture(this.gl.TEXTURE0);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+      this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 1);
+      const format = this.gl.RED_INTEGER;
+      const type =
+        image.componentType === 1
+          ? this.gl.UNSIGNED_BYTE
+          : this.gl.UNSIGNED_SHORT;
+      this.gl.texImage2D(
+        this.gl.TEXTURE_2D,
+        0,
+        image.componentType === 1 ? this.gl.R8UI : this.gl.R16UI,
+        image.width,
+        image.height,
+        0,
+        format,
+        type,
+        image.pixels,
+      );
+      this.gl.texParameteri(
+        this.gl.TEXTURE_2D,
+        this.gl.TEXTURE_MIN_FILTER,
+        this.gl.NEAREST,
+      );
+      this.gl.texParameteri(
+        this.gl.TEXTURE_2D,
+        this.gl.TEXTURE_MAG_FILTER,
+        this.gl.NEAREST,
+      );
+      this.gl.texParameteri(
+        this.gl.TEXTURE_2D,
+        this.gl.TEXTURE_WRAP_S,
+        this.gl.CLAMP_TO_EDGE,
+      );
+      this.gl.texParameteri(
+        this.gl.TEXTURE_2D,
+        this.gl.TEXTURE_WRAP_T,
+        this.gl.CLAMP_TO_EDGE,
+      );
+      return texture;
+    } catch (error) {
+      this.gl.deleteTexture(texture);
+      throw error;
+    }
   }
 
-  private async restore(generation: import("./resourceRegistry").ResourceGeneration<IndexedGpuCpu, WebGLTexture>): Promise<void> {
+  private async restore(
+    generation: import("./resourceRegistry").ResourceGeneration<
+      IndexedGpuCpu,
+      WebGLTexture
+    >,
+  ): Promise<void> {
     try {
       if (generation.cpu.image && generation.id % 2 === 0) {
         const texture = this.uploadPlane(generation.cpu.image);
-        if (!this.gpuRegistry.attachGpu(generation, texture, generation.cpu.image.pixels.byteLength)) this.gl.deleteTexture(texture);
+        if (
+          !this.gpuRegistry.attachGpu(
+            generation,
+            texture,
+            generation.cpu.image.pixels.byteLength,
+          )
+        )
+          this.gl.deleteTexture(texture);
       } else if (generation.cpu.image) {
-          const plane = this.gpuRegistry.current(this.planeKey(generation.cpu.planeId!))?.gpu;
-          if (!plane) throw new Error("Indexed plane is not restored");
-          const palette = this.uploadPalette(this.paletteKey(generation.id), generation.cpu.palette!);
-          try {
-            const texture = this.materializer.materialize(generation.cpu.image, plane, palette.value.gpu!);
-            if (!this.gpuRegistry.attachGpu(generation, texture, this.materializedBytes(generation.cpu.image))) this.gl.deleteTexture(texture);
-          } finally {
-            palette.release();
-            this.gpuRegistry.remove(this.paletteKey(generation.id));
-          }
+        const plane = this.gpuRegistry.current(
+          this.planeKey(generation.cpu.planeId!),
+        )?.gpu;
+        if (!plane) throw new Error("Indexed plane is not restored");
+        const palette = this.uploadPalette(
+          this.paletteKey(generation.id),
+          generation.cpu.palette!,
+        );
+        try {
+          const texture = this.materializer.materialize(
+            generation.cpu.image,
+            plane,
+            palette.value.gpu!,
+          );
+          if (
+            !this.gpuRegistry.attachGpu(
+              generation,
+              texture,
+              this.materializedBytes(generation.cpu.image),
+            )
+          )
+            this.gl.deleteTexture(texture);
+        } finally {
+          palette.release();
+          this.gpuRegistry.remove(this.paletteKey(generation.id));
+        }
       }
       this.gpuRegistry.markUploadPending(generation.id, false);
-    } catch { this.gpuRegistry.markUploadPending(generation.id, true); }
+    } catch {
+      this.gpuRegistry.markUploadPending(generation.id, true);
+    }
   }
 }
 const ATX8_MAGIC = 0x38585441;
@@ -517,10 +852,10 @@ export async function uploadResourceTexture(
     format === 6
       ? profile
       : format <= 2
-      ? TEXTURE_PROFILE.bc
-      : format <= 5
-        ? TEXTURE_PROFILE.etc2
-        : null;
+        ? TEXTURE_PROFILE.bc
+        : format <= 5
+          ? TEXTURE_PROFILE.etc2
+          : null;
   if (expectedProfile !== profile)
     throw new Error(
       `Texture resource ${resource.id} does not match profile ${profile}`,

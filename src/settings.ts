@@ -29,7 +29,9 @@ export interface SettingsData {
   readonly renderScale: number;
 }
 
-export function parseTextureProfilePreference(value: unknown): TextureProfilePreference {
+export function parseTextureProfilePreference(
+  value: unknown,
+): TextureProfilePreference {
   switch (String(value).trim().toLowerCase()) {
     case "bc":
     case "bc / s3tc":
@@ -77,9 +79,14 @@ function load(): typeof defaults {
   try {
     const serialized = window.localStorage.getItem(storageKey);
     const parsed = serialized ? JSON.parse(serialized) : null;
-    saved = parsed && typeof parsed === "object"
-      ? parsed
-      : { textureProfile: window.localStorage.getItem("acterrain.textureProfile") };
+    saved =
+      parsed && typeof parsed === "object"
+        ? parsed
+        : {
+            textureProfile: window.localStorage.getItem(
+              "acterrain.textureProfile",
+            ),
+          };
     if (parsed && typeof parsed === "object") {
       const legacy = parsed as Record<string, unknown>;
       legacyFogDistance = legacy.fogDistanceLandblocks;
@@ -91,12 +98,17 @@ function load(): typeof defaults {
 
   const result = { ...defaults };
   if (typeof saved.distanceLandblocks !== "number") {
-    if (typeof legacyFogDistance === "number") result.distanceLandblocks = legacyFogDistance;
-    else if (typeof legacyObjectDistance === "number") result.distanceLandblocks = legacyObjectDistance;
+    if (typeof legacyFogDistance === "number")
+      result.distanceLandblocks = legacyFogDistance;
+    else if (typeof legacyObjectDistance === "number")
+      result.distanceLandblocks = legacyObjectDistance;
   }
   for (const key of Object.keys(defaults) as Array<keyof typeof defaults>) {
     const value = saved[key];
-    if (typeof value === typeof defaults[key] || (value === null && defaults[key] === null)) {
+    if (
+      typeof value === typeof defaults[key] ||
+      (value === null && defaults[key] === null)
+    ) {
       (result[key] as typeof value) = value;
     }
   }
@@ -112,7 +124,10 @@ let dirty = false;
 function persistAndNotify(): void {
   try {
     const saved = Object.fromEntries(
-      Object.keys(defaults).map((key) => [key, data[key as keyof typeof defaults]]),
+      Object.keys(defaults).map((key) => [
+        key,
+        data[key as keyof typeof defaults],
+      ]),
     );
     window.localStorage.setItem(storageKey, JSON.stringify(saved));
   } catch {
@@ -123,7 +138,10 @@ function persistAndNotify(): void {
 
 const data = new Proxy({ ...load() } as SettingsData, {
   set(target, property: string | symbol, value: unknown): boolean {
-    if (typeof property !== "string" || target[property as keyof SettingsData] === value) {
+    if (
+      typeof property !== "string" ||
+      target[property as keyof SettingsData] === value
+    ) {
       return Reflect.set(target, property, value);
     }
     Reflect.set(target, property, value);

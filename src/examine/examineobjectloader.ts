@@ -17,7 +17,12 @@ export class ExamineObjectLoader {
     try {
       model = await this.datClient.loadServerObjectModel(guid, signal, onPhase);
     } catch (error) {
-      if (modelIndex === undefined || !(error instanceof Error) || !error.message.includes("unsupported")) throw error;
+      if (
+        modelIndex === undefined ||
+        !(error instanceof Error) ||
+        !error.message.includes("unsupported")
+      )
+        throw error;
       onPhase?.("loading model resources");
       const object = await this.datClient.getServerObject(guid, signal);
       const mesh = await this.datClient.mesh(modelIndex, signal);
@@ -45,8 +50,10 @@ export class ExamineObjectLoader {
   }
 
   release(model: LoadedServerObjectModel): void {
-    void Promise.all(model.batches.map((batch) =>
-      this.datClient.releaseMaterial(batch.mesh.materialResourceId),
-    )).then(() => this.datClient.beginFrame());
+    void Promise.all(
+      model.batches.map((batch) =>
+        this.datClient.releaseMaterial(batch.mesh.materialResourceId),
+      ),
+    ).then(() => this.datClient.beginFrame());
   }
 }

@@ -19,7 +19,11 @@ let currentRoute = "";
 
 const updateHash = debounce(
   (newRoute: string) => {
-    history.replaceState(null, "", `${location.pathname}${location.search}#${newRoute}`);
+    history.replaceState(
+      null,
+      "",
+      `${location.pathname}${location.search}#${newRoute}`,
+    );
   },
   300,
   {
@@ -38,12 +42,23 @@ function formatCoordinate(value: number, positive: string, negative: string) {
 function makeRoute(route: CameraRoute) {
   if (route.dungeon) {
     const selection = route.dungeon;
-    const location = selection.cellId?.toString(16).padStart(8, "0")
-      ?? selection.landblock.toString(16).padStart(4, "0");
-    return [route.mode, location,
-      route.position.x.toFixed(3), (-route.position.y).toFixed(3),
-      ...(route.mode === "2d" ? [route.zoom!.toFixed(4)] :
-        [route.position.z.toFixed(3), formatAngle(route.yaw!), formatAngle(route.pitch!), formatAngle(route.roll!)])].join(",");
+    const location =
+      selection.cellId?.toString(16).padStart(8, "0") ??
+      selection.landblock.toString(16).padStart(4, "0");
+    return [
+      route.mode,
+      location,
+      route.position.x.toFixed(3),
+      (-route.position.y).toFixed(3),
+      ...(route.mode === "2d"
+        ? [route.zoom!.toFixed(4)]
+        : [
+            route.position.z.toFixed(3),
+            formatAngle(route.yaw!),
+            formatAngle(route.pitch!),
+            formatAngle(route.roll!),
+          ]),
+    ].join(",");
   }
   const coords = worldToMapCoordinates({
     x: route.position.x,
@@ -74,7 +89,11 @@ export function pushCameraRoute(route: CameraRoute) {
   if (currentRoute == newRoute) return;
   updateHash.cancel();
   currentRoute = newRoute;
-  history.pushState(null, "", `${location.pathname}${location.search}#${newRoute}`);
+  history.pushState(
+    null,
+    "",
+    `${location.pathname}${location.search}#${newRoute}`,
+  );
 }
 
 export function cancelCameraRouteUpdate(): void {
@@ -104,9 +123,7 @@ function parseDungeonLocation(value: string) {
     const cellId = parseInt(value, 16);
     const landblock = cellId >>> 16;
     const cell = cellId & 0xffff;
-    return cell >= 0x100 && cell < 0xfffe
-      ? { landblock, cellId }
-      : undefined;
+    return cell >= 0x100 && cell < 0xfffe ? { landblock, cellId } : undefined;
   }
   return /^[0-9a-f]{4}$/i.test(value)
     ? { landblock: parseInt(value, 16) }
@@ -120,23 +137,49 @@ function parseAngle(value: string) {
 
 export function parseRoute(route: string): CameraRoute | undefined {
   const parts = route.replace(/^#+/, "").split(",");
-  if (parts[0] === "2d" && parts.length === 5 && parseDungeonLocation(parts[1])) {
+  if (
+    parts[0] === "2d" &&
+    parts.length === 5 &&
+    parseDungeonLocation(parts[1])
+  ) {
     const location = parseDungeonLocation(parts[1])!;
     const values = parts.slice(2).map(Number);
-    if (parts.slice(2).some(value => !value.trim()) || values.some(value => !Number.isFinite(value)) || values[2] <= 0) {
+    if (
+      parts.slice(2).some((value) => !value.trim()) ||
+      values.some((value) => !Number.isFinite(value)) ||
+      values[2] <= 0
+    ) {
       return undefined;
     }
-    return { dungeon: location, mode: "2d", position: { x: values[0], y: -values[1], z: 1 }, zoom: values[2] };
+    return {
+      dungeon: location,
+      mode: "2d",
+      position: { x: values[0], y: -values[1], z: 1 },
+      zoom: values[2],
+    };
   }
 
-  if (parts[0] === "3d" && parts.length === 8 && parseDungeonLocation(parts[1])) {
+  if (
+    parts[0] === "3d" &&
+    parts.length === 8 &&
+    parseDungeonLocation(parts[1])
+  ) {
     const location = parseDungeonLocation(parts[1])!;
     const values = parts.slice(2).map(Number);
-    if (parts.slice(2).some(value => !value.trim()) || values.some(value => !Number.isFinite(value))) {
+    if (
+      parts.slice(2).some((value) => !value.trim()) ||
+      values.some((value) => !Number.isFinite(value))
+    ) {
       return undefined;
     }
-    return { dungeon: location, mode: "3d", position: { x: values[0], y: -values[1], z: values[2] },
-      yaw: values[3] * Math.PI / 180, pitch: values[4] * Math.PI / 180, roll: values[5] * Math.PI / 180 };
+    return {
+      dungeon: location,
+      mode: "3d",
+      position: { x: values[0], y: -values[1], z: values[2] },
+      yaw: (values[3] * Math.PI) / 180,
+      pitch: (values[4] * Math.PI) / 180,
+      roll: (values[5] * Math.PI) / 180,
+    };
   }
 
   if (parts[0] === "2d" && parts.length === 4) {
@@ -166,7 +209,11 @@ export function parseRoute(route: string): CameraRoute | undefined {
     const yaw = parseAngle(parts[4]);
     const pitch = parseAngle(parts[5]);
     const roll = parseAngle(parts[6]);
-    if ([northSouth, eastWest, z, yaw, pitch, roll].some((value) => value === undefined))
+    if (
+      [northSouth, eastWest, z, yaw, pitch, roll].some(
+        (value) => value === undefined,
+      )
+    )
       return undefined;
     const position = mapCoordinatesToWorld(
       Coordinates.FromCoordinates(northSouth!, eastWest!, z!),

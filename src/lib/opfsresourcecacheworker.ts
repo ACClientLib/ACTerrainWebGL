@@ -519,7 +519,10 @@ function acknowledgeWrites(): void {
 }
 
 function pendingWriteCount(): number {
-  return [...pendingWrites.values()].reduce((total, writes) => total + writes.size, 0);
+  return [...pendingWrites.values()].reduce(
+    (total, writes) => total + writes.size,
+    0,
+  );
 }
 
 function completeLifecycleFlushes(): void {
@@ -548,7 +551,8 @@ function queuePendingWrite(
 ): void {
   const writes = pendingWrites.get(namespace)!;
   const previous = writes.get(key);
-  if (previous) queuedBytes = Math.max(0, queuedBytes - previous.bytes.byteLength);
+  if (previous)
+    queuedBytes = Math.max(0, queuedBytes - previous.bytes.byteLength);
   writes.set(key, value);
   queuedBytes += value.bytes.byteLength;
 }
@@ -800,7 +804,8 @@ async function handleControl(task: ControlTask): Promise<void> {
     if (task.operation === "flush") {
       lifecycleFlushesRequested++;
       lifecycleFlushes.push(task.id);
-      if (lifecycleFlushStartedAt === 0) lifecycleFlushStartedAt = performance.now();
+      if (lifecycleFlushStartedAt === 0)
+        lifecycleFlushStartedAt = performance.now();
       flushDue = true;
       return;
     }
@@ -836,7 +841,9 @@ async function handleControl(task: ControlTask): Promise<void> {
   }
 }
 
-async function configure(request: Extract<CacheWorkerRequest, { operation: "configure" }>): Promise<void> {
+async function configure(
+  request: Extract<CacheWorkerRequest, { operation: "configure" }>,
+): Promise<void> {
   desiredBytesByNamespace.set(
     request.namespace,
     Math.ceil(request.cacheFootprintBytes * 1.15),
@@ -848,8 +855,12 @@ async function configure(request: Extract<CacheWorkerRequest, { operation: "conf
   desiredBytes = Math.max(desiredBytes, cacheBytes());
   await updateEstimate(true);
   const nonCacheUsage = Math.max(0, estimatedUsage - cacheBytes());
-  const available = Math.max(0, estimatedQuota - nonCacheUsage - QUOTA_RESERVE_BYTES);
-  cacheLimitBytes = estimatedQuota > 0 ? Math.min(desiredBytes, available) : desiredBytes;
+  const available = Math.max(
+    0,
+    estimatedQuota - nonCacheUsage - QUOTA_RESERVE_BYTES,
+  );
+  cacheLimitBytes =
+    estimatedQuota > 0 ? Math.min(desiredBytes, available) : desiredBytes;
   evictIfNeeded();
   post({ type: "diagnostics", diagnostics: diagnostics() });
   post({ type: "result", id: request.id });
@@ -1005,7 +1016,11 @@ async function pump(): Promise<void> {
       }
       if (compactionDue) {
         await new Promise((resolve) => setTimeout(resolve, 0));
-        if ((!shutdownRequested && readQueue.length === 0 || shutdownRequested) && !flushDue)
+        if (
+          ((!shutdownRequested && readQueue.length === 0) ||
+            shutdownRequested) &&
+          !flushDue
+        )
           await compact();
         continue;
       }
@@ -1068,7 +1083,9 @@ async function initialize(): Promise<void> {
     if (!navigator.storage?.getDirectory)
       throw new Error("OPFS is unavailable");
     const parent = await navigator.storage.getDirectory();
-    root = await parent.getDirectoryHandle("acterrain-format16", { create: true });
+    root = await parent.getDirectoryHandle("acterrain-format16", {
+      create: true,
+    });
     for (const namespace of CACHE_NAMESPACES)
       states.set(namespace, await openNamespace(namespace));
     enabled = true;
@@ -1131,14 +1148,24 @@ scope.onmessage = (event) => {
     for (const [key, value] of request.entries) {
       queuePendingWrite(request.namespace, key, value);
     }
-    acceptedWrites.push({ id: request.id, namespace: request.namespace, queuedAt: Date.now() });
+    acceptedWrites.push({
+      id: request.id,
+      namespace: request.namespace,
+      queuedAt: Date.now(),
+    });
     flushDue = true;
     void pump();
     post({ type: "diagnostics", diagnostics: diagnostics() });
     return;
   }
   if (request.operation === "configure") {
-    void configure(request).catch((error) => post({ type: "error", id: request.id, message: error instanceof Error ? error.message : String(error) }));
+    void configure(request).catch((error) =>
+      post({
+        type: "error",
+        id: request.id,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
     return;
   }
   controlQueue.push(request);

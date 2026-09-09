@@ -57,13 +57,27 @@ export class SceneGeometryResources {
 
   constructor(private readonly gl: WebGL2RenderingContext) {
     this.createPrograms();
-    gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
-    gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
+    gl.canvas.addEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+      false,
+    );
+    gl.canvas.addEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+      false,
+    );
   }
 
   dispose(): void {
-    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.gl.canvas.removeEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+    );
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+    );
     this.gl.deleteProgram(this.program);
     this.gl.deleteProgram(this.particleProgram);
     this.program = null;
@@ -72,32 +86,75 @@ export class SceneGeometryResources {
 
   private createPrograms(): void {
     const gl = this.gl;
-    const vertex = glhelpers.createShader(gl, gl.VERTEX_SHADER, Building3DVertSource);
-    const fragment = glhelpers.createShader(gl, gl.FRAGMENT_SHADER, Building3DFragSource);
-    this.program = vertex && fragment ? glhelpers.createProgram(gl, vertex, fragment) : null;
+    const vertex = glhelpers.createShader(
+      gl,
+      gl.VERTEX_SHADER,
+      Building3DVertSource,
+    );
+    const fragment = glhelpers.createShader(
+      gl,
+      gl.FRAGMENT_SHADER,
+      Building3DFragSource,
+    );
+    this.program =
+      vertex && fragment ? glhelpers.createProgram(gl, vertex, fragment) : null;
     if (vertex) gl.deleteShader(vertex);
     if (fragment) gl.deleteShader(fragment);
 
-    const particleVertex = glhelpers.createShader(gl, gl.VERTEX_SHADER, ParticleVertSource);
-    const particleFragment = glhelpers.createShader(gl, gl.FRAGMENT_SHADER, ParticleFragSource);
-    this.particleProgram = particleVertex && particleFragment ? glhelpers.createProgram(gl, particleVertex, particleFragment) : null;
+    const particleVertex = glhelpers.createShader(
+      gl,
+      gl.VERTEX_SHADER,
+      ParticleVertSource,
+    );
+    const particleFragment = glhelpers.createShader(
+      gl,
+      gl.FRAGMENT_SHADER,
+      ParticleFragSource,
+    );
+    this.particleProgram =
+      particleVertex && particleFragment
+        ? glhelpers.createProgram(gl, particleVertex, particleFragment)
+        : null;
     if (particleVertex) gl.deleteShader(particleVertex);
     if (particleFragment) gl.deleteShader(particleFragment);
 
-    const uniform = (program: WebGLProgram | null, name: string) => program ? gl.getUniformLocation(program, name) : null;
+    const uniform = (program: WebGLProgram | null, name: string) =>
+      program ? gl.getUniformLocation(program, name) : null;
     this.uniforms = {
-      acYOrigin: uniform(this.program, "acYOrigin"), xWorld: uniform(this.program, "xWorld"), cameraMode: uniform(this.program, "cameraMode"), texture: uniform(this.program, "buildingTexture"),
-      diffuse: uniform(this.program, "diffuseAmount"), luminosity: uniform(this.program, "luminosity"), opacity: uniform(this.program, "opacity"),
-      alphaMode: uniform(this.program, "alphaMode"), alphaCutoff: uniform(this.program, "alphaCutoff"), renderPass: uniform(this.program, "renderPass"),
-      cameraPosition: uniform(this.program, "cameraPosition"), fogColor: uniform(this.program, "fogColor"), fogStart: uniform(this.program, "fogStart"),
-      fogEnd: uniform(this.program, "fogEnd"), fogEnabled: uniform(this.program, "fogEnabled"), lightDirection: uniform(this.program, "lightDirection"),
-      sunlightColor: uniform(this.program, "sunlightColor"), ambientColor: uniform(this.program, "ambientColor"),
+      acYOrigin: uniform(this.program, "acYOrigin"),
+      xWorld: uniform(this.program, "xWorld"),
+      cameraMode: uniform(this.program, "cameraMode"),
+      texture: uniform(this.program, "buildingTexture"),
+      diffuse: uniform(this.program, "diffuseAmount"),
+      luminosity: uniform(this.program, "luminosity"),
+      opacity: uniform(this.program, "opacity"),
+      alphaMode: uniform(this.program, "alphaMode"),
+      alphaCutoff: uniform(this.program, "alphaCutoff"),
+      renderPass: uniform(this.program, "renderPass"),
+      cameraPosition: uniform(this.program, "cameraPosition"),
+      fogColor: uniform(this.program, "fogColor"),
+      fogStart: uniform(this.program, "fogStart"),
+      fogEnd: uniform(this.program, "fogEnd"),
+      fogEnabled: uniform(this.program, "fogEnabled"),
+      lightDirection: uniform(this.program, "lightDirection"),
+      sunlightColor: uniform(this.program, "sunlightColor"),
+      ambientColor: uniform(this.program, "ambientColor"),
     };
     this.particleUniforms = {
-      acYOrigin: uniform(this.particleProgram, "acYOrigin"), xWorld: uniform(this.particleProgram, "xWorld"), texture: uniform(this.particleProgram, "particleTexture"), cameraRight: uniform(this.particleProgram, "cameraRight"),
-      cameraUp: uniform(this.particleProgram, "cameraUp"), opacity: uniform(this.particleProgram, "materialOpacity"), alphaMode: uniform(this.particleProgram, "alphaMode"), alphaCutoff: uniform(this.particleProgram, "alphaCutoff"), renderPass: uniform(this.particleProgram, "renderPass"),
-      cameraPosition: uniform(this.particleProgram, "cameraPosition"), fogColor: uniform(this.particleProgram, "fogColor"), fogStart: uniform(this.particleProgram, "fogStart"),
-      fogEnd: uniform(this.particleProgram, "fogEnd"), fogEnabled: uniform(this.particleProgram, "fogEnabled"),
+      acYOrigin: uniform(this.particleProgram, "acYOrigin"),
+      xWorld: uniform(this.particleProgram, "xWorld"),
+      texture: uniform(this.particleProgram, "particleTexture"),
+      cameraRight: uniform(this.particleProgram, "cameraRight"),
+      cameraUp: uniform(this.particleProgram, "cameraUp"),
+      opacity: uniform(this.particleProgram, "materialOpacity"),
+      alphaMode: uniform(this.particleProgram, "alphaMode"),
+      alphaCutoff: uniform(this.particleProgram, "alphaCutoff"),
+      renderPass: uniform(this.particleProgram, "renderPass"),
+      cameraPosition: uniform(this.particleProgram, "cameraPosition"),
+      fogColor: uniform(this.particleProgram, "fogColor"),
+      fogStart: uniform(this.particleProgram, "fogStart"),
+      fogEnd: uniform(this.particleProgram, "fogEnd"),
+      fogEnabled: uniform(this.particleProgram, "fogEnabled"),
     };
   }
 }

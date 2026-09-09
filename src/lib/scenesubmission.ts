@@ -11,7 +11,10 @@ export interface SceneRenderKey {
   readonly parity: boolean;
 }
 
-export function cullForTransform(cullState: V3CullState, negativeDeterminant: boolean): V3CullState {
+export function cullForTransform(
+  cullState: V3CullState,
+  negativeDeterminant: boolean,
+): V3CullState {
   return negativeDeterminant
     ? cullState === "front"
       ? "back"
@@ -21,7 +24,8 @@ export function cullForTransform(cullState: V3CullState, negativeDeterminant: bo
     : cullState;
 }
 
-export type ScenePass = "opaque" | "color" | "revealage" | "additive" | "fallback";
+export type ScenePass =
+  "opaque" | "color" | "revealage" | "additive" | "fallback";
 
 /** A draw owned by a producer but ordered and state-managed by SceneRenderer. */
 export interface SceneSubmission {

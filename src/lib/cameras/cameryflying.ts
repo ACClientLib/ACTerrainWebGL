@@ -126,7 +126,9 @@ export class CameraFlying extends BaseCamera {
     if (this.MapProjectionBlend === 0) {
       return projection;
     }
-    const halfHeight = this.canvas.height * settings.data.renderScale / (2 * this.MapProjectionZoom);
+    const halfHeight =
+      (this.canvas.height * settings.data.renderScale) /
+      (2 * this.MapProjectionZoom);
     const orthographic = new Matrix4().ortho({
       left: -halfHeight * aspect,
       right: halfHeight * aspect,
@@ -137,8 +139,10 @@ export class CameraFlying extends BaseCamera {
     });
     // Normalize perspective at the ground plane for an even change in scale.
     for (let i = 0; i < 16; i++) {
-      projection[i] = projection[i] / this.MapProjectionHeight * (1 - this.MapProjectionBlend)
-        + orthographic[i] * this.MapProjectionBlend;
+      projection[i] =
+        (projection[i] / this.MapProjectionHeight) *
+          (1 - this.MapProjectionBlend) +
+        orthographic[i] * this.MapProjectionBlend;
     }
     return projection;
   }
@@ -165,69 +169,109 @@ export class CameraFlying extends BaseCamera {
     Promise.resolve().then(() => this.setupMobileJoysticks());
 
     // Mouse events for looking around
-    this.canvas.addEventListener("mousedown", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      if (event.button === 2) {
-        this._mouseDown = true;
-        this._ignoreNextPointerLockMove = true;
-        this.canvas.requestPointerLock();
-        event.preventDefault();
-      }
-    }, { signal: this.renderer.shutdownSignal });
+    this.canvas.addEventListener(
+      "mousedown",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        if (event.button === 2) {
+          this._mouseDown = true;
+          this._ignoreNextPointerLockMove = true;
+          this.canvas.requestPointerLock();
+          event.preventDefault();
+        }
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
-    this.canvas.addEventListener("mouseup", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      if (event.button === 2) {
-        this._mouseDown = false;
-        this._ignoreNextPointerLockMove = false;
-        document.exitPointerLock();
-        event.preventDefault();
-      }
-    }, { signal: this.renderer.shutdownSignal });
+    this.canvas.addEventListener(
+      "mouseup",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        if (event.button === 2) {
+          this._mouseDown = false;
+          this._ignoreNextPointerLockMove = false;
+          document.exitPointerLock();
+          event.preventDefault();
+        }
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
-    document.addEventListener("pointerlockchange", () => {
-      if (document.pointerLockElement === this.canvas) {
-        this._ignoreNextPointerLockMove = true;
-      } else {
+    document.addEventListener(
+      "pointerlockchange",
+      () => {
+        if (document.pointerLockElement === this.canvas) {
+          this._ignoreNextPointerLockMove = true;
+        } else {
+          this._ignoreNextPointerLockMove = false;
+          this.cancelPointerInput();
+        }
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
+    document.addEventListener(
+      "pointerlockerror",
+      () => {
         this._ignoreNextPointerLockMove = false;
         this.cancelPointerInput();
-      }
-    }, { signal: this.renderer.shutdownSignal });
-    document.addEventListener("pointerlockerror", () => {
-      this._ignoreNextPointerLockMove = false;
-      this.cancelPointerInput();
-    }, { signal: this.renderer.shutdownSignal });
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
-    this.canvas.addEventListener("contextmenu", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-    }, { signal: this.renderer.shutdownSignal });
+    this.canvas.addEventListener(
+      "contextmenu",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        event.preventDefault();
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
-    this.canvas.addEventListener("mousemove", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      if (this._mouseDown && document.pointerLockElement === this.canvas) {
-        if (this._ignoreNextPointerLockMove) {
-          this._ignoreNextPointerLockMove = false;
+    this.canvas.addEventListener(
+      "mousemove",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        if (this._mouseDown && document.pointerLockElement === this.canvas) {
+          if (this._ignoreNextPointerLockMove) {
+            this._ignoreNextPointerLockMove = false;
+            return;
+          }
+          this.handleMouseLook(event.movementX, event.movementY);
+          this.mousePos.x = event.clientX;
+          this.mousePos.y = event.clientY;
           return;
         }
-        this.handleMouseLook(event.movementX, event.movementY);
-        this.mousePos.x = event.clientX;
-        this.mousePos.y = event.clientY;
-        return;
-      }
-      this.handleMove(event.clientX, event.clientY);
-    }, { signal: this.renderer.shutdownSignal });
+        this.handleMove(event.clientX, event.clientY);
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
     // Keyboard events for movement
-    window.addEventListener("keydown", (event) => {
-      if (this.renderer.currentCamera != this || isTextEditingTarget(event.target)) return;
-      this._keys[event.code.toLowerCase()] = true;
-    }, { signal: this.renderer.shutdownSignal });
+    window.addEventListener(
+      "keydown",
+      (event) => {
+        if (
+          this.renderer.currentCamera != this ||
+          isTextEditingTarget(event.target)
+        )
+          return;
+        this._keys[event.code.toLowerCase()] = true;
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
-    window.addEventListener("keyup", (event) => {
-      if (this.renderer.currentCamera != this || isTextEditingTarget(event.target)) return;
-      this._keys[event.code.toLowerCase()] = false;
-    }, { signal: this.renderer.shutdownSignal });
+    window.addEventListener(
+      "keyup",
+      (event) => {
+        if (
+          this.renderer.currentCamera != this ||
+          isTextEditingTarget(event.target)
+        )
+          return;
+        this._keys[event.code.toLowerCase()] = false;
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
 
     const cancelInput = () => {
       this._keys = {};
@@ -237,21 +281,32 @@ export class CameraFlying extends BaseCamera {
       this._mobileLook.y = 0;
       this._mobileInputActive = false;
       this.cancelPointerInput();
-      if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+      if (document.pointerLockElement === this.canvas)
+        document.exitPointerLock();
     };
-    window.addEventListener("blur", cancelInput, { signal: this.renderer.shutdownSignal });
-    document.addEventListener("visibilitychange", cancelInput, { signal: this.renderer.shutdownSignal });
-    this.canvas.addEventListener("focusout", cancelInput, { signal: this.renderer.shutdownSignal });
+    window.addEventListener("blur", cancelInput, {
+      signal: this.renderer.shutdownSignal,
+    });
+    document.addEventListener("visibilitychange", cancelInput, {
+      signal: this.renderer.shutdownSignal,
+    });
+    this.canvas.addEventListener("focusout", cancelInput, {
+      signal: this.renderer.shutdownSignal,
+    });
 
     // Mouse wheel for speed adjustment
-    this.canvas.addEventListener("wheel", (event) => {
-      if (this.renderer.currentCamera != this) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this._moveSpeed *= event.deltaY > 0 ? 0.9 : 1.1;
-      this._moveSpeed = Math.max(0.1, Math.min(2000, this._moveSpeed));
-      this.renderer.updateFlyingCameraControls();
-    }, { signal: this.renderer.shutdownSignal });
+    this.canvas.addEventListener(
+      "wheel",
+      (event) => {
+        if (this.renderer.currentCamera != this) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this._moveSpeed *= event.deltaY > 0 ? 0.9 : 1.1;
+        this._moveSpeed = Math.max(0.1, Math.min(2000, this._moveSpeed));
+        this.renderer.updateFlyingCameraControls();
+      },
+      { signal: this.renderer.shutdownSignal },
+    );
   }
 
   private setupMobileJoysticks() {
@@ -259,8 +314,8 @@ export class CameraFlying extends BaseCamera {
     if (!controls) return;
 
     const isTouchDevice =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(pointer: coarse)").matches ||
+      (typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches) ||
       navigator.maxTouchPoints > 0 ||
       typeof window.ontouchstart !== "undefined";
     if (isTouchDevice) controls.classList.add("touch-device");
@@ -320,45 +375,73 @@ export class CameraFlying extends BaseCamera {
           Math.hypot(this._mobileLook.x, this._mobileLook.y) > 0;
       };
 
-      element.addEventListener("pointerdown", (event) => {
-        if (this.renderer.currentCamera != this || event.pointerType === "mouse") return;
-        event.preventDefault();
-        pointerId = event.pointerId;
-        if (typeof element.setPointerCapture === "function") {
-          element.setPointerCapture(pointerId);
-        }
-        element.classList.add("active");
-        update(event.clientX, event.clientY);
-      }, { signal: this.renderer.shutdownSignal });
-      element.addEventListener("pointermove", (event) => {
-        if (event.pointerId !== pointerId) return;
-        event.preventDefault();
-        update(event.clientX, event.clientY);
-      }, { signal: this.renderer.shutdownSignal });
-      element.addEventListener("pointerup", (event) => {
-        if (event.pointerId === pointerId) clear();
-      }, { signal: this.renderer.shutdownSignal });
-      element.addEventListener("pointercancel", (event) => {
-        if (event.pointerId === pointerId) clear();
-      }, { signal: this.renderer.shutdownSignal });
+      element.addEventListener(
+        "pointerdown",
+        (event) => {
+          if (
+            this.renderer.currentCamera != this ||
+            event.pointerType === "mouse"
+          )
+            return;
+          event.preventDefault();
+          pointerId = event.pointerId;
+          if (typeof element.setPointerCapture === "function") {
+            element.setPointerCapture(pointerId);
+          }
+          element.classList.add("active");
+          update(event.clientX, event.clientY);
+        },
+        { signal: this.renderer.shutdownSignal },
+      );
+      element.addEventListener(
+        "pointermove",
+        (event) => {
+          if (event.pointerId !== pointerId) return;
+          event.preventDefault();
+          update(event.clientX, event.clientY);
+        },
+        { signal: this.renderer.shutdownSignal },
+      );
+      element.addEventListener(
+        "pointerup",
+        (event) => {
+          if (event.pointerId === pointerId) clear();
+        },
+        { signal: this.renderer.shutdownSignal },
+      );
+      element.addEventListener(
+        "pointercancel",
+        (event) => {
+          if (event.pointerId === pointerId) clear();
+        },
+        { signal: this.renderer.shutdownSignal },
+      );
 
-      element.addEventListener("touchstart", (event) => {
-        if (pointerId !== null || touchId !== null) return;
-        const touch = event.changedTouches[0];
-        if (!touch) return;
-        event.preventDefault();
-        touchId = touch.identifier;
-        element.classList.add("active");
-        update(touch.clientX, touch.clientY);
-      }, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
-      element.addEventListener("touchmove", (event) => {
-        const touch = Array.from(event.changedTouches).find(
-          (changedTouch) => changedTouch.identifier === touchId,
-        );
-        if (!touch) return;
-        event.preventDefault();
-        update(touch.clientX, touch.clientY);
-      }, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
+      element.addEventListener(
+        "touchstart",
+        (event) => {
+          if (pointerId !== null || touchId !== null) return;
+          const touch = event.changedTouches[0];
+          if (!touch) return;
+          event.preventDefault();
+          touchId = touch.identifier;
+          element.classList.add("active");
+          update(touch.clientX, touch.clientY);
+        },
+        { ...{ passive: false }, signal: this.renderer.shutdownSignal },
+      );
+      element.addEventListener(
+        "touchmove",
+        (event) => {
+          const touch = Array.from(event.changedTouches).find(
+            (changedTouch) => changedTouch.identifier === touchId,
+          );
+          if (!touch) return;
+          event.preventDefault();
+          update(touch.clientX, touch.clientY);
+        },
+        { ...{ passive: false }, signal: this.renderer.shutdownSignal },
+      );
       const endTouch = (event: TouchEvent) => {
         if (touchId === null) return;
         const ended = Array.from(event.changedTouches).some(
@@ -366,8 +449,14 @@ export class CameraFlying extends BaseCamera {
         );
         if (ended) clear();
       };
-      element.addEventListener("touchend", endTouch, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
-      element.addEventListener("touchcancel", endTouch, { ...{ passive: false }, signal: this.renderer.shutdownSignal });
+      element.addEventListener("touchend", endTouch, {
+        ...{ passive: false },
+        signal: this.renderer.shutdownSignal,
+      });
+      element.addEventListener("touchcancel", endTouch, {
+        ...{ passive: false },
+        signal: this.renderer.shutdownSignal,
+      });
     };
 
     setupJoystick("movement-joystick", this._mobileMovement, () => {
@@ -420,7 +509,10 @@ export class CameraFlying extends BaseCamera {
     const moveDistance = (this._moveSpeed * speedMultiplier * dt) / 1000;
 
     const horizontalForward = new Vector3(this._forward.x, this._forward.y, 0);
-    const horizontalLength = Math.hypot(horizontalForward.x, horizontalForward.y);
+    const horizontalLength = Math.hypot(
+      horizontalForward.x,
+      horizontalForward.y,
+    );
     if (horizontalLength > 0) horizontalForward.scale(1 / horizontalLength);
     if (Math.hypot(this._mobileMovement.x, this._mobileMovement.y) > 0) {
       const movementRight = new Vector3(
@@ -430,18 +522,21 @@ export class CameraFlying extends BaseCamera {
       );
       // Touch movement has its own rate. Do not multiply it by MoveSpeed:
       // changing the desktop control must not change joystick sensitivity.
-      const mobileMoveDistance =
-        (this._mobileMoveSensitivity * dt) / 1000;
+      const mobileMoveDistance = (this._mobileMoveSensitivity * dt) / 1000;
       this.Position.add(
         movementRight.scale(-this._mobileMovement.x * mobileMoveDistance),
       );
       this.Position.add(
-        this._forward.clone().scale(this._mobileMovement.y * mobileMoveDistance),
+        this._forward
+          .clone()
+          .scale(this._mobileMovement.y * mobileMoveDistance),
       );
     }
     if (Math.hypot(this._mobileLook.x, this._mobileLook.y) > 0) {
-      this.Yaw += (this._mobileLook.x * this._mobileLookSensitivity * dt) / 1000;
-      this.Pitch += (this._mobileLook.y * this._mobileLookSensitivity * dt) / 1000;
+      this.Yaw +=
+        (this._mobileLook.x * this._mobileLookSensitivity * dt) / 1000;
+      this.Pitch +=
+        (this._mobileLook.y * this._mobileLookSensitivity * dt) / 1000;
     }
 
     // WASD movement
@@ -457,15 +552,17 @@ export class CameraFlying extends BaseCamera {
     if (this._keys["keyd"] || this._keys["arrowright"]) {
       this.Position.subtract(this._right.clone().scale(moveDistance));
     }
-
   }
 
   FitToPoints(points: readonly Vector3[], center: Vector3): void {
-    if (points.length === 0 || points.some(point => !point.every(Number.isFinite))) {
+    if (
+      points.length === 0 ||
+      points.some((point) => !point.every(Number.isFinite))
+    ) {
       throw new Error("The dungeon has no finite geometry bounds to frame.");
     }
     this.MapProjectionBlend = 0;
-    this.SetRotation(-3 * Math.PI / 4, -Math.PI / 4, 0);
+    this.SetRotation((-3 * Math.PI) / 4, -Math.PI / 4, 0);
     const backward = this.GetForward().negate();
     let radius = 1;
     for (const point of points) {
@@ -481,11 +578,18 @@ export class CameraFlying extends BaseCamera {
       placeCamera(distance);
       const transform = this.Transform;
       for (const point of points) {
-        const clip = new Vector4(point.x, point.y, point.z, 1).transform(transform);
+        const clip = new Vector4(point.x, point.y, point.z, 1).transform(
+          transform,
+        );
         // Use the same homogeneous clip coordinates as the vertex shader.
         // Positive W and the Z checks reject points behind the camera or clipped in depth.
-        if (!(clip.w > 0 && Math.abs(clip.x) <= clip.w * 0.9 &&
-            Math.abs(clip.y) <= clip.w * 0.9 && clip.z >= -clip.w && clip.z <= clip.w)) {
+        if (!(
+          clip.w > 0 &&
+          Math.abs(clip.x) <= clip.w * 0.9 &&
+          Math.abs(clip.y) <= clip.w * 0.9 &&
+          clip.z >= -clip.w &&
+          clip.z <= clip.w
+        )) {
           return false;
         }
       }
@@ -497,7 +601,9 @@ export class CameraFlying extends BaseCamera {
     let attempts = 0;
     while (!fits(farDistance)) {
       if (++attempts > 32) {
-        throw new Error("Unable to frame dungeon geometry in the current viewport.");
+        throw new Error(
+          "Unable to frame dungeon geometry in the current viewport.",
+        );
       }
       farDistance *= 2;
     }
@@ -563,7 +669,9 @@ export class CameraFlying extends BaseCamera {
       for (let iteration = 0; iteration < 2; iteration++) {
         const distance = (groundHeight - ray.origin.z) / ray.direction.z;
         if (distance < 0) return this.Position.clone();
-        const point = ray.origin.clone().add(ray.direction.clone().scale(distance));
+        const point = ray.origin
+          .clone()
+          .add(ray.direction.clone().scale(distance));
         groundHeight = this.renderer.getTerrainHeightAt(point.x, point.y);
         if (iteration === 1) return point;
       }

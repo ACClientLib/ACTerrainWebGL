@@ -61,7 +61,12 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
   }
 
   get usage(): ResourceRegistryBudgets {
-    return { encodedBytes: this.encodedBytes, decodedBytes: this.decodedBytes, gpuBytes: this.gpuBytes, uploadBytesPerFrame: this.uploadBytesThisFrame };
+    return {
+      encodedBytes: this.encodedBytes,
+      decodedBytes: this.decodedBytes,
+      gpuBytes: this.gpuBytes,
+      uploadBytesPerFrame: this.uploadBytesThisFrame,
+    };
   }
 
   get pendingUploadCount(): number {
@@ -95,30 +100,76 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
   }
 
   reserveUpload(bytes: number): UploadReservation | undefined {
-    if (bytes < 0 || bytes > this.options.budgets.uploadBytesPerFrame - this.uploadBytesThisFrame) return undefined;
+    if (
+      bytes < 0 ||
+      bytes >
+        this.options.budgets.uploadBytesPerFrame - this.uploadBytesThisFrame
+    )
+      return undefined;
     this.uploadBytesThisFrame += bytes;
     let released = false;
-    return { bytes, release: () => { if (released) return; released = true; this.uploadBytesThisFrame -= bytes; } };
+    return {
+      bytes,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.uploadBytesThisFrame -= bytes;
+      },
+    };
   }
 
-  publish(id: number, cpu: TCpu, sizes: { encodedBytes: number; decodedBytes: number }, gpu?: TGpu, gpuBytes = 0): ResourceGeneration<TCpu, TGpu> {
+  publish(
+    id: number,
+    cpu: TCpu,
+    sizes: { encodedBytes: number; decodedBytes: number },
+    gpu?: TGpu,
+    gpuBytes = 0,
+  ): ResourceGeneration<TCpu, TGpu> {
     return this.publishEntry(id, cpu, sizes, gpu, gpuBytes, 0).generation;
   }
 
-  publishAndAcquire(id: number, cpu: TCpu, sizes: { encodedBytes: number; decodedBytes: number }, gpu?: TGpu, gpuBytes = 0): ResourceLease<TCpu, TGpu> {
+  publishAndAcquire(
+    id: number,
+    cpu: TCpu,
+    sizes: { encodedBytes: number; decodedBytes: number },
+    gpu?: TGpu,
+    gpuBytes = 0,
+  ): ResourceLease<TCpu, TGpu> {
     return this.lease(this.publishEntry(id, cpu, sizes, gpu, gpuBytes, 1));
   }
 
-  private publishEntry(id: number, cpu: TCpu, sizes: { encodedBytes: number; decodedBytes: number }, gpu: TGpu | undefined, gpuBytes: number, references: number): Entry<TCpu, TGpu> {
+  private publishEntry(
+    id: number,
+    cpu: TCpu,
+    sizes: { encodedBytes: number; decodedBytes: number },
+    gpu: TGpu | undefined,
+    gpuBytes: number,
+    references: number,
+  ): Entry<TCpu, TGpu> {
     this.changeRevision++;
     const previous = this.entries.get(id);
-    const generation: ResourceGeneration<TCpu, TGpu> = { id, generation: this.nextGeneration++, cpuEncodedBytes: sizes.encodedBytes, cpuDecodedBytes: sizes.decodedBytes, gpuBytes, cpu, gpu };
+    const generation: ResourceGeneration<TCpu, TGpu> = {
+      id,
+      generation: this.nextGeneration++,
+      cpuEncodedBytes: sizes.encodedBytes,
+      cpuDecodedBytes: sizes.decodedBytes,
+      gpuBytes,
+      cpu,
+      gpu,
+    };
     if (previous) {
       previous.retired = true;
       this.retired.add(previous);
       this.collect(previous);
     }
-    const entry: Entry<TCpu, TGpu> = { generation, references, lastUsed: ++this.clock, uploadPending: false, retired: false, collected: false };
+    const entry: Entry<TCpu, TGpu> = {
+      generation,
+      references,
+      lastUsed: ++this.clock,
+      uploadPending: false,
+      retired: false,
+      collected: false,
+    };
     this.entries.set(id, entry);
     this.encodedBytes += sizes.encodedBytes;
     this.decodedBytes += sizes.decodedBytes;
@@ -127,9 +178,19 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
     return entry;
   }
 
-  attachGpu(generation: ResourceGeneration<TCpu, TGpu>, gpu: TGpu, gpuBytes: number): boolean {
+  attachGpu(
+    generation: ResourceGeneration<TCpu, TGpu>,
+    gpu: TGpu,
+    gpuBytes: number,
+  ): boolean {
     const entry = this.findEntry(generation);
-    if (!entry || entry.generation !== generation || !this.contextAvailable || gpuBytes < 0) return false;
+    if (
+      !entry ||
+      entry.generation !== generation ||
+      !this.contextAvailable ||
+      gpuBytes < 0
+    )
+      return false;
     this.changeRevision++;
     if (generation.gpu !== undefined) this.deferGpuDestruction(generation.gpu);
     this.gpuBytes -= generation.gpuBytes;
@@ -144,7 +205,12 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
 
   detachGpu(generation: ResourceGeneration<TCpu, TGpu>): void {
     const entry = this.findEntry(generation);
-    if (!entry || entry.generation !== generation || generation.gpu === undefined) return;
+    if (
+      !entry ||
+      entry.generation !== generation ||
+      generation.gpu === undefined
+    )
+      return;
     this.changeRevision++;
     this.deferGpuDestruction(generation.gpu);
     generation.gpu = undefined;
@@ -162,7 +228,17 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
 
   private lease(entry: Entry<TCpu, TGpu>): ResourceLease<TCpu, TGpu> {
     let released = false;
-    return { value: entry.generation, release: () => { if (released) return; released = true; entry.references--; entry.lastUsed = ++this.clock; this.collect(entry); this.evict(); } };
+    return {
+      value: entry.generation,
+      release: () => {
+        if (released) return;
+        released = true;
+        entry.references--;
+        entry.lastUsed = ++this.clock;
+        this.collect(entry);
+        this.evict();
+      },
+    };
   }
 
   current(id: number): ResourceGeneration<TCpu, TGpu> | undefined {
@@ -208,7 +284,8 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
 
   contextRestored(): void {
     this.contextAvailable = true;
-    for (const entry of this.entries.values()) if (entry.generation.gpu === undefined) entry.uploadPending = true;
+    for (const entry of this.entries.values())
+      if (entry.generation.gpu === undefined) entry.uploadPending = true;
   }
 
   canUpload(): boolean {
@@ -216,7 +293,11 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
   }
 
   private evict(): void {
-    while (this.encodedBytes > this.options.budgets.encodedBytes || this.decodedBytes > this.options.budgets.decodedBytes || this.gpuBytes > this.options.budgets.gpuBytes) {
+    while (
+      this.encodedBytes > this.options.budgets.encodedBytes ||
+      this.decodedBytes > this.options.budgets.decodedBytes ||
+      this.gpuBytes > this.options.budgets.gpuBytes
+    ) {
       let candidate: Entry<TCpu, TGpu> | undefined;
       for (const entry of this.entries.values()) {
         if (entry.references !== 0 || entry.uploadPending) {
@@ -264,10 +345,13 @@ export class ResourceRegistry<TCpu, TGpu = unknown> {
     this.dispose(entry);
   }
 
-  private findEntry(generation: ResourceGeneration<TCpu, TGpu>): Entry<TCpu, TGpu> | undefined {
+  private findEntry(
+    generation: ResourceGeneration<TCpu, TGpu>,
+  ): Entry<TCpu, TGpu> | undefined {
     const active = this.entries.get(generation.id);
     if (active?.generation === generation) return active;
-    for (const entry of this.retired) if (entry.generation === generation) return entry;
+    for (const entry of this.retired)
+      if (entry.generation === generation) return entry;
     return undefined;
   }
 }

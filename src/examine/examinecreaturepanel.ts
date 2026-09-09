@@ -21,7 +21,11 @@ export interface ExamineWindowOptions {
 function text(element: HTMLElement, value: unknown): void {
   element.textContent = value == null || value === "" ? "???" : String(value);
 }
-function appendRow(container: HTMLElement, label: string, value: unknown): void {
+function appendRow(
+  container: HTMLElement,
+  label: string,
+  value: unknown,
+): void {
   const row = document.createElement("div");
   row.className = "ac-examine-row";
   const labelElement = document.createElement("span");
@@ -185,18 +189,25 @@ export class ExamineCreaturePanel {
     );
     this.info.hidden = isCharacter;
     this.characterMeta.hidden = !isCharacter;
-    const creatureType = (names.CreatureType as Record<string, string>)[String(object.int.CreatureType)];
+    const creatureType = (names.CreatureType as Record<string, string>)[
+      String(object.int.CreatureType)
+    ];
     this.info.textContent = creatureType ?? object.name ?? "Object";
     const meta = this.characterMeta.children;
     // CharExamineUI::SetAppraiseInfo / InqGenderHeritageDisplay.
-    const gender = (names.Gender as Record<string, string>)[String(object.int.Gender)];
+    const gender = (names.Gender as Record<string, string>)[
+      String(object.int.Gender)
+    ];
     const heritage = Number(object.int.HeritageGroup)
-      ? (names.HeritageGroup as Record<string, string>)[String(object.int.HeritageGroup)]
+      ? (names.HeritageGroup as Record<string, string>)[
+          String(object.int.HeritageGroup)
+        ]
       : creatureType;
     meta[0].textContent = [gender, heritage].filter(Boolean).join(" ");
     meta[1].textContent =
-      (names.CharacterTitle as Record<string, string>)[String(object.int.CharacterTitleId)]
-      ?? String(object.string.Template ?? "");
+      (names.CharacterTitle as Record<string, string>)[
+        String(object.int.CharacterTitleId)
+      ] ?? String(object.string.Template ?? "");
     meta[2].textContent =
       Number(object.int.PlayerKillerStatus) & 4
         ? "Player Killer"
@@ -210,9 +221,7 @@ export class ExamineCreaturePanel {
       this.root.querySelector(".ac-examine-level-label") as HTMLElement
     ).textContent = "Level";
     (this.root.querySelector(".ac-examine-level") as HTMLElement).textContent =
-      Number(object.int.Level) > 0
-        ? String(object.int.Level)
-        : "???";
+      Number(object.int.Level) > 0 ? String(object.int.Level) : "???";
     this.allegiance.textContent =
       Number(object.int.AllegianceRank) > 0 && object.string.AllegianceName
         ? String(object.string.AllegianceName)
@@ -252,33 +261,64 @@ export class ExamineCreaturePanel {
     }
     this.misc.replaceChildren();
     this.misc.scrollTop = 0;
-    const addMisc = (label: string, value: string) => appendRow(this.misc, label, value);
+    const addMisc = (label: string, value: string) =>
+      appendRow(this.misc, label, value);
     // CreatureExamineUI::SetAppraiseInfo includes these ratings when nonzero.
     const rating = (key: string) => Number(object.int[key] ?? 0);
     for (const [label, first, second, extra, format] of [
-      ["Dmg/CritDmg", "DamageRating", "CritDamageRating", "CritRating", "%Rating: "],
-      ["Dmg/CritDmg", "DamageResistRating", "CritDamageResistRating", "CritResistRating", "%Resist: "],
+      [
+        "Dmg/CritDmg",
+        "DamageRating",
+        "CritDamageRating",
+        "CritRating",
+        "%Rating: ",
+      ],
+      [
+        "Dmg/CritDmg",
+        "DamageResistRating",
+        "CritDamageResistRating",
+        "CritResistRating",
+        "%Resist: ",
+      ],
       ["Overpower %", "Overpower", "OverpowerResist", "", ""],
       ["PK Dmg/Res", "PKDamageRating", "PKDamageResistRating", "", "%Rating: "],
       ["DoT/Life:", "DotResistRating", "LifeResistRating", "", "%Resist: "],
     ]) {
       if (rating(first) > 0 || rating(second) > 0 || rating(extra) > 0) {
-        addMisc(label, first === "Overpower"
-          ? `+${rating(first)}/-${rating(second)}`
-          : `${format}${rating(first)}/${rating(second)}`);
+        addMisc(
+          label,
+          first === "Overpower"
+            ? `+${rating(first)}/-${rating(second)}`
+            : `${format}${rating(first)}/${rating(second)}`,
+        );
       }
     }
     if (isCharacter) {
-      for (const [key, label] of Object.entries({ MonarchsTitle: "Monarch:", PatronsTitle: "Patron:", Fellowship: "Fellowship:", DateOfBirth: "Arrived in Dereth:" })) {
+      for (const [key, label] of Object.entries({
+        MonarchsTitle: "Monarch:",
+        PatronsTitle: "Patron:",
+        Fellowship: "Fellowship:",
+        DateOfBirth: "Arrived in Dereth:",
+      })) {
         if (object.string[key] != null) {
           addMisc(label, String(object.string[key]));
         }
       }
-      for (const [key, label] of Object.entries({ AllegianceFollowers: "Followers:", ChessRank: "Chess Rank:", FakeFishingSkill: "Fishing Skill:", NumDeaths: "Deaths:", NumCharacterTitles: "Titles Earned:", Enlightenment: "Enlightenment:" })) {
+      for (const [key, label] of Object.entries({
+        AllegianceFollowers: "Followers:",
+        ChessRank: "Chess Rank:",
+        FakeFishingSkill: "Fishing Skill:",
+        NumDeaths: "Deaths:",
+        NumCharacterTitles: "Titles Earned:",
+        Enlightenment: "Enlightenment:",
+      })) {
         if (object.int[key] != null) {
-          addMisc(label, key === "NumDeaths" && Number(object.int[key]) === 0
-            ? "Has never died"
-            : String(object.int[key]));
+          addMisc(
+            label,
+            key === "NumDeaths" && Number(object.int[key]) === 0
+              ? "Has never died"
+              : String(object.int[key]),
+          );
         }
       }
     }

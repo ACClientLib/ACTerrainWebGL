@@ -80,11 +80,18 @@ class OpfsCacheWorkerClient {
         this.handleMessage(event.data as CacheWorkerMessage);
       this.worker.onerror = (event) =>
         this.disable(event.message || "OPFS cache worker failed");
-      addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden")
-          void this.flush().catch(() => undefined);
-      }, { signal: this.lifecycleController.signal });
-      addEventListener("pagehide", () => this.shutdown(), { once: true, signal: this.lifecycleController.signal });
+      addEventListener(
+        "visibilitychange",
+        () => {
+          if (document.visibilityState === "hidden")
+            void this.flush().catch(() => undefined);
+        },
+        { signal: this.lifecycleController.signal },
+      );
+      addEventListener("pagehide", () => this.shutdown(), {
+        once: true,
+        signal: this.lifecycleController.signal,
+      });
       this.initializationTimer = setTimeout(() => {
         if (!this.initialized) this.disable("initialization timed out");
       }, 5000);
@@ -92,7 +99,6 @@ class OpfsCacheWorkerClient {
       this.disable(error instanceof Error ? error.message : String(error));
     }
   }
-
 
   async getMany(
     namespace: CacheNamespace,
@@ -421,7 +427,9 @@ export class DatObjectCache {
         "acterrain-format13",
         "acterrain-format15",
       ]) {
-        await root.removeEntry(name, { recursive: true }).catch(() => undefined);
+        await root
+          .removeEntry(name, { recursive: true })
+          .catch(() => undefined);
       }
     } catch {
       // The legacy OPFS namespace may not exist.

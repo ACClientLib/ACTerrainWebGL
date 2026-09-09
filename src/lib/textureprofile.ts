@@ -25,9 +25,8 @@ export function selectTextureProfile(
     : etc
       ? TEXTURE_PROFILE.etc2
       : TEXTURE_PROFILE.rgba8;
-  const profile = data.textureProfile === "auto"
-    ? automaticProfile
-    : data.textureProfile;
+  const profile =
+    data.textureProfile === "auto" ? automaticProfile : data.textureProfile;
   const result = {
     profile,
     extensions: { s3tc, etc },

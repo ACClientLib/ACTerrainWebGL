@@ -33,10 +33,23 @@ import {
   mapYToLandBlock,
 } from "./worldgeometry";
 import { LegacyMeshGpuOwner } from "./gpuresources";
-import { cullForTransform, type ScenePass, type SceneRenderKey, type SceneSubmission, type SceneSubmissionSink } from "./scenesubmission";
+import {
+  cullForTransform,
+  type ScenePass,
+  type SceneRenderKey,
+  type SceneSubmission,
+  type SceneSubmissionSink,
+} from "./scenesubmission";
 import type { SceneView } from "./sceneview";
-import { ParticleSimulation, type ParticleSimulationInstance } from "./particlesimulation";
-import { SceneGeometryResources, type SceneGeometryUniforms, type SceneParticleUniforms } from "./scenegeometryresources";
+import {
+  ParticleSimulation,
+  type ParticleSimulationInstance,
+} from "./particlesimulation";
+import {
+  SceneGeometryResources,
+  type SceneGeometryUniforms,
+  type SceneParticleUniforms,
+} from "./scenegeometryresources";
 
 interface GpuBatch {
   vertexBuffer: WebGLBuffer | null;
@@ -94,7 +107,15 @@ interface TwoDChunkData {
 interface Static3DPreparation {
   key: string;
   drawableGroups: { key: string; group: SceneGroup; mesh: GpuMesh }[];
-  commonGroups: Map<string, { modelIndex: number; parity: boolean; instanceCount: number; offset: number }>;
+  commonGroups: Map<
+    string,
+    {
+      modelIndex: number;
+      parity: boolean;
+      instanceCount: number;
+      offset: number;
+    }
+  >;
   submissions: SceneSubmission[];
   instanceData: Float32Array;
   requiredFloats: number;
@@ -113,30 +134,44 @@ export class SceneGeometryRenderer {
   private dungeonPlacements: IndexedPlacement[] = [];
   private acYOrigin = MAP_SIZE;
 
-  async loadDungeon(cells: readonly import("./dungeons").DungeonCell[]): Promise<void> {
-    const modelIndexes = [...new Set(cells.flatMap(cell => cell.placements.map(p => p.modelIndex)))];
+  async loadDungeon(
+    cells: readonly import("./dungeons").DungeonCell[],
+  ): Promise<void> {
+    const modelIndexes = [
+      ...new Set(
+        cells.flatMap((cell) => cell.placements.map((p) => p.modelIndex)),
+      ),
+    ];
     await this.dats.loadResources(this.dats.resourceIdsForModels(modelIndexes));
 
     // Dungeon placements do not have exterior chunks, so their meshes cannot
     // be discovered by the normal visible-chunk loader. Decode and upload
     // them before publishing the dungeon state; otherwise the first dungeon
     // frames contain no submissions while every model is still queued.
-    await Promise.all(modelIndexes.map(async (modelIndex) => {
-      const mesh = await this.dats.mesh(modelIndex);
-      this.meshes.set(modelIndex, this.uploadMesh(this.dats.model(modelIndex)!.meshResourceId, mesh));
-    }));
+    await Promise.all(
+      modelIndexes.map(async (modelIndex) => {
+        const mesh = await this.dats.mesh(modelIndex);
+        this.meshes.set(
+          modelIndex,
+          this.uploadMesh(this.dats.model(modelIndex)!.meshResourceId, mesh),
+        );
+      }),
+    );
   }
 
   setDungeon(cells: readonly import("./dungeons").DungeonCell[]): void {
     this.acYOrigin = cells.length > 0 ? 0 : MAP_SIZE;
     this.placementBoundsCache = new WeakMap<IndexedPlacement, Bounds3>();
-    this.dungeonPlacements = cells.flatMap(cell => cell.placements);
+    this.dungeonPlacements = cells.flatMap((cell) => cell.placements);
     this.cacheGeneration++;
     this.decodeController.abort();
     this.decodeController = new AbortController();
     this.pendingMeshes.clear();
     this.pendingBakedMeshes.clear();
-    this.evictOutside(new Set(), new Set(this.dungeonPlacements.map(p => p.modelIndex)));
+    this.evictOutside(
+      new Set(),
+      new Set(this.dungeonPlacements.map((p) => p.modelIndex)),
+    );
     this.twoDPreparedSubmissions = [];
     this.twoDPreparedVisibleKey = "";
     this.particleSimulations.clear();
@@ -154,25 +189,41 @@ export class SceneGeometryRenderer {
     // Frame the room shell. Static and spawn bounds can include particle travel
     // ranges thousands of units across, far beyond the visible dungeon walls.
     return this.dungeonPlacements
-      .filter(placement => placement.category === ENV_CELLS)
-      .map(placement => this.placementBounds(placement, this.dats.model(placement.modelIndex)!.bounds));
+      .filter((placement) => placement.category === ENV_CELLS)
+      .map((placement) =>
+        this.placementBounds(
+          placement,
+          this.dats.model(placement.modelIndex)!.bounds,
+        ),
+      );
   }
 
-  renderDungeon(camera: BaseCamera, mode: CameraMode, submit: SceneSubmissionSink): void {
+  renderDungeon(
+    camera: BaseCamera,
+    mode: CameraMode,
+    submit: SceneSubmissionSink,
+  ): void {
     if (!this.program || !this.instanceBuffer) {
       return;
     }
     this.frameFrustum = mode === CameraMode.Flying ? camera.FrameFrustum : null;
-    this.lastParticleCameraPosition = mode === CameraMode.Flying
-      ? [camera.Position.x, camera.Position.y, camera.Position.z]
-      : null;
+    this.lastParticleCameraPosition =
+      mode === CameraMode.Flying
+        ? [camera.Position.x, camera.Position.y, camera.Position.z]
+        : null;
     this.meshOwner.beginFrame();
     this.dats.beginFrame();
     this.refreshMeshHandles();
     this.fogDistance = 0;
     // Reuse instancing without exterior distance, zoom, or 2D category filters.
     this.twoDPreparedDirty = true;
-    this.prepareCommonSubmissions(camera, mode, this.groupVisible3D(this.dungeonPlacements), [], submit);
+    this.prepareCommonSubmissions(
+      camera,
+      mode,
+      this.groupVisible3D(this.dungeonPlacements),
+      [],
+      submit,
+    );
   }
 
   loadDistance = 8;
@@ -209,7 +260,10 @@ export class SceneGeometryRenderer {
   private camera2DVisibleBounds: Bounds3 | null = null;
   private chunkBoundsCache = new WeakMap<IndexedChunk, Bounds3>();
   private placementBoundsCache = new WeakMap<IndexedPlacement, Bounds3>();
-  private oversizedStatic2DCache = new WeakMap<IndexedChunk, Set<IndexedPlacement>>();
+  private oversizedStatic2DCache = new WeakMap<
+    IndexedChunk,
+    Set<IndexedPlacement>
+  >();
   private twoDChunkCache = new WeakMap<IndexedChunk, TwoDChunkData>();
   private twoDAggregatedGroups = new Map<string, SceneGroup>();
   private twoDAggregateRangeKey = "";
@@ -223,7 +277,15 @@ export class SceneGeometryRenderer {
   private placementIdentity = new WeakMap<IndexedPlacement, number>();
   private nextPlacementIdentity = 1;
   readonly meshOwner: LegacyMeshGpuOwner;
-  private readonly commonGroups = new Map<string, { modelIndex: number; parity: boolean; instanceCount: number; offset: number }>();
+  private readonly commonGroups = new Map<
+    string,
+    {
+      modelIndex: number;
+      parity: boolean;
+      instanceCount: number;
+      offset: number;
+    }
+  >();
   private readonly contextLostHandler = (event: Event) => {
     event.preventDefault();
     invalidateSceneDrawState(this.gl);
@@ -233,7 +295,10 @@ export class SceneGeometryRenderer {
     this.particleVao = null;
     this.particleBuffer = null;
     this.particleQuadBuffer = null;
-    for (const mesh of [...this.meshes.values(), ...this.bakedMeshes.values()]) {
+    for (const mesh of [
+      ...this.meshes.values(),
+      ...this.bakedMeshes.values(),
+    ]) {
       if (!mesh) continue;
       for (const batch of mesh.batches) {
         batch.vertexBuffer = null;
@@ -259,9 +324,23 @@ export class SceneGeometryRenderer {
   ) {
     this.meshOwner = new LegacyMeshGpuOwner(gl);
     this.createProducerResources();
-    this.dats = new AcDatClient(gl, undefined, descriptorPath, cacheNamespace, serverId);
-    gl.canvas.addEventListener("webglcontextlost", this.contextLostHandler, false);
-    gl.canvas.addEventListener("webglcontextrestored", this.contextRestoredHandler, false);
+    this.dats = new AcDatClient(
+      gl,
+      undefined,
+      descriptorPath,
+      cacheNamespace,
+      serverId,
+    );
+    gl.canvas.addEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+      false,
+    );
+    gl.canvas.addEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+      false,
+    );
   }
 
   get datClient(): AcDatClient {
@@ -318,8 +397,14 @@ export class SceneGeometryRenderer {
     this.stopped = true;
     this.cacheGeneration++;
     this.decodeController.abort();
-    this.gl.canvas.removeEventListener("webglcontextlost", this.contextLostHandler);
-    this.gl.canvas.removeEventListener("webglcontextrestored", this.contextRestoredHandler);
+    this.gl.canvas.removeEventListener(
+      "webglcontextlost",
+      this.contextLostHandler,
+    );
+    this.gl.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.contextRestoredHandler,
+    );
     for (const mesh of this.meshes.values()) {
       this.deleteMesh(mesh);
     }
@@ -380,11 +465,19 @@ export class SceneGeometryRenderer {
     return this.resourceLoadError;
   }
 
-  async pickServerSpawn2D(ray: { origin: Vector3; direction: Vector3 }): Promise<IndexedPlacement | null> {
-    return (await this.pickServerSpawn(ray, CameraMode.Camera2D))?.placement ?? null;
+  async pickServerSpawn2D(ray: {
+    origin: Vector3;
+    direction: Vector3;
+  }): Promise<IndexedPlacement | null> {
+    return (
+      (await this.pickServerSpawn(ray, CameraMode.Camera2D))?.placement ?? null
+    );
   }
 
-  async pickServerSpawn3D(ray: { origin: Vector3; direction: Vector3 }): Promise<{ placement: IndexedPlacement; distance: number } | null> {
+  async pickServerSpawn3D(ray: {
+    origin: Vector3;
+    direction: Vector3;
+  }): Promise<{ placement: IndexedPlacement; distance: number } | null> {
     return this.pickServerSpawn(ray, CameraMode.Flying);
   }
 
@@ -392,53 +485,113 @@ export class SceneGeometryRenderer {
     ray: { origin: Vector3; direction: Vector3 },
     mode: CameraMode,
   ): Promise<{ placement: IndexedPlacement; distance: number } | null> {
-    const hits: { placement: IndexedPlacement; distance: number; bounds: Bounds3 }[] = [];
+    const hits: {
+      placement: IndexedPlacement;
+      distance: number;
+      bounds: Bounds3;
+    }[] = [];
     let frustumSkipped = 0;
     for (const placement of this.serverSpawnPlacements()) {
       // Outdoor 2D submissions exclude indoor spawns; they must not intercept clicks.
-      if (mode === CameraMode.Camera2D && this.dungeonPlacements.length === 0 &&
-        placement.category === CELL_SERVER_SPAWNS) {
+      if (
+        mode === CameraMode.Camera2D &&
+        this.dungeonPlacements.length === 0 &&
+        placement.category === CELL_SERVER_SPAWNS
+      ) {
         continue;
       }
       const model = this.dats.model(placement.modelIndex);
       if (!model) continue;
       const bounds = this.placementBounds(placement, model.bounds);
-      if (mode === CameraMode.Flying && this.frameFrustum && !intersectsFrustum(bounds, this.frameFrustum)) {
+      if (
+        mode === CameraMode.Flying &&
+        this.frameFrustum &&
+        !intersectsFrustum(bounds, this.frameFrustum)
+      ) {
         frustumSkipped++;
         continue;
       }
-      const distance = this.rayBoundsDistance(ray.origin, ray.direction, bounds);
+      const distance = this.rayBoundsDistance(
+        ray.origin,
+        ray.direction,
+        bounds,
+      );
       if (distance === null) continue;
       hits.push({ placement, distance, bounds });
     }
-    const exactHits = (await Promise.all(hits.map(async hit => {
-      try {
-        const mesh = await this.dats.mesh(hit.placement.modelIndex);
-        let distance: number | null = null;
-        for (const batch of mesh.batches) {
-          if (!batch.vertices || !batch.indices) continue;
-          for (let index = 0; index + 2 < batch.indices.length; index += 3) {
-            const a = this.placementVertex(hit.placement, batch.vertices, batch.indices[index]);
-            const b = this.placementVertex(hit.placement, batch.vertices, batch.indices[index + 1]);
-            const c = this.placementVertex(hit.placement, batch.vertices, batch.indices[index + 2]);
-            const triangleDistance = this.rayTriangleDistance(ray, a, b, c);
-            if (triangleDistance !== null && (distance === null || triangleDistance < distance)) distance = triangleDistance;
+    const exactHits = (
+      await Promise.all(
+        hits.map(async (hit) => {
+          try {
+            const mesh = await this.dats.mesh(hit.placement.modelIndex);
+            let distance: number | null = null;
+            for (const batch of mesh.batches) {
+              if (!batch.vertices || !batch.indices) continue;
+              for (
+                let index = 0;
+                index + 2 < batch.indices.length;
+                index += 3
+              ) {
+                const a = this.placementVertex(
+                  hit.placement,
+                  batch.vertices,
+                  batch.indices[index],
+                );
+                const b = this.placementVertex(
+                  hit.placement,
+                  batch.vertices,
+                  batch.indices[index + 1],
+                );
+                const c = this.placementVertex(
+                  hit.placement,
+                  batch.vertices,
+                  batch.indices[index + 2],
+                );
+                const triangleDistance = this.rayTriangleDistance(ray, a, b, c);
+                if (
+                  triangleDistance !== null &&
+                  (distance === null || triangleDistance < distance)
+                )
+                  distance = triangleDistance;
+              }
+            }
+            return distance === null ? null : { ...hit, distance };
+          } catch {
+            return null;
           }
-        }
-        return distance === null ? null : { ...hit, distance };
-      } catch {
-        return null;
-      }
-    }))).filter((hit): hit is { placement: IndexedPlacement; distance: number; bounds: Bounds3 } => hit !== null);
-    let best: { placement: IndexedPlacement; distance: number; bounds: Bounds3 } | null = null;
+        }),
+      )
+    ).filter(
+      (
+        hit,
+      ): hit is {
+        placement: IndexedPlacement;
+        distance: number;
+        bounds: Bounds3;
+      } => hit !== null,
+    );
+    let best: {
+      placement: IndexedPlacement;
+      distance: number;
+      bounds: Bounds3;
+    } | null = null;
     for (const hit of exactHits) {
-      if (!best || hit.distance < best.distance ||
-        hit.distance === best.distance && this.comparePlacement(hit.placement, best.placement) < 0) best = hit;
+      if (
+        !best ||
+        hit.distance < best.distance ||
+        (hit.distance === best.distance &&
+          this.comparePlacement(hit.placement, best.placement) < 0)
+      )
+        best = hit;
     }
     return best;
   }
 
-  private placementVertex(placement: IndexedPlacement, vertices: Float32Array, index: number): Vector3 {
+  private placementVertex(
+    placement: IndexedPlacement,
+    vertices: Float32Array,
+    index: number,
+  ): Vector3 {
     const offset = index * 8;
     const value = new Vector3(
       vertices[offset] * placement.scale[0],
@@ -452,11 +605,13 @@ export class SceneGeometryRenderer {
       q[0] * value.y - q[1] * value.x,
     );
     const rotated = value.clone().add(cross.clone().scale(2 * q[3]));
-    rotated.add(new Vector3(
-      q[1] * cross.z - q[2] * cross.y,
-      q[2] * cross.x - q[0] * cross.z,
-      q[0] * cross.y - q[1] * cross.x,
-    ).scale(2));
+    rotated.add(
+      new Vector3(
+        q[1] * cross.z - q[2] * cross.y,
+        q[2] * cross.x - q[0] * cross.z,
+        q[0] * cross.y - q[1] * cross.x,
+      ).scale(2),
+    );
     return new Vector3(
       placement.origin[0] + rotated.x,
       this.acYOrigin - placement.origin[1] - rotated.y,
@@ -488,7 +643,9 @@ export class SceneGeometryRenderer {
       offset.z * edge1.x - offset.x * edge1.z,
       offset.x * edge1.y - offset.y * edge1.x,
     );
-    const v = inverse * (ray.direction.x * q.x + ray.direction.y * q.y + ray.direction.z * q.z);
+    const v =
+      inverse *
+      (ray.direction.x * q.x + ray.direction.y * q.y + ray.direction.z * q.z);
     if (v < 0 || u + v > 1) return null;
     const distance = inverse * (edge2.x * q.x + edge2.y * q.y + edge2.z * q.z);
     return distance >= 0 ? distance : null;
@@ -496,25 +653,44 @@ export class SceneGeometryRenderer {
 
   private serverSpawnPlacements(): Iterable<IndexedPlacement> {
     if (this.dungeonPlacements.length > 0) {
-      return this.dungeonPlacements.filter(placement =>
-        !placement.attached && (placement.category === SERVER_SPAWNS || placement.category === CELL_SERVER_SPAWNS),
+      return this.dungeonPlacements.filter(
+        (placement) =>
+          !placement.attached &&
+          (placement.category === SERVER_SPAWNS ||
+            placement.category === CELL_SERVER_SPAWNS),
       );
     }
-    return [...this.chunks.values()].flatMap(loaded => loaded
-      ? this.dats.placementsForChunk(loaded.chunk).filter(placement =>
-        !placement.attached && (placement.category === SERVER_SPAWNS || placement.category === CELL_SERVER_SPAWNS),
-      )
-      : []);
+    return [...this.chunks.values()].flatMap((loaded) =>
+      loaded
+        ? this.dats
+            .placementsForChunk(loaded.chunk)
+            .filter(
+              (placement) =>
+                !placement.attached &&
+                (placement.category === SERVER_SPAWNS ||
+                  placement.category === CELL_SERVER_SPAWNS),
+            )
+        : [],
+    );
   }
 
   private comparePlacement(a: IndexedPlacement, b: IndexedPlacement): number {
     const aGuid = a.objectGuid ?? Number.POSITIVE_INFINITY;
     const bGuid = b.objectGuid ?? Number.POSITIVE_INFINITY;
-    return aGuid - bGuid || a.modelIndex - b.modelIndex ||
-      a.origin[0] - b.origin[0] || a.origin[1] - b.origin[1] || a.origin[2] - b.origin[2];
+    return (
+      aGuid - bGuid ||
+      a.modelIndex - b.modelIndex ||
+      a.origin[0] - b.origin[0] ||
+      a.origin[1] - b.origin[1] ||
+      a.origin[2] - b.origin[2]
+    );
   }
 
-  private rayBoundsDistance(origin: Vector3, direction: Vector3, bounds: Bounds3): number | null {
+  private rayBoundsDistance(
+    origin: Vector3,
+    direction: Vector3,
+    bounds: Bounds3,
+  ): number | null {
     const originValues = [origin.x, origin.y, origin.z];
     const directionValues = [direction.x, direction.y, direction.z];
     let near = 0;
@@ -559,20 +735,22 @@ export class SceneGeometryRenderer {
         ? (maximumDistanceLandblocks ?? this.loadDistance) * LAND_BLOCK_SIZE
         : 0;
     const reason = !this.program
-        ? "shader program unavailable"
-        : !this.instanceBuffer
-          ? "instance buffer unavailable"
-          : !this.isCloseEnough(camera, mode, minimumZoom)
-            ? `zoom ${mode === CameraMode.Camera2D ? (camera as Camera2D).Zoom : "3D"} < ${minimumZoom}`
-            : "";
+      ? "shader program unavailable"
+      : !this.instanceBuffer
+        ? "instance buffer unavailable"
+        : !this.isCloseEnough(camera, mode, minimumZoom)
+          ? `zoom ${mode === CameraMode.Camera2D ? (camera as Camera2D).Zoom : "3D"} < ${minimumZoom}`
+          : "";
     if (reason) return;
     this.frameFrustum = mode === CameraMode.Flying ? camera.FrameFrustum : null;
-    const visibleBlocks = mode === CameraMode.Camera2D
-      ? this.visible2D(camera as Camera2D)
-      : this.visible3D(camera as CameraFlying, maximumDistanceLandblocks);
-    this.camera2DVisibleBounds = mode === CameraMode.Camera2D
-      ? this.screenBounds(camera as Camera2D)
-      : null;
+    const visibleBlocks =
+      mode === CameraMode.Camera2D
+        ? this.visible2D(camera as Camera2D)
+        : this.visible3D(camera as CameraFlying, maximumDistanceLandblocks);
+    this.camera2DVisibleBounds =
+      mode === CameraMode.Camera2D
+        ? this.screenBounds(camera as Camera2D)
+        : null;
     const preloadBlocks =
       mode === CameraMode.Flying ? [] : this.preloadRing(visibleBlocks, camera);
     const visibleKeys = this.canonicalChunkKeys(visibleBlocks);
@@ -582,26 +760,30 @@ export class SceneGeometryRenderer {
     for (const [x, y] of visibleBlocks) {
       const loaded = this.chunks.get(`${x},${y}`);
       if (!loaded) continue;
-      if (
-        mode !== CameraMode.Camera2D &&
-        !this.chunkVisible(loaded, mode)
-      )
+      if (mode !== CameraMode.Camera2D && !this.chunkVisible(loaded, mode))
         continue;
       if (mode === CameraMode.Camera2D) {
         continue;
       }
       const placements = this.dats.placementsForChunk(loaded.chunk);
       for (const placement of placements) {
-        if (!this.placementVisible(placement, mode))
-          continue;
+        if (!this.placementVisible(placement, mode)) continue;
         visible.push(placement);
       }
     }
 
-    const groups = mode === CameraMode.Camera2D
-      ? this.twoDAggregateGroups(visibleBlocks)
-      : this.groupVisible3D(visible);
-    this.prepareCommonSubmissions(camera, mode, groups, visibleBlocks, submissions, skyParticles);
+    const groups =
+      mode === CameraMode.Camera2D
+        ? this.twoDAggregateGroups(visibleBlocks)
+        : this.groupVisible3D(visible);
+    this.prepareCommonSubmissions(
+      camera,
+      mode,
+      groups,
+      visibleBlocks,
+      submissions,
+      skyParticles,
+    );
     const retainedKeys = [...new Set([...visibleKeys, ...preloadKeys])].sort();
     const evictionKey = retainedKeys.join("|");
     if (evictionKey !== this.lastEvictionKey) {
@@ -614,7 +796,8 @@ export class SceneGeometryRenderer {
     const groups = new Map<string, SceneGroup>();
     for (const placement of visible) {
       if (placement.geometryPath === 1) continue;
-      const parity = placement.scale[0] * placement.scale[1] * placement.scale[2] < 0;
+      const parity =
+        placement.scale[0] * placement.scale[1] * placement.scale[2] < 0;
       const key = `${placement.modelIndex}:${parity ? 1 : 0}`;
       const group: SceneGroup = groups.get(key) ?? {
         modelIndex: placement.modelIndex,
@@ -629,7 +812,9 @@ export class SceneGeometryRenderer {
     return groups;
   }
 
-  private drawableGroups(groups: Map<string, SceneGroup>): { key: string; group: SceneGroup; mesh: GpuMesh }[] {
+  private drawableGroups(
+    groups: Map<string, SceneGroup>,
+  ): { key: string; group: SceneGroup; mesh: GpuMesh }[] {
     const drawable: { key: string; group: SceneGroup; mesh: GpuMesh }[] = [];
     for (const [key, group] of groups) {
       const mesh = this.meshes.get(group.modelIndex);
@@ -648,15 +833,17 @@ export class SceneGeometryRenderer {
     camera: BaseCamera,
   ): string {
     const frustum = this.frameFrustum ? [...this.frameFrustum].join(",") : "";
-    const placements = [...groups.values()].flatMap(group =>
-      group.placementSegments.flatMap(segment => segment.map(placement => {
-        let identity = this.placementIdentity.get(placement);
-        if (identity === undefined) {
-          identity = this.nextPlacementIdentity++;
-          this.placementIdentity.set(placement, identity);
-        }
-        return identity;
-      })),
+    const placements = [...groups.values()].flatMap((group) =>
+      group.placementSegments.flatMap((segment) =>
+        segment.map((placement) => {
+          let identity = this.placementIdentity.get(placement);
+          if (identity === undefined) {
+            identity = this.nextPlacementIdentity++;
+            this.placementIdentity.set(placement, identity);
+          }
+          return identity;
+        }),
+      ),
     );
     const blocks = visibleBlocks.map(([x, y]) => `${x},${y}`).join("|");
     return `${this.staticPreparationRevision}|${camera.constructor.name}|${this.acYOrigin}|${this.fogDistance}|${frustum}|${blocks}|${placements.join(",")}`;
@@ -667,9 +854,12 @@ export class SceneGeometryRenderer {
     this.static3DPreparation = null;
   }
 
-  private twoDAggregateGroups(visibleBlocks: [number, number][]): Map<string, SceneGroup> {
+  private twoDAggregateGroups(
+    visibleBlocks: [number, number][],
+  ): Map<string, SceneGroup> {
     const rangeKey = visibleBlocks.map(([x, y]) => `${x},${y}`).join("|");
-    if (rangeKey === this.twoDAggregateRangeKey) return this.twoDAggregatedGroups;
+    if (rangeKey === this.twoDAggregateRangeKey)
+      return this.twoDAggregatedGroups;
 
     const groups = new Map<string, SceneGroup>();
     for (const [x, y] of visibleBlocks) {
@@ -707,23 +897,35 @@ export class SceneGeometryRenderer {
     skyParticles: readonly SkyParticleInput[] = [],
   ): void {
     const now = performance.now() * 0.001;
-    const deltaTime = this.particleLastFrameTime === 0 ? 1 / 60 : Math.max(0, now - this.particleLastFrameTime);
+    const deltaTime =
+      this.particleLastFrameTime === 0
+        ? 1 / 60
+        : Math.max(0, now - this.particleLastFrameTime);
     this.particleLastFrameTime = now;
     this.particleFrameDeltaTime = deltaTime;
     const visibleKey = visibleBlocks.map(([x, y]) => `${x},${y}`).join("|");
-    const preparedKey = mode === CameraMode.Camera2D
-      ? `${visibleKey}|zoom:${(camera as Camera2D).Zoom}`
-      : visibleKey;
-    if (mode === CameraMode.Camera2D &&
-        preparedKey === this.twoDPreparedVisibleKey &&
-        !this.twoDPreparedDirty) {
+    const preparedKey =
+      mode === CameraMode.Camera2D
+        ? `${visibleKey}|zoom:${(camera as Camera2D).Zoom}`
+        : visibleKey;
+    if (
+      mode === CameraMode.Camera2D &&
+      preparedKey === this.twoDPreparedVisibleKey &&
+      !this.twoDPreparedDirty
+    ) {
       for (const submission of this.twoDPreparedSubmissions) submit(submission);
       return;
     }
-    if (mode !== CameraMode.Camera2D || visibleKey !== this.twoDPreparedVisibleKey) {
+    if (
+      mode !== CameraMode.Camera2D ||
+      visibleKey !== this.twoDPreparedVisibleKey
+    ) {
       this.twoDPreparedDirty = mode === CameraMode.Camera2D;
     }
-    if (mode !== CameraMode.Camera2D || visibleKey !== this.particle2DVisibleKey) {
+    if (
+      mode !== CameraMode.Camera2D ||
+      visibleKey !== this.particle2DVisibleKey
+    ) {
       this.particle2DFrozen = mode === CameraMode.Camera2D;
       this.particleFrozenData.clear();
     }
@@ -737,32 +939,53 @@ export class SceneGeometryRenderer {
       preparedSubmissions.push(submission);
       submit(submission);
     };
-    let particleInstancesRemaining = mode === CameraMode.Camera2D
-      ? MAX_2D_PARTICLE_INSTANCES
-      : MAX_3D_PARTICLE_INSTANCES;
-    const staticKey = mode === CameraMode.Camera2D ? "" : this.static3DKey(groups, visibleBlocks, camera);
-    const cachedStatic = mode === CameraMode.Flying && this.static3DPreparation?.key === staticKey
-      ? this.static3DPreparation
-      : null;
-    const drawableGroups = cachedStatic?.drawableGroups ?? this.drawableGroups(groups);
+    let particleInstancesRemaining =
+      mode === CameraMode.Camera2D
+        ? MAX_2D_PARTICLE_INSTANCES
+        : MAX_3D_PARTICLE_INSTANCES;
+    const staticKey =
+      mode === CameraMode.Camera2D
+        ? ""
+        : this.static3DKey(groups, visibleBlocks, camera);
+    const cachedStatic =
+      mode === CameraMode.Flying && this.static3DPreparation?.key === staticKey
+        ? this.static3DPreparation
+        : null;
+    const drawableGroups =
+      cachedStatic?.drawableGroups ?? this.drawableGroups(groups);
     let requiredFloats = cachedStatic?.requiredFloats ?? 0;
     if (cachedStatic) {
-      for (const [key, group] of cachedStatic.commonGroups) this.commonGroups.set(key, group);
+      for (const [key, group] of cachedStatic.commonGroups)
+        this.commonGroups.set(key, group);
       if (this.instanceUploadData.length < requiredFloats) {
         this.instanceUploadData = new Float32Array(requiredFloats);
       }
       this.instanceUploadData.set(cachedStatic.instanceData, 0);
       for (const submission of cachedStatic.submissions) submit(submission);
     } else {
-      requiredFloats = drawableGroups.reduce((total, item) => total + item.group.instanceCount * INSTANCE_FLOATS, 0);
+      requiredFloats = drawableGroups.reduce(
+        (total, item) => total + item.group.instanceCount * INSTANCE_FLOATS,
+        0,
+      );
       if (this.instanceUploadData.length < requiredFloats) {
-        this.instanceUploadData = new Float32Array(Math.max(requiredFloats, this.instanceUploadData.length * 2, INSTANCE_FLOATS * 64));
+        this.instanceUploadData = new Float32Array(
+          Math.max(
+            requiredFloats,
+            this.instanceUploadData.length * 2,
+            INSTANCE_FLOATS * 64,
+          ),
+        );
       }
       let instanceOffset = 0;
       const staticSubmissions: SceneSubmission[] = [];
       for (const { key, group, mesh } of drawableGroups) {
         const groupOffset = instanceOffset;
-        this.commonGroups.set(key, { modelIndex: group.modelIndex, parity: group.parity, instanceCount: group.instanceCount, offset: groupOffset });
+        this.commonGroups.set(key, {
+          modelIndex: group.modelIndex,
+          parity: group.parity,
+          instanceCount: group.instanceCount,
+          offset: groupOffset,
+        });
         if (group.instanceSegments) {
           let floatOffset = groupOffset;
           for (const data of group.instanceSegments) {
@@ -773,13 +996,21 @@ export class SceneGeometryRenderer {
           let itemOffset = 0;
           for (const placements of group.placementSegments) {
             for (const placement of placements) {
-              this.writePlacementInstance(this.instanceUploadData, groupOffset + itemOffset * INSTANCE_FLOATS, placement);
+              this.writePlacementInstance(
+                this.instanceUploadData,
+                groupOffset + itemOffset * INSTANCE_FLOATS,
+                placement,
+              );
               itemOffset++;
             }
           }
         }
         instanceOffset += group.instanceCount * INSTANCE_FLOATS;
-        for (let batchIndex = 0; batchIndex < mesh.batches.length; batchIndex++) {
+        for (
+          let batchIndex = 0;
+          batchIndex < mesh.batches.length;
+          batchIndex++
+        ) {
           const batch = mesh.batches[batchIndex];
           if (!batch.material || batch.materialError) continue;
           if (!batch.particles && batch.indexCount > 0) {
@@ -787,7 +1018,13 @@ export class SceneGeometryRenderer {
               staticSubmissions.push(submission);
               preparedSubmit(submission);
             };
-            this.emitCommonMeshSubmission(key, batch, batchIndex, group.instanceCount, staticSubmit);
+            this.emitCommonMeshSubmission(
+              key,
+              batch,
+              batchIndex,
+              group.instanceCount,
+              staticSubmit,
+            );
           }
         }
       }
@@ -805,8 +1042,14 @@ export class SceneGeometryRenderer {
     for (const { group, mesh } of drawableGroups) {
       for (let batchIndex = 0; batchIndex < mesh.batches.length; batchIndex++) {
         const batch = mesh.batches[batchIndex];
-        if (!batch.material || batch.materialError || !batch.particles) continue;
-        for (let segmentIndex = 0; segmentIndex < group.placementSegments.length && particleInstancesRemaining > 0; segmentIndex++) {
+        if (!batch.material || batch.materialError || !batch.particles)
+          continue;
+        for (
+          let segmentIndex = 0;
+          segmentIndex < group.placementSegments.length &&
+          particleInstancesRemaining > 0;
+          segmentIndex++
+        ) {
           particleInstancesRemaining -= this.appendParticlesForGroup(
             batch,
             group.placementSegments[segmentIndex],
@@ -827,18 +1070,45 @@ export class SceneGeometryRenderer {
     );
     requiredFloats = bakedResult.offset;
     particleInstancesRemaining = bakedResult.particleInstancesRemaining;
-    const instanceBufferKey = mode === CameraMode.Flying
-      ? `${staticKey}|${requiredFloats}`
-      : `${mode}|${this.staticPreparationRevision}|${preparedKey}|${requiredFloats}`;
+    const instanceBufferKey =
+      mode === CameraMode.Flying
+        ? `${staticKey}|${requiredFloats}`
+        : `${mode}|${this.staticPreparationRevision}|${preparedKey}|${requiredFloats}`;
     const skyGroups: ParticleDrawGroup[] = [];
     for (const input of skyParticles) {
-      const group: ParticleDrawGroup = { material: input.material, data: new Float32Array(0), count: 0, offset: 0, skyPass: input.skyPass, skyObjectIndex: input.objectIndex };
+      const group: ParticleDrawGroup = {
+        material: input.material,
+        data: new Float32Array(0),
+        count: 0,
+        offset: 0,
+        skyPass: input.skyPass,
+        skyObjectIndex: input.objectIndex,
+      };
       skyGroups.push(group);
-      particleInstancesRemaining -= this.appendParticleInstances(group, input.particles, input.origin[0], this.acYOrigin - input.origin[1], input.origin[2], input.rotation, input.scale, input.key, particleInstancesRemaining, false, input.emitting);
+      particleInstancesRemaining -= this.appendParticleInstances(
+        group,
+        input.particles,
+        input.origin[0],
+        this.acYOrigin - input.origin[1],
+        input.origin[2],
+        input.rotation,
+        input.scale,
+        input.key,
+        particleInstancesRemaining,
+        false,
+        input.emitting,
+      );
     }
-    if (requiredFloats > 0 && this.instanceBufferPreparationKey !== instanceBufferKey) {
+    if (
+      requiredFloats > 0 &&
+      this.instanceBufferPreparationKey !== instanceBufferKey
+    ) {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
-      this.gl.bufferData(this.gl.ARRAY_BUFFER, this.instanceUploadData.subarray(0, requiredFloats), this.gl.DYNAMIC_DRAW);
+      this.gl.bufferData(
+        this.gl.ARRAY_BUFFER,
+        this.instanceUploadData.subarray(0, requiredFloats),
+        this.gl.DYNAMIC_DRAW,
+      );
       this.instanceBufferPreparationKey = instanceBufferKey;
     }
     let particleFloats = 0;
@@ -857,7 +1127,13 @@ export class SceneGeometryRenderer {
     const particleDrawGroups = [...this.particleGroups.values(), ...skyGroups];
     if (particleFloats > 0 && this.particleBuffer) {
       if (this.particleUploadData.length < particleFloats) {
-        this.particleUploadData = new Float32Array(Math.max(particleFloats, this.particleUploadData.length * 2, PARTICLE_INSTANCE_FLOATS * 64));
+        this.particleUploadData = new Float32Array(
+          Math.max(
+            particleFloats,
+            this.particleUploadData.length * 2,
+            PARTICLE_INSTANCE_FLOATS * 64,
+          ),
+        );
       }
       for (const group of particleDrawGroups) {
         this.particleUploadData.set(
@@ -866,16 +1142,35 @@ export class SceneGeometryRenderer {
         );
       }
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.particleBuffer);
-      this.gl.bufferData(this.gl.ARRAY_BUFFER, this.particleUploadData.subarray(0, particleFloats), this.gl.DYNAMIC_DRAW);
+      this.gl.bufferData(
+        this.gl.ARRAY_BUFFER,
+        this.particleUploadData.subarray(0, particleFloats),
+        this.gl.DYNAMIC_DRAW,
+      );
     }
     for (const group of particleDrawGroups) {
       const material = group.material;
       if (group.count === 0) continue;
-      const renderClass = material.alphaMode === "additive" ? "additive" : material.alphaMode === "cutout" ? "masked" : material.alphaMode === "blended" ? "sourceOver" : "opaque";
+      const renderClass =
+        material.alphaMode === "additive"
+          ? "additive"
+          : material.alphaMode === "cutout"
+            ? "masked"
+            : material.alphaMode === "blended"
+              ? "sourceOver"
+              : "opaque";
       preparedSubmit({
         skyPass: group.skyPass,
         skyObjectIndex: group.skyObjectIndex,
-        key: { renderClass, programVariant: "particle", cullState: "none", meshBatch: -1, material: material.indexedMaterialResourceId ?? -1, sampler: "clamp", parity: false },
+        key: {
+          renderClass,
+          programVariant: "particle",
+          cullState: "none",
+          meshBatch: -1,
+          material: material.indexedMaterialResourceId ?? -1,
+          sampler: "clamp",
+          parity: false,
+        },
         instanceCount: group.count,
         draw: (view, pass) => this.drawCommonParticle(view, group, pass),
       });
@@ -888,7 +1183,8 @@ export class SceneGeometryRenderer {
       }
     }
     for (const key of this.particleFrozenData.keys()) {
-      if (!this.particleSimulationSeen.has(key)) this.particleFrozenData.delete(key);
+      if (!this.particleSimulationSeen.has(key))
+        this.particleFrozenData.delete(key);
     }
     if (mode === CameraMode.Camera2D) {
       this.twoDPreparedVisibleKey = preparedKey;
@@ -901,18 +1197,44 @@ export class SceneGeometryRenderer {
     }
   }
 
-  private emitCommonMeshSubmission(groupKey: string, batch: GpuBatch, batchIndex: number, instanceCount: number, submit: SceneSubmissionSink): void {
+  private emitCommonMeshSubmission(
+    groupKey: string,
+    batch: GpuBatch,
+    batchIndex: number,
+    instanceCount: number,
+    submit: SceneSubmissionSink,
+  ): void {
     const group = this.commonGroups.get(groupKey)!;
     const material = batch.material!;
-    const renderClass: SceneRenderKey["renderClass"] = material.alphaMode === "cutout" ? "masked" : material.alphaMode === "blended" ? "sourceOver" : material.alphaMode === "additive" ? "additive" : "opaque";
+    const renderClass: SceneRenderKey["renderClass"] =
+      material.alphaMode === "cutout"
+        ? "masked"
+        : material.alphaMode === "blended"
+          ? "sourceOver"
+          : material.alphaMode === "additive"
+            ? "additive"
+            : "opaque";
     submit({
-      key: { renderClass, programVariant: "world-geometry", cullState: cullForTransform(batch.cullState, group.parity), meshBatch: group.modelIndex * 65536 + batchIndex, material: batch.materialResourceId, sampler: batch.samplerMode, parity: group.parity },
+      key: {
+        renderClass,
+        programVariant: "world-geometry",
+        cullState: cullForTransform(batch.cullState, group.parity),
+        meshBatch: group.modelIndex * 65536 + batchIndex,
+        material: batch.materialResourceId,
+        sampler: batch.samplerMode,
+        parity: group.parity,
+      },
       instanceCount,
       draw: (view, pass) => this.drawCommonMesh(view, group, batch, pass),
     });
   }
 
-  private drawCommonMesh(view: SceneView, group: { modelIndex: number; instanceCount: number; offset: number }, batch: GpuBatch, pass: ScenePass): void {
+  private drawCommonMesh(
+    view: SceneView,
+    group: { modelIndex: number; instanceCount: number; offset: number },
+    batch: GpuBatch,
+    pass: ScenePass,
+  ): void {
     if (!batch.material || !batch.vao) return;
     const gl = this.gl;
     const state = getSceneDrawState(gl);
@@ -928,7 +1250,10 @@ export class SceneGeometryRenderer {
       state.producerOrigin = null;
       gl.useProgram(this.program);
       gl.uniformMatrix4fv(this.uniforms.xWorld, false, view.viewProjection);
-      gl.uniform1i(this.uniforms.cameraMode, view.cameraMode === CameraMode.Camera2D ? 0 : 1);
+      gl.uniform1i(
+        this.uniforms.cameraMode,
+        view.cameraMode === CameraMode.Camera2D ? 0 : 1,
+      );
       gl.uniform3f(this.uniforms.cameraPosition, ...view.cameraPosition);
       gl.uniform3f(this.uniforms.fogColor, ...view.fog.color);
       gl.uniform1f(this.uniforms.fogStart, view.fog.start);
@@ -946,7 +1271,18 @@ export class SceneGeometryRenderer {
     }
     if (state.meshPass !== pass) {
       state.meshPass = pass;
-      gl.uniform1i(this.uniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : pass === "opaque" ? 4 : 0);
+      gl.uniform1i(
+        this.uniforms.renderPass,
+        pass === "additive"
+          ? 1
+          : pass === "revealage"
+            ? 2
+            : pass === "fallback"
+              ? 3
+              : pass === "opaque"
+                ? 4
+                : 0,
+      );
     }
     if (state.meshMaterial !== batch.material) {
       const previous = state.meshMaterial;
@@ -967,7 +1303,16 @@ export class SceneGeometryRenderer {
         gl.uniform1f(this.uniforms.alphaCutoff, batch.material.alphaCutoff);
       }
       if (!previous || previous.alphaMode !== batch.material.alphaMode) {
-        gl.uniform1i(this.uniforms.alphaMode, batch.material.alphaMode === "cutout" ? 1 : batch.material.alphaMode === "blended" ? 2 : batch.material.alphaMode === "additive" ? 3 : 0);
+        gl.uniform1i(
+          this.uniforms.alphaMode,
+          batch.material.alphaMode === "cutout"
+            ? 1
+            : batch.material.alphaMode === "blended"
+              ? 2
+              : batch.material.alphaMode === "additive"
+                ? 3
+                : 0,
+        );
       }
     }
     if (state.meshBatch !== batch) {
@@ -979,11 +1324,38 @@ export class SceneGeometryRenderer {
       batch.instanceOffset = group.offset;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuffer);
       const byteOffset = group.offset * Float32Array.BYTES_PER_ELEMENT;
-      gl.vertexAttribPointer(3, 3, gl.FLOAT, false, INSTANCE_FLOATS * 4, byteOffset);
-      gl.vertexAttribPointer(4, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, byteOffset + 12);
-      gl.vertexAttribPointer(5, 3, gl.FLOAT, false, INSTANCE_FLOATS * 4, byteOffset + 28);
+      gl.vertexAttribPointer(
+        3,
+        3,
+        gl.FLOAT,
+        false,
+        INSTANCE_FLOATS * 4,
+        byteOffset,
+      );
+      gl.vertexAttribPointer(
+        4,
+        4,
+        gl.FLOAT,
+        false,
+        INSTANCE_FLOATS * 4,
+        byteOffset + 12,
+      );
+      gl.vertexAttribPointer(
+        5,
+        3,
+        gl.FLOAT,
+        false,
+        INSTANCE_FLOATS * 4,
+        byteOffset + 28,
+      );
     }
-    gl.drawElementsInstanced(gl.TRIANGLES, batch.indexCount, gl.UNSIGNED_INT, 0, group.instanceCount);
+    gl.drawElementsInstanced(
+      gl.TRIANGLES,
+      batch.indexCount,
+      gl.UNSIGNED_INT,
+      0,
+      group.instanceCount,
+    );
   }
 
   private prepareCommonBaked(
@@ -994,23 +1366,48 @@ export class SceneGeometryRenderer {
     offset: number,
     particleInstancesRemaining: number,
   ): { offset: number; particleInstancesRemaining: number } {
-    const groups = new Map<number, { mesh: GpuMesh; items: { placement: IndexedPlacement; x: number; y: number }[]; offset: number }>();
+    const groups = new Map<
+      number,
+      {
+        mesh: GpuMesh;
+        items: { placement: IndexedPlacement; x: number; y: number }[];
+        offset: number;
+      }
+    >();
     for (const [x, y] of visibleBlocks) {
       const loaded = this.chunks.get(`${x},${y}`);
-      if (!loaded || (mode !== CameraMode.Camera2D && !this.chunkVisible(loaded, mode))) continue;
+      if (
+        !loaded ||
+        (mode !== CameraMode.Camera2D && !this.chunkVisible(loaded, mode))
+      )
+        continue;
       for (const baked of loaded.chunk.bakedMeshes) {
         const mesh = this.bakedMeshes.get(baked.resourceId);
-        if (mesh === undefined) { this.requestBakedMesh(baked.resourceId); continue; }
+        if (mesh === undefined) {
+          this.requestBakedMesh(baked.resourceId);
+          continue;
+        }
         if (!mesh) continue;
         let group = groups.get(baked.resourceId);
         if (!group) {
           group = { mesh, items: [], offset };
           groups.set(baked.resourceId, group);
         }
-        for (let batchIndex = 0; batchIndex < mesh.batches.length; batchIndex++) {
+        for (
+          let batchIndex = 0;
+          batchIndex < mesh.batches.length;
+          batchIndex++
+        ) {
           const batch = mesh.batches[batchIndex];
           if (!batch.particles || !batch.material) continue;
-          const particleGroup: ParticleDrawGroup = this.particleGroups.get(batch.material) ?? { material: batch.material, data: new Float32Array(0), count: 0, offset: 0 };
+          const particleGroup: ParticleDrawGroup = this.particleGroups.get(
+            batch.material,
+          ) ?? {
+            material: batch.material,
+            data: new Float32Array(0),
+            count: 0,
+            offset: 0,
+          };
           this.particleGroups.set(batch.material, particleGroup);
           particleInstancesRemaining -= this.appendParticleInstances(
             particleGroup,
@@ -1029,7 +1426,13 @@ export class SceneGeometryRenderer {
         }
         const instanceOffset = offset;
         if (this.instanceUploadData.length < instanceOffset + INSTANCE_FLOATS) {
-          const data = new Float32Array(Math.max(instanceOffset + INSTANCE_FLOATS, this.instanceUploadData.length * 2, INSTANCE_FLOATS * 64));
+          const data = new Float32Array(
+            Math.max(
+              instanceOffset + INSTANCE_FLOATS,
+              this.instanceUploadData.length * 2,
+              INSTANCE_FLOATS * 64,
+            ),
+          );
           data.set(this.instanceUploadData);
           this.instanceUploadData = data;
         }
@@ -1043,21 +1446,70 @@ export class SceneGeometryRenderer {
         this.instanceUploadData[instanceOffset + 7] = 1;
         this.instanceUploadData[instanceOffset + 8] = 1;
         this.instanceUploadData[instanceOffset + 9] = 1;
-        group.items.push({ placement: { category: ENV_CELLS, geometryPath: 1, modelIndex: baked.resourceId, origin: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] }, x, y });
+        group.items.push({
+          placement: {
+            category: ENV_CELLS,
+            geometryPath: 1,
+            modelIndex: baked.resourceId,
+            origin: [0, 0, 0],
+            rotation: [0, 0, 0, 1],
+            scale: [1, 1, 1],
+          },
+          x,
+          y,
+        });
         offset += INSTANCE_FLOATS;
       }
     }
     for (const [resourceId, group] of groups) {
-      for (let batchIndex = 0; batchIndex < group.mesh.batches.length; batchIndex++) {
+      for (
+        let batchIndex = 0;
+        batchIndex < group.mesh.batches.length;
+        batchIndex++
+      ) {
         const batch = group.mesh.batches[batchIndex];
-        if (!batch.material || batch.materialError || batch.particles || batch.indexCount === 0) continue;
-        const renderClass: SceneRenderKey["renderClass"] = batch.material.alphaMode === "cutout" ? "masked" : batch.material.alphaMode === "blended" ? "sourceOver" : batch.material.alphaMode === "additive" ? "additive" : "opaque";
-        submit({ key: { renderClass, programVariant: "world-baked", cullState: batch.cullState, meshBatch: 0x40000000 | resourceId * 256 + batchIndex, material: batch.materialResourceId, sampler: batch.samplerMode, parity: false }, instanceCount: group.items.length, draw: (view, pass) => this.drawCommonMesh(view, { modelIndex: resourceId, instanceCount: group.items.length, offset: group.offset }, batch, pass) });
+        if (
+          !batch.material ||
+          batch.materialError ||
+          batch.particles ||
+          batch.indexCount === 0
+        )
+          continue;
+        const renderClass: SceneRenderKey["renderClass"] =
+          batch.material.alphaMode === "cutout"
+            ? "masked"
+            : batch.material.alphaMode === "blended"
+              ? "sourceOver"
+              : batch.material.alphaMode === "additive"
+                ? "additive"
+                : "opaque";
+        submit({
+          key: {
+            renderClass,
+            programVariant: "world-baked",
+            cullState: batch.cullState,
+            meshBatch: 0x40000000 | (resourceId * 256 + batchIndex),
+            material: batch.materialResourceId,
+            sampler: batch.samplerMode,
+            parity: false,
+          },
+          instanceCount: group.items.length,
+          draw: (view, pass) =>
+            this.drawCommonMesh(
+              view,
+              {
+                modelIndex: resourceId,
+                instanceCount: group.items.length,
+                offset: group.offset,
+              },
+              batch,
+              pass,
+            ),
+        });
       }
     }
     return { offset, particleInstancesRemaining };
   }
-
 
   private appendParticlesForGroup(
     batch: GpuBatch,
@@ -1067,7 +1519,14 @@ export class SceneGeometryRenderer {
     freeze: boolean,
   ): number {
     if (!batch.particles || !batch.material || maxInstances <= 0) return 0;
-    const group: ParticleDrawGroup = this.particleGroups.get(batch.material) ?? { material: batch.material, data: new Float32Array(0), count: 0, offset: 0 };
+    const group: ParticleDrawGroup = this.particleGroups.get(
+      batch.material,
+    ) ?? {
+      material: batch.material,
+      data: new Float32Array(0),
+      count: 0,
+      offset: 0,
+    };
     this.particleGroups.set(batch.material, group);
     let appended = 0;
     for (let itemIndex = 0; itemIndex < placements.length; itemIndex++) {
@@ -1092,8 +1551,18 @@ export class SceneGeometryRenderer {
     return appended;
   }
 
-  private drawCommonParticle(view: SceneView, group: ParticleDrawGroup, pass: ScenePass): void {
-    if (!this.particleBuffer || !this.particleProgram || !this.particleVao || !this.particleQuadBuffer) return;
+  private drawCommonParticle(
+    view: SceneView,
+    group: ParticleDrawGroup,
+    pass: ScenePass,
+  ): void {
+    if (
+      !this.particleBuffer ||
+      !this.particleProgram ||
+      !this.particleVao ||
+      !this.particleQuadBuffer
+    )
+      return;
     const gl = this.gl;
     if (group.skyPass) {
       invalidateSceneDrawState(gl);
@@ -1110,16 +1579,35 @@ export class SceneGeometryRenderer {
       state.particleOffset = -1;
       state.producerOrigin = null;
       gl.useProgram(this.particleProgram);
-      gl.uniformMatrix4fv(this.particleUniforms.xWorld, false, view.viewProjection);
+      gl.uniformMatrix4fv(
+        this.particleUniforms.xWorld,
+        false,
+        view.viewProjection,
+      );
       gl.uniform3f(this.particleUniforms.cameraRight, ...view.particleRight);
       gl.uniform3f(this.particleUniforms.cameraUp, ...view.particleUp);
-      gl.uniform3f(this.particleUniforms.cameraPosition, ...view.cameraPosition);
+      gl.uniform3f(
+        this.particleUniforms.cameraPosition,
+        ...view.cameraPosition,
+      );
       gl.uniform3f(this.particleUniforms.fogColor, ...view.fog.color);
       gl.uniform1f(this.particleUniforms.fogStart, view.fog.start);
       gl.uniform1f(this.particleUniforms.fogEnd, view.fog.end);
-      gl.uniform1i(this.particleUniforms.fogEnabled, !group.skyPass && view.fog.enabled ? 1 : 0);
+      gl.uniform1i(
+        this.particleUniforms.fogEnabled,
+        !group.skyPass && view.fog.enabled ? 1 : 0,
+      );
       gl.uniform1i(this.particleUniforms.texture, BUILDING_TEXTURE_UNIT);
-      gl.uniform1i(this.particleUniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : 0);
+      gl.uniform1i(
+        this.particleUniforms.renderPass,
+        pass === "additive"
+          ? 1
+          : pass === "revealage"
+            ? 2
+            : pass === "fallback"
+              ? 3
+              : 0,
+      );
       gl.activeTexture(gl.TEXTURE0 + BUILDING_TEXTURE_UNIT);
     }
     if (state.producerOrigin !== this.acYOrigin) {
@@ -1129,7 +1617,16 @@ export class SceneGeometryRenderer {
     if (state.particlePass !== pass) {
       state.particlePass = pass;
       state.particleMaterial = null;
-      gl.uniform1i(this.particleUniforms.renderPass, pass === "additive" ? 1 : pass === "revealage" ? 2 : pass === "fallback" ? 3 : 0);
+      gl.uniform1i(
+        this.particleUniforms.renderPass,
+        pass === "additive"
+          ? 1
+          : pass === "revealage"
+            ? 2
+            : pass === "fallback"
+              ? 3
+              : 0,
+      );
     }
     // Programs are shared, but each producer owns its particle VAO and buffer.
     if (state.particleVao !== this.particleVao || state.particleOffset === -1) {
@@ -1148,8 +1645,20 @@ export class SceneGeometryRenderer {
       // handle; the material will be refreshed by AcDatClient on a later frame.
       gl.bindTexture(gl.TEXTURE_2D, group.material.texture);
       gl.uniform1f(this.particleUniforms.opacity, group.material.opacity);
-      gl.uniform1f(this.particleUniforms.alphaCutoff, group.material.alphaCutoff);
-      gl.uniform1i(this.particleUniforms.alphaMode, group.material.alphaMode === "cutout" ? 1 : group.material.alphaMode === "blended" ? 2 : group.material.alphaMode === "additive" ? 3 : 0);
+      gl.uniform1f(
+        this.particleUniforms.alphaCutoff,
+        group.material.alphaCutoff,
+      );
+      gl.uniform1i(
+        this.particleUniforms.alphaMode,
+        group.material.alphaMode === "cutout"
+          ? 1
+          : group.material.alphaMode === "blended"
+            ? 2
+            : group.material.alphaMode === "additive"
+              ? 3
+              : 0,
+      );
     }
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, group.count);
   }
@@ -1169,7 +1678,11 @@ export class SceneGeometryRenderer {
   ): number {
     if (maxInstances <= 0) return 0;
     let appended = 0;
-    for (let descriptorIndex = 0; descriptorIndex < particles.length; descriptorIndex++) {
+    for (
+      let descriptorIndex = 0;
+      descriptorIndex < particles.length;
+      descriptorIndex++
+    ) {
       if (appended >= maxInstances) break;
       const descriptor = particles[descriptorIndex];
       let simulation = this.sharedParticleSimulations.get(descriptor);
@@ -1180,11 +1693,13 @@ export class SceneGeometryRenderer {
       const lastFrame = this.sharedParticleFrame.get(descriptor);
       let elapsed = this.sharedParticleElapsed.get(descriptor) ?? 0;
       const previousStride = this.sharedParticleUpdateStride.get(descriptor);
-      const strideWasRequestedThisFrame = previousStride?.frame === this.particleFrameNumber;
+      const strideWasRequestedThisFrame =
+        previousStride?.frame === this.particleFrameNumber;
       const effectiveStride = strideWasRequestedThisFrame
         ? Math.min(previousStride!.stride, updateStride)
         : updateStride;
-      const strideWasPromoted = strideWasRequestedThisFrame && effectiveStride < previousStride!.stride;
+      const strideWasPromoted =
+        strideWasRequestedThisFrame && effectiveStride < previousStride!.stride;
       this.sharedParticleUpdateStride.set(descriptor, {
         frame: this.particleFrameNumber,
         stride: effectiveStride,
@@ -1193,8 +1708,11 @@ export class SceneGeometryRenderer {
         elapsed += this.particleFrameDeltaTime;
         this.sharedParticleFrame.set(descriptor, this.particleFrameNumber);
       }
-      const shouldUpdate = !this.sharedParticleInitialized.has(descriptor) ||
-        (!freeze && lastFrame !== this.particleFrameNumber && this.particleFrameNumber % effectiveStride === 0) ||
+      const shouldUpdate =
+        !this.sharedParticleInitialized.has(descriptor) ||
+        (!freeze &&
+          lastFrame !== this.particleFrameNumber &&
+          this.particleFrameNumber % effectiveStride === 0) ||
         (!freeze && strideWasPromoted);
       if (shouldUpdate) {
         simulation.update(
@@ -1202,7 +1720,9 @@ export class SceneGeometryRenderer {
           [0, 0, 0],
           [0, 0, 0, 1],
           [1, 1, 1],
-          descriptor.maxParticles > 0 ? descriptor.maxParticles : Number.POSITIVE_INFINITY,
+          descriptor.maxParticles > 0
+            ? descriptor.maxParticles
+            : Number.POSITIVE_INFINITY,
           true,
         );
         this.sharedParticleInitialized.add(descriptor);
@@ -1332,10 +1852,7 @@ export class SceneGeometryRenderer {
       .bakedMesh(resourceId, this.decodeController.signal)
       .then((mesh) => {
         if (generation === this.cacheGeneration) {
-          this.bakedMeshes.set(
-            resourceId,
-            this.uploadMesh(resourceId, mesh),
-          );
+          this.bakedMeshes.set(resourceId, this.uploadMesh(resourceId, mesh));
           this.twoDPreparedDirty = true;
           this.invalidateStaticPreparation();
         }
@@ -1376,7 +1893,9 @@ export class SceneGeometryRenderer {
         particles: item.particles,
         hasWrappingUVs: item.hasWrappingUVs === true,
         cullState: item.cullState ?? "none",
-        samplerMode: item.samplerMode ?? (item.hasWrappingUVs === true ? "repeat" : "clamp"),
+        samplerMode:
+          item.samplerMode ??
+          (item.hasWrappingUVs === true ? "repeat" : "clamp"),
       };
       batch.vao = this.createBatchVao(batch);
       this.dats
@@ -1408,11 +1927,25 @@ export class SceneGeometryRenderer {
   private particleFrameDeltaTime = 1 / 60;
   private particleFrameNumber = 0;
   private particleSimulationElapsed = new Map<string, number>();
-  private sharedParticleSimulations = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, ParticleSimulation>();
-  private sharedParticleElapsed = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, number>();
-  private sharedParticleFrame = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, number>();
-  private sharedParticleUpdateStride = new WeakMap<import("./acdatclient").ParticleEmitterDescriptor, { frame: number; stride: number }>();
-  private sharedParticleInitialized = new WeakSet<import("./acdatclient").ParticleEmitterDescriptor>();
+  private sharedParticleSimulations = new WeakMap<
+    import("./acdatclient").ParticleEmitterDescriptor,
+    ParticleSimulation
+  >();
+  private sharedParticleElapsed = new WeakMap<
+    import("./acdatclient").ParticleEmitterDescriptor,
+    number
+  >();
+  private sharedParticleFrame = new WeakMap<
+    import("./acdatclient").ParticleEmitterDescriptor,
+    number
+  >();
+  private sharedParticleUpdateStride = new WeakMap<
+    import("./acdatclient").ParticleEmitterDescriptor,
+    { frame: number; stride: number }
+  >();
+  private sharedParticleInitialized = new WeakSet<
+    import("./acdatclient").ParticleEmitterDescriptor
+  >();
   private particle2DFrozen = false;
   private particle2DVisibleKey = "";
   private particleFrozenData = new Map<string, number[]>();
@@ -1433,7 +1966,11 @@ export class SceneGeometryRenderer {
   ): number {
     if (maxInstances <= 0) return 0;
     let appended = 0;
-    for (let descriptorIndex = 0; descriptorIndex < particles.length; descriptorIndex++) {
+    for (
+      let descriptorIndex = 0;
+      descriptorIndex < particles.length;
+      descriptorIndex++
+    ) {
       if (appended >= maxInstances) break;
       const descriptor = particles[descriptorIndex];
       const key = `${simulationKey}:${descriptorIndex}:${descriptor.hookIndex}:${descriptor.seed}`;
@@ -1452,14 +1989,19 @@ export class SceneGeometryRenderer {
         );
         this.ensureParticleCapacity(group, count / PARTICLE_INSTANCE_FLOATS);
         for (let index = 0; index < count; index++) {
-          group.data[group.count * PARTICLE_INSTANCE_FLOATS + index] = cached[index];
+          group.data[group.count * PARTICLE_INSTANCE_FLOATS + index] =
+            cached[index];
         }
         group.count += count / PARTICLE_INSTANCE_FLOATS;
         appended += count / PARTICLE_INSTANCE_FLOATS;
         continue;
       }
-      const elapsed = (this.particleSimulationElapsed.get(key) ?? 0) + this.particleFrameDeltaTime;
-      const shouldUpdate = !this.particleSimulationElapsed.has(key) || this.particleFrameNumber % updateStride === 0;
+      const elapsed =
+        (this.particleSimulationElapsed.get(key) ?? 0) +
+        this.particleFrameDeltaTime;
+      const shouldUpdate =
+        !this.particleSimulationElapsed.has(key) ||
+        this.particleFrameNumber % updateStride === 0;
       let instances: ParticleSimulationInstance[];
       if (shouldUpdate) {
         this.particleSimulationElapsed.set(key, 0);
@@ -1479,7 +2021,11 @@ export class SceneGeometryRenderer {
       for (const instance of instances) {
         if (frozen) this.appendParticleInstance(frozen, instance);
         this.ensureParticleCapacity(group, 1);
-        this.writeParticleInstance(group.data, group.count * PARTICLE_INSTANCE_FLOATS, instance);
+        this.writeParticleInstance(
+          group.data,
+          group.count * PARTICLE_INSTANCE_FLOATS,
+          instance,
+        );
         group.count++;
       }
       if (frozen) this.particleFrozenData.set(key, frozen);
@@ -1488,7 +2034,10 @@ export class SceneGeometryRenderer {
     return appended;
   }
 
-  private appendParticleInstance(data: number[], instance: ParticleSimulationInstance): void {
+  private appendParticleInstance(
+    data: number[],
+    instance: ParticleSimulationInstance,
+  ): void {
     appendParticleInstance(data, instance);
   }
 
@@ -1502,7 +2051,8 @@ export class SceneGeometryRenderer {
     placementRotation?: [number, number, number, number],
     placementScale?: [number, number, number],
   ): void {
-    const shared = placementRotation !== undefined && placementScale !== undefined;
+    const shared =
+      placementRotation !== undefined && placementScale !== undefined;
     const sx = placementScale !== undefined ? placementScale[0] : 1;
     const sy = placementScale !== undefined ? placementScale[1] : 1;
     const sz = placementScale !== undefined ? placementScale[2] : 1;
@@ -1521,10 +2071,26 @@ export class SceneGeometryRenderer {
       centerX = centerX + q[3] * tx + q[1] * tz - q[2] * ty + (originX ?? 0);
       centerY = centerY + q[3] * ty + q[2] * tx - q[0] * tz + (originY ?? 0);
       centerZ = centerZ + q[3] * tz + q[0] * ty - q[1] * tx + (originZ ?? 0);
-      rotationX = q[3] * instance.rotation[0] + q[0] * instance.rotation[3] + q[1] * instance.rotation[2] - q[2] * instance.rotation[1];
-      rotationY = q[3] * instance.rotation[1] - q[0] * instance.rotation[2] + q[1] * instance.rotation[3] + q[2] * instance.rotation[0];
-      rotationZ = q[3] * instance.rotation[2] + q[0] * instance.rotation[1] - q[1] * instance.rotation[0] + q[2] * instance.rotation[3];
-      rotationW = q[3] * instance.rotation[3] - q[0] * instance.rotation[0] - q[1] * instance.rotation[1] - q[2] * instance.rotation[2];
+      rotationX =
+        q[3] * instance.rotation[0] +
+        q[0] * instance.rotation[3] +
+        q[1] * instance.rotation[2] -
+        q[2] * instance.rotation[1];
+      rotationY =
+        q[3] * instance.rotation[1] -
+        q[0] * instance.rotation[2] +
+        q[1] * instance.rotation[3] +
+        q[2] * instance.rotation[0];
+      rotationZ =
+        q[3] * instance.rotation[2] +
+        q[0] * instance.rotation[1] -
+        q[1] * instance.rotation[0] +
+        q[2] * instance.rotation[3];
+      rotationW =
+        q[3] * instance.rotation[3] -
+        q[0] * instance.rotation[0] -
+        q[1] * instance.rotation[1] -
+        q[2] * instance.rotation[2];
     }
     const fullBillboard = instance.billboard === 1;
     const cameraAligned = instance.billboard > 0.5;
@@ -1537,17 +2103,20 @@ export class SceneGeometryRenderer {
       const y = instance.dimensions[1];
       const z = instance.dimensions[2];
       if (y > x && y > z) {
-        [sizeX, sizeY] = x > z
-          ? [Math.abs(x * sx), Math.abs(y * sy)]
-          : [Math.abs(y * sy), Math.abs(z * sz)];
+        [sizeX, sizeY] =
+          x > z
+            ? [Math.abs(x * sx), Math.abs(y * sy)]
+            : [Math.abs(y * sy), Math.abs(z * sz)];
       } else if (x > y && x > z) {
-        [sizeX, sizeY] = z > y
-          ? [Math.abs(x * sx), Math.abs(z * sz)]
-          : [Math.abs(x * sx), Math.abs(y * sy)];
+        [sizeX, sizeY] =
+          z > y
+            ? [Math.abs(x * sx), Math.abs(z * sz)]
+            : [Math.abs(x * sx), Math.abs(y * sy)];
       } else {
-        [sizeX, sizeY] = x > y
-          ? [Math.abs(x * sx), Math.abs(z * sz)]
-          : [Math.abs(y * sy), Math.abs(z * sz)];
+        [sizeX, sizeY] =
+          x > y
+            ? [Math.abs(x * sx), Math.abs(z * sz)]
+            : [Math.abs(y * sy), Math.abs(z * sz)];
       }
     }
     if (fullBillboard) {
@@ -1584,10 +2153,17 @@ export class SceneGeometryRenderer {
     data[offset + 18] = cameraAligned ? instance.billboard : 0;
   }
 
-  private ensureParticleCapacity(group: ParticleDrawGroup, additional: number): void {
+  private ensureParticleCapacity(
+    group: ParticleDrawGroup,
+    additional: number,
+  ): void {
     const required = (group.count + additional) * PARTICLE_INSTANCE_FLOATS;
     if (group.data.length >= required) return;
-    const capacity = Math.max(required, group.data.length * 2, PARTICLE_INSTANCE_FLOATS * 64);
+    const capacity = Math.max(
+      required,
+      group.data.length * 2,
+      PARTICLE_INSTANCE_FLOATS * 64,
+    );
     const data = new Float32Array(capacity);
     data.set(group.data.subarray(0, group.count * PARTICLE_INSTANCE_FLOATS));
     group.data = data;
@@ -1601,8 +2177,10 @@ export class SceneGeometryRenderer {
     const dz = placement.origin[2] - camera[2];
     const distance = Math.hypot(dx, dy, dz);
     if (distance <= PARTICLE_LOD_NEAR_CAMERA_DISTANCE) return 1;
-    if (distance >= PARTICLE_LOD_FAR_CAMERA_DISTANCE) return PARTICLE_LOD_MIN_SCALE;
-    const range = PARTICLE_LOD_FAR_CAMERA_DISTANCE - PARTICLE_LOD_NEAR_CAMERA_DISTANCE;
+    if (distance >= PARTICLE_LOD_FAR_CAMERA_DISTANCE)
+      return PARTICLE_LOD_MIN_SCALE;
+    const range =
+      PARTICLE_LOD_FAR_CAMERA_DISTANCE - PARTICLE_LOD_NEAR_CAMERA_DISTANCE;
     const progress = (distance - PARTICLE_LOD_NEAR_CAMERA_DISTANCE) / range;
     return 1 - progress * (1 - PARTICLE_LOD_MIN_SCALE);
   }
@@ -1614,13 +2192,54 @@ export class SceneGeometryRenderer {
     return 8;
   }
 
-  private normalize(v: [number, number, number]): [number, number, number] { const n = Math.hypot(v[0], v[1], v[2]); return n < 0.0002 ? [0, 0, 0] : [v[0] / n, v[1] / n, v[2] / n]; }
-  private rotate(q: [number, number, number, number], v: [number, number, number]): [number, number, number] { const t = [2 * (q[1] * v[2] - q[2] * v[1]), 2 * (q[2] * v[0] - q[0] * v[2]), 2 * (q[0] * v[1] - q[1] * v[0])]; return [v[0] + q[3] * t[0] + q[1] * t[2] - q[2] * t[1], v[1] + q[3] * t[1] + q[2] * t[0] - q[0] * t[2], v[2] + q[3] * t[2] + q[0] * t[1] - q[1] * t[0]]; }
-  private mulQuat(a: [number, number, number, number], b: [number, number, number, number]): [number, number, number, number] { return [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]]; }
-  private add(a: [number, number, number], b: [number, number, number]): [number, number, number] { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
-  private mul(a: [number, number, number], s: number): [number, number, number] { return [a[0] * s, a[1] * s, a[2] * s]; }
-  private lerp(a: number, b: number, t: number): number { return a + (b - a) * t; }
-  private clamp(a: number, min: number, max: number): number { return Math.max(min, Math.min(max, a)); }
+  private normalize(v: [number, number, number]): [number, number, number] {
+    const n = Math.hypot(v[0], v[1], v[2]);
+    return n < 0.0002 ? [0, 0, 0] : [v[0] / n, v[1] / n, v[2] / n];
+  }
+  private rotate(
+    q: [number, number, number, number],
+    v: [number, number, number],
+  ): [number, number, number] {
+    const t = [
+      2 * (q[1] * v[2] - q[2] * v[1]),
+      2 * (q[2] * v[0] - q[0] * v[2]),
+      2 * (q[0] * v[1] - q[1] * v[0]),
+    ];
+    return [
+      v[0] + q[3] * t[0] + q[1] * t[2] - q[2] * t[1],
+      v[1] + q[3] * t[1] + q[2] * t[0] - q[0] * t[2],
+      v[2] + q[3] * t[2] + q[0] * t[1] - q[1] * t[0],
+    ];
+  }
+  private mulQuat(
+    a: [number, number, number, number],
+    b: [number, number, number, number],
+  ): [number, number, number, number] {
+    return [
+      a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+      a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+      a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+      a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ];
+  }
+  private add(
+    a: [number, number, number],
+    b: [number, number, number],
+  ): [number, number, number] {
+    return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  }
+  private mul(
+    a: [number, number, number],
+    s: number,
+  ): [number, number, number] {
+    return [a[0] * s, a[1] * s, a[2] * s];
+  }
+  private lerp(a: number, b: number, t: number): number {
+    return a + (b - a) * t;
+  }
+  private clamp(a: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, a));
+  }
 
   private particleDepth(data: number[], camera: BaseCamera): number {
     if (data.length < 3) return 0;
@@ -1663,10 +2282,15 @@ export class SceneGeometryRenderer {
       groups: new Map<string, SceneGroup>(),
     };
     for (const placement of placements) {
-      if (placement.category === CELL_STATICS || placement.category === CELL_SERVER_SPAWNS) continue;
+      if (
+        placement.category === CELL_STATICS ||
+        placement.category === CELL_SERVER_SPAWNS
+      )
+        continue;
       if (oversizedStatics.has(placement)) continue;
       if (placement.geometryPath === 1) continue;
-      const parity = placement.scale[0] * placement.scale[1] * placement.scale[2] < 0;
+      const parity =
+        placement.scale[0] * placement.scale[1] * placement.scale[2] < 0;
       const key = `${placement.modelIndex}:${parity ? 1 : 0}`;
       const group: SceneGroup = data.groups.get(key) ?? {
         modelIndex: placement.modelIndex,
@@ -1682,7 +2306,11 @@ export class SceneGeometryRenderer {
       const instances = new Float32Array(group.instanceCount * INSTANCE_FLOATS);
       const placements = group.placementSegments[0];
       for (let index = 0; index < placements.length; index++) {
-        this.writePlacementInstance(instances, index * INSTANCE_FLOATS, placements[index]);
+        this.writePlacementInstance(
+          instances,
+          index * INSTANCE_FLOATS,
+          placements[index],
+        );
       }
       group.instanceSegments = [instances];
     }
@@ -1774,15 +2402,19 @@ export class SceneGeometryRenderer {
       Math.max(0, centerY - radius),
       Math.min(MAX_LAND_BLOCK_INDEX, centerY + radius),
     );
-    const visible = candidates.filter(([x, y]) =>
-      !this.frameFrustum || intersectsFrustum(this.landBlockBounds(x, y), this.frameFrustum),
+    const visible = candidates.filter(
+      ([x, y]) =>
+        !this.frameFrustum ||
+        intersectsFrustum(this.landBlockBounds(x, y), this.frameFrustum),
     );
     const center = camera.Position;
     visible.sort((a, b) => {
       const adx = a[0] * LAND_BLOCK_SIZE + LAND_BLOCK_SIZE / 2 - center.x;
-      const ady = MAP_SIZE - (a[1] * LAND_BLOCK_SIZE + LAND_BLOCK_SIZE / 2) - center.y;
+      const ady =
+        MAP_SIZE - (a[1] * LAND_BLOCK_SIZE + LAND_BLOCK_SIZE / 2) - center.y;
       const bdx = b[0] * LAND_BLOCK_SIZE + LAND_BLOCK_SIZE / 2 - center.x;
-      const bdy = MAP_SIZE - (b[1] * LAND_BLOCK_SIZE + LAND_BLOCK_SIZE / 2) - center.y;
+      const bdy =
+        MAP_SIZE - (b[1] * LAND_BLOCK_SIZE + LAND_BLOCK_SIZE / 2) - center.y;
       return adx * adx + ady * ady - bdx * bdx - bdy * bdy;
     });
     return visible;
@@ -1790,8 +2422,16 @@ export class SceneGeometryRenderer {
 
   private landBlockBounds(x: number, y: number): Bounds3 {
     return {
-      minimum: [x * LAND_BLOCK_SIZE, MAP_SIZE - (y + 1) * LAND_BLOCK_SIZE, -4096],
-      maximum: [(x + 1) * LAND_BLOCK_SIZE, MAP_SIZE - y * LAND_BLOCK_SIZE, 4096],
+      minimum: [
+        x * LAND_BLOCK_SIZE,
+        MAP_SIZE - (y + 1) * LAND_BLOCK_SIZE,
+        -4096,
+      ],
+      maximum: [
+        (x + 1) * LAND_BLOCK_SIZE,
+        MAP_SIZE - y * LAND_BLOCK_SIZE,
+        4096,
+      ],
     };
   }
 
@@ -1886,12 +2526,7 @@ export class SceneGeometryRenderer {
     if (cached) return cached;
     const bounds = transformBounds(
       loaded.chunk.bounds,
-      (point) =>
-        new Vector3(
-          point.x,
-          MAP_SIZE - point.y,
-          point.z,
-        ),
+      (point) => new Vector3(point.x, MAP_SIZE - point.y, point.z),
     );
     this.chunkBoundsCache.set(loaded.chunk, bounds);
     return bounds;
@@ -1921,11 +2556,8 @@ export class SceneGeometryRenderer {
         q[0] * vector.y - q[1] * vector.x,
       );
       return new Vector3(
-        placement.origin[0] +
-          scaled.x +
-          2 * cross.x,
-        this.acYOrigin -
-          (placement.origin[1] + scaled.y + 2 * cross.y),
+        placement.origin[0] + scaled.x + 2 * cross.x,
+        this.acYOrigin - (placement.origin[1] + scaled.y + 2 * cross.y),
         placement.origin[2] + scaled.z + 2 * cross.z,
       );
     });
@@ -1933,10 +2565,7 @@ export class SceneGeometryRenderer {
     return transformed;
   }
 
-  private chunkVisible(
-    loaded: LoadedChunk,
-    mode: CameraMode,
-  ): boolean {
+  private chunkVisible(loaded: LoadedChunk, mode: CameraMode): boolean {
     if (mode === CameraMode.Camera2D) {
       return this.camera2DVisibleBounds
         ? intersectsRectangle(
@@ -1962,7 +2591,10 @@ export class SceneGeometryRenderer {
     };
   }
 
-  private evictOutside(retained: Set<string>, retainedModels = new Set<number>()): void {
+  private evictOutside(
+    retained: Set<string>,
+    retainedModels = new Set<number>(),
+  ): void {
     const retainedBaked = new Set<number>();
     for (const key of retained) {
       const loaded = this.chunks.get(key);
@@ -2018,7 +2650,12 @@ export class SceneGeometryRenderer {
       if (!current) return;
       mesh.batches.forEach((batch, index) => {
         const source = current.batches[index];
-        if (!source || batch.vertexBuffer === source.vertexBuffer && batch.indexBuffer === source.indexBuffer) return;
+        if (
+          !source ||
+          (batch.vertexBuffer === source.vertexBuffer &&
+            batch.indexBuffer === source.indexBuffer)
+        )
+          return;
         if (batch.vao) this.gl.deleteVertexArray(batch.vao);
         batch.vertexBuffer = source.vertexBuffer ?? null;
         batch.indexBuffer = source.indexBuffer ?? null;
@@ -2042,7 +2679,11 @@ export class SceneGeometryRenderer {
     this.particleQuadBuffer = gl.createBuffer();
     if (this.particleQuadBuffer) {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.particleQuadBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]), gl.STATIC_DRAW);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]),
+        gl.STATIC_DRAW,
+      );
     }
     this.configureParticleVao();
     this.uniforms = this.geometryResources.uniforms;
@@ -2050,7 +2691,8 @@ export class SceneGeometryRenderer {
   }
 
   private createBatchVao(batch: GpuBatch): WebGLVertexArrayObject | null {
-    if (!batch.vertexBuffer || !batch.indexBuffer || !this.instanceBuffer) return null;
+    if (!batch.vertexBuffer || !batch.indexBuffer || !this.instanceBuffer)
+      return null;
     const gl = this.gl;
     const vao = gl.createVertexArray();
     if (!vao) return null;
@@ -2063,7 +2705,8 @@ export class SceneGeometryRenderer {
     gl.vertexAttribPointer(3, 3, gl.FLOAT, false, INSTANCE_FLOATS * 4, 0);
     gl.vertexAttribPointer(4, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, 12);
     gl.vertexAttribPointer(5, 3, gl.FLOAT, false, INSTANCE_FLOATS * 4, 28);
-    for (const location of [0, 1, 2, 3, 4, 5]) gl.enableVertexAttribArray(location);
+    for (const location of [0, 1, 2, 3, 4, 5])
+      gl.enableVertexAttribArray(location);
     gl.vertexAttribDivisor(3, 1);
     gl.vertexAttribDivisor(4, 1);
     gl.vertexAttribDivisor(5, 1);
@@ -2073,7 +2716,8 @@ export class SceneGeometryRenderer {
   }
 
   private configureParticleVao(): void {
-    if (!this.particleVao || !this.particleQuadBuffer || !this.particleBuffer) return;
+    if (!this.particleVao || !this.particleQuadBuffer || !this.particleBuffer)
+      return;
     const gl = this.gl;
     gl.bindVertexArray(this.particleVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.particleQuadBuffer);
@@ -2093,9 +2737,23 @@ export class SceneGeometryRenderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.particleBuffer);
     const stride = PARTICLE_INSTANCE_FLOATS * Float32Array.BYTES_PER_ELEMENT;
     const byteOffset = floatOffset * Float32Array.BYTES_PER_ELEMENT;
-    const attributes = [[1, 3, 0], [2, 4, 12], [3, 3, 28], [4, 4, 40], [5, 4, 56], [6, 1, 72]];
+    const attributes = [
+      [1, 3, 0],
+      [2, 4, 12],
+      [3, 3, 28],
+      [4, 4, 40],
+      [5, 4, 56],
+      [6, 1, 72],
+    ];
     for (const [location, size, offset] of attributes) {
-      gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, byteOffset + offset);
+      gl.vertexAttribPointer(
+        location,
+        size,
+        gl.FLOAT,
+        false,
+        stride,
+        byteOffset + offset,
+      );
     }
   }
 

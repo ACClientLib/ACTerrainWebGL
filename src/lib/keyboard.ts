@@ -3,8 +3,10 @@ export function isTextEditingTarget(target: EventTarget | null): boolean {
     return false;
   }
 
-  return target.isContentEditable ||
+  return (
+    target.isContentEditable ||
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement;
+    target instanceof HTMLSelectElement
+  );
 }

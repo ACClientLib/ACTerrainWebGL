@@ -9,22 +9,33 @@ export class ExamineDataClient {
   private descriptor?: Promise<DatImageDescriptor & { version: string }>;
 
   constructor(private readonly options: ExamineWindowOptions) {
-    this.baseUrl = new URL(options.apiBase.endsWith("/") ? options.apiBase : `${options.apiBase}/`, window.location.href);
+    this.baseUrl = new URL(
+      options.apiBase.endsWith("/") ? options.apiBase : `${options.apiBase}/`,
+      window.location.href,
+    );
     this.images = new DatImageClient(this.baseUrl.href);
   }
 
   private getDescriptor(): Promise<DatImageDescriptor & { version: string }> {
-    this.descriptor ??= this.read(this.options.serverDescriptorPath).catch((error) => {
-      this.descriptor = undefined;
-      throw error;
-    });
+    this.descriptor ??= this.read(this.options.serverDescriptorPath).catch(
+      (error) => {
+        this.descriptor = undefined;
+        throw error;
+      },
+    );
     return this.descriptor;
   }
 
-  async getServerObject(guid: number | string, signal?: AbortSignal): Promise<WorldObjectData> {
+  async getServerObject(
+    guid: number | string,
+    signal?: AbortSignal,
+  ): Promise<WorldObjectData> {
     const descriptor = await this.getDescriptor();
     signal?.throwIfAborted();
-    return this.read(`v3/servers/${encodeURIComponent(this.options.serverId)}/${encodeURIComponent(descriptor.version)}/objects/${encodeURIComponent(String(guid))}`, signal);
+    return this.read(
+      `v3/servers/${encodeURIComponent(this.options.serverId)}/${encodeURIComponent(descriptor.version)}/objects/${encodeURIComponent(String(guid))}`,
+      signal,
+    );
   }
 
   async image(id: number): Promise<HTMLImageElement> {
@@ -32,7 +43,10 @@ export class ExamineDataClient {
   }
 
   private async read(path: string, signal?: AbortSignal): Promise<any> {
-    const response = await fetch(new URL(path.replace(/^\//, ""), this.baseUrl), { signal });
+    const response = await fetch(
+      new URL(path.replace(/^\//, ""), this.baseUrl),
+      { signal },
+    );
     if (!response.ok) {
       throw new Error(`Examine request failed (${response.status})`);
     }
