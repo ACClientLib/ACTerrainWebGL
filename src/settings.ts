@@ -62,7 +62,7 @@ const defaults = {
   mobileMoveSensitivity: 85,
   mobileLookSensitivity: 1.5,
   mobileLookInvertY: false,
-  fov: 45,
+  fov: 60,
   directionX: 0.38,
   directionY: -0.15,
   directionZ: -1,

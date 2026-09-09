@@ -12,7 +12,7 @@ export class CameraFlying extends BaseCamera {
   private _pitch = 0; // Rotation around X axis (up/down)
   private _roll = 0; // Rotation around Y axis (banking)
 
-  private _fov = 45; // Field of view in degrees
+  private _fov = 60; // Field of view in degrees
   // A very small near plane wastes most of the 24-bit depth buffer when the
   // scene spans the whole map. Keep it above sub-unit distances to improve
   // terrain/building depth separation in the 3D view.
