@@ -15,13 +15,13 @@ export class ExamineObjectLoader {
   ): Promise<LoadedServerObjectModel> {
     let model: LoadedServerObjectModel;
     try {
-      model = await this.datClient.loadServerObjectModel(guid, signal, onPhase, false);
+      model = await this.datClient.loadServerObjectModel(guid, signal, onPhase);
     } catch (error) {
       if (modelIndex === undefined || !(error instanceof Error) || !error.message.includes("unsupported")) throw error;
       onPhase?.("loading model resources");
       const object = await this.datClient.getServerObject(guid, signal);
       const mesh = await this.datClient.mesh(modelIndex, signal);
-      const batches = await this.datClient.loadModelBatches(mesh, signal, false);
+      const batches = await this.datClient.loadModelBatches(mesh, signal);
       model = {
         object,
         render: {

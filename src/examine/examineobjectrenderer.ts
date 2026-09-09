@@ -1,3 +1,4 @@
+import { ExamineParticleRenderer } from "./examineparticlerenderer";
 import {
   type AcDatClient,
   type LoadedModelBatch,
@@ -63,6 +64,9 @@ export class ExamineObjectRenderer {
   private readonly alphaCutoffLocation: WebGLUniformLocation | null;
   private readonly alphaModeLocation: WebGLUniformLocation | null;
   private batches: RenderBatch[] = [];
+  private particleBatches: LoadedModelBatch[] = [];
+  private readonly particles: ExamineParticleRenderer;
+  private animationFrame: number | null = null;
   private bounds: { minimum: [number, number, number]; maximum: [number, number, number] } | null = null;
   private camera: ExamineCamera | null = null;
   private modelMatrix = new Float32Array([
@@ -86,6 +90,7 @@ export class ExamineObjectRenderer {
     if (!gl) throw new Error("Examine rendering requires WebGL2");
     this.gl = gl;
     this.loader = new ExamineObjectLoader(datClient);
+    this.particles = new ExamineParticleRenderer(gl);
     this.program = createProgram(gl);
     const vao = gl.createVertexArray();
     const clampSampler = gl.createSampler();
@@ -151,14 +156,21 @@ export class ExamineObjectRenderer {
       this.updateModelMatrix();
       try {
         for (const [order, batch] of loaded.batches.entries()) {
-          this.batches.push(this.uploadBatch(batch, order));
+          if (batch.mesh.particles) {
+            this.particleBatches.push(batch);
+          } else {
+            this.batches.push(this.uploadBatch(batch, order));
+          }
         }
       } catch (cause) {
-        const uploadedCount = this.batches.length;
+        const uploadedCount = this.batches.length + this.particleBatches.length;
         this.releaseBatches();
         this.loader.release({ ...loaded, batches: loaded.batches.slice(uploadedCount) });
         throw cause;
       }
+      this.particles.setBatches(this.particleBatches);
+      this.resize();
+      this.startAnimation();
     } catch (cause) {
       if (generation !== this.generation || controller.signal.aborted) return;
       this.releaseBatches();
@@ -196,8 +208,9 @@ export class ExamineObjectRenderer {
   render(): void {
     if (this.destroyed) return;
     this.datClient.beginFrame();
-    if (!this.camera || this.batches.length === 0) return;
+    if (!this.camera) return;
     const gl = this.gl;
+    gl.depthMask(true);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
@@ -215,6 +228,18 @@ export class ExamineObjectRenderer {
       }
     }
     gl.bindVertexArray(null);
+    this.particles.render(this.camera, this.modelMatrix, this.clampSampler, this.repeatSampler);
+  }
+
+  private startAnimation(): void {
+    if (!this.particles.active || this.animationFrame !== null) {
+      return;
+    }
+    this.animationFrame = requestAnimationFrame(() => {
+      this.animationFrame = null;
+      this.render();
+      this.startAnimation();
+    });
   }
 
   destroy(): void {
@@ -225,6 +250,7 @@ export class ExamineObjectRenderer {
     this.bounds = null;
     this.camera = null;
     this.loaded = null;
+    this.particles.destroy();
     this.gl.deleteSampler(this.clampSampler);
     this.gl.deleteSampler(this.repeatSampler);
     this.gl.deleteVertexArray(this.vao);
@@ -259,7 +285,7 @@ export class ExamineObjectRenderer {
   private drawBatch(batch: RenderBatch): void {
     const gl = this.gl;
     const material = batch.material;
-    const cull = material.cullState;
+    const cull = batch.mesh.cullState ?? material.cullState;
     if (cull === "none") gl.disable(gl.CULL_FACE);
     else {
       gl.enable(gl.CULL_FACE);
@@ -274,7 +300,8 @@ export class ExamineObjectRenderer {
     } else gl.disable(gl.BLEND);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, material.texture);
-    gl.bindSampler(0, material.samplerMode === "repeat" ? this.repeatSampler : this.clampSampler);
+    const samplerMode = batch.mesh.samplerMode ?? (batch.mesh.hasWrappingUVs ? "repeat" : material.samplerMode);
+    gl.bindSampler(0, samplerMode === "repeat" ? this.repeatSampler : this.clampSampler);
     gl.uniform1f(this.opacityLocation, material.opacity);
     gl.uniform1f(this.luminosityLocation, material.luminosity);
     gl.uniform1f(this.diffuseLocation, material.diffuse);
@@ -289,6 +316,11 @@ export class ExamineObjectRenderer {
   }
 
   private releaseBatches(): void {
+    if (this.animationFrame !== null) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+    this.particles.setBatches([]);
     const releases: Promise<void>[] = [];
     for (const batch of this.batches) {
       this.gl.deleteBuffer(batch.vertexBuffer);
@@ -296,8 +328,13 @@ export class ExamineObjectRenderer {
       releases.push(this.datClient.releaseMaterial(batch.mesh.materialResourceId));
     }
     this.batches = [];
+    for (const batch of this.particleBatches) {
+      releases.push(this.datClient.releaseMaterial(batch.mesh.materialResourceId));
+    }
+    this.particleBatches = [];
     // Flush this client's deferred texture deletions after material releases finish.
     void Promise.all(releases).then(() => this.datClient.beginFrame());
+    this.gl.depthMask(true);
     this.gl.clearColor(0, 0, 0, 0);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
   }
@@ -333,6 +370,9 @@ export class ExamineObjectRenderer {
     const maximum: [number, number, number] = [-Infinity, -Infinity, -Infinity];
     let vertexCount = 0;
     for (const batch of batches) {
+      if (batch.mesh.particles) {
+        continue;
+      }
       const vertices = batch.mesh.vertices;
       if (!vertices) continue;
       vertexCount += vertices.length / 8;

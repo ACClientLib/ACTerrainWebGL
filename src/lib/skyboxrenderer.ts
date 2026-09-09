@@ -26,7 +26,7 @@ vec3 rotate(vec3 value) {
 void main() {
   // AC places sky objects on a 500-unit camera-relative sphere before
   // applying the object's sky rotation.
-  vec3 p = rotate(localPosition + vec3(0.0, 0.0, -500.0)) + skyOrigin;
+  vec3 p = rotate(localPosition + vec3(0.0, 0.0, 0.0)) + skyOrigin;
   normal = normalize(rotate(localNormal));
   p.y = -p.y;
   normal.y = -normal.y;

@@ -12,6 +12,7 @@ import {
 } from "./formatcontract";
 import { parseV3SceneIndex } from "../v3/v3sceneindex";
 import { parseV3Material, parseV3PlacementChunk } from "../v3/v3parsers";
+import type { V3AttachedItemView } from "../v3/v3types";
 import { ResourceRegistry, type ResourceLease } from "./resourceRegistry";
 import {
   selectTextureProfile,
@@ -56,6 +57,19 @@ export interface IndexedPlacement {
   rotation: [number, number, number, number];
   scale: [number, number, number];
   objectGuid?: number;
+  attached?: boolean;
+}
+
+function rotateVector(q: [number, number, number, number], v: [number, number, number]): [number, number, number] {
+  const [x, y, z, w] = q;
+  const tx = 2 * (y * v[2] - z * v[1]);
+  const ty = 2 * (z * v[0] - x * v[2]);
+  const tz = 2 * (x * v[1] - y * v[0]);
+  return [v[0] + w * tx + y * tz - z * ty, v[1] + w * ty + z * tx - x * tz, v[2] + w * tz + x * ty - y * tx];
+}
+
+function multiplyQuaternion(a: [number, number, number, number], b: [number, number, number, number]): [number, number, number, number] {
+  return [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
 }
 
 export interface WorldObjectVector3 { x: number; y: number; z: number; }
@@ -225,6 +239,7 @@ export interface Mesh {
 export interface LoadedModelBatch {
   mesh: MeshBatch;
   material: ObjectMaterial;
+  particlePlacement?: Pick<V3AttachedItemView, "offset" | "orientation" | "scale">;
 }
 export interface LoadedServerObjectModel {
   object: WorldObjectData;
@@ -593,10 +608,59 @@ export class AcDatClient {
       ...object.render.dependencyResourceIds,
     ];
     onPhase?.("loading model resources");
-    await this.loadResources([...new Set(resourceIds)], signal);
+    // Resource requests are shared across selections, just like mesh decodes.
+    await this.loadResources([...new Set(resourceIds)]);
+    signal?.throwIfAborted();
     const mesh = await this.meshResource(object.render.meshResourceId, signal);
     const batches = await this.loadModelBatches(mesh, signal, includeParticles);
-    return { object, render: object.render, mesh, batches };
+    try {
+      const chunk = this.chunks.get(object.cellId) ?? this.chunk(object.cellId >>> 24, (object.cellId >>> 16) & 0xff);
+      if (chunk?.placementResourceId !== undefined) {
+        const placements = parseV3PlacementChunk(await this.decodeResource(chunk.placementResourceId, 6));
+        for (const item of placements.attachedItems) {
+          if (item.parentSourceId !== object.guid) {
+            continue;
+          }
+          const attachedMesh = await this.mesh(item.modelIndex, signal);
+          const transformedMesh = {
+            ...attachedMesh,
+            batches: attachedMesh.batches.map((batch) => {
+              if (!batch.vertices) {
+                return batch;
+              }
+              const vertices = batch.vertices.slice();
+              for (let offset = 0; offset < vertices.length; offset += 8) {
+                const position = rotateVector(item.orientation, [
+                  vertices[offset] * item.scale[0],
+                  vertices[offset + 1] * item.scale[1],
+                  vertices[offset + 2] * item.scale[2],
+                ]);
+                const normal = rotateVector(item.orientation, [
+                  vertices[offset + 3] / item.scale[0],
+                  vertices[offset + 4] / item.scale[1],
+                  vertices[offset + 5] / item.scale[2],
+                ]);
+                for (let axis = 0; axis < 3; axis++) {
+                  vertices[offset + axis] = position[axis] + item.offset[axis];
+                  vertices[offset + 3 + axis] = normal[axis];
+                }
+              }
+              return { ...batch, vertices };
+            }),
+          };
+          const attachedBatches = await this.loadModelBatches(transformedMesh, signal, includeParticles);
+          for (const batch of attachedBatches) {
+            batches.push(batch.mesh.particles ? { ...batch, particlePlacement: item } : batch);
+          }
+        }
+      }
+      signal?.throwIfAborted();
+      return { object, render: object.render, mesh, batches };
+    } catch (error) {
+      await Promise.all(batches.map((batch) => this.releaseMaterial(batch.mesh.materialResourceId)));
+      this.beginFrame();
+      throw error;
+    }
   }
 
   async loadModelBatches(mesh: Mesh, signal?: AbortSignal, includeParticles = true): Promise<LoadedModelBatch[]> {
@@ -732,7 +796,7 @@ export class AcDatClient {
   }
 
   serverSpawnsForChunk(chunk: IndexedChunk): IndexedPlacement[] {
-    return this.placementsForChunk(chunk, SERVER_SPAWNS);
+    return this.placementsForChunk(chunk, SERVER_SPAWNS).filter((placement) => !placement.attached);
   }
 
   model(modelIndex: number): IndexedModel | undefined {
@@ -755,7 +819,8 @@ export class AcDatClient {
     let promise = this.meshesByResourceId.get(resourceId);
     if (!promise) {
       let created!: Promise<Mesh>;
-      created = this.decodeMesh(resourceId, 1, signal).catch((error) => {
+      // A selection may be cancelled while another caller is awaiting the same mesh.
+      created = this.decodeMesh(resourceId, 1, this.lifecycleController.signal).catch((error) => {
         if (this.meshesByResourceId.get(resourceId) === created)
           this.meshesByResourceId.delete(resourceId);
         throw error;
@@ -767,7 +832,10 @@ export class AcDatClient {
       this.meshesByResourceId.set(resourceId, promise);
     }
     this.trimMeshCache();
-    return promise;
+    return promise.then((mesh) => {
+      signal?.throwIfAborted();
+      return mesh;
+    });
   }
 
   bakedMesh(resourceId: number, signal?: AbortSignal): Promise<Mesh> {
@@ -998,7 +1066,27 @@ export class AcDatClient {
             ),
           ),
     );
+    const parentsByGuid = new Map<number, IndexedPlacement>();
+    for (const placement of placements) if (placement.objectGuid !== undefined) parentsByGuid.set(placement.objectGuid, placement);
+    for (const item of parsed.attachedItems) {
+      const parent = parentsByGuid.get(item.parentSourceId);
+      if (parent) placements.push(this.decodeAttachedPlacement(parent, item));
+    }
     this.decodedPlacements.set(chunkId, placements);
+  }
+
+  private decodeAttachedPlacement(parent: IndexedPlacement, item: V3AttachedItemView): IndexedPlacement {
+    const scaledOffset: [number, number, number] = [item.offset[0] * parent.scale[0], item.offset[1] * parent.scale[1], item.offset[2] * parent.scale[2]];
+    const worldOffset = rotateVector(parent.rotation, scaledOffset);
+    return {
+      category: parent.category,
+      geometryPath: 0,
+      modelIndex: item.modelIndex,
+      origin: [parent.origin[0] + worldOffset[0], parent.origin[1] + worldOffset[1], parent.origin[2] + worldOffset[2]],
+      rotation: multiplyQuaternion(parent.rotation, item.orientation),
+      scale: [parent.scale[0] * item.scale[0], parent.scale[1] * item.scale[1], parent.scale[2] * item.scale[2]],
+      attached: true,
+    };
   }
 
   material(id: number): Promise<ObjectMaterial> {

@@ -54,12 +54,11 @@ export class ExamineCreaturePanel {
   private readonly allegiance: HTMLElement;
   private readonly misc: HTMLElement;
   readonly datClient: AcDatClient;
-  private renderer: ExamineObjectRenderer;
+  private readonly renderer: ExamineObjectRenderer;
   private readonly resizeObserver: ResizeObserver;
   private controller: AbortController | null = null;
   private request = 0;
   private closed = false;
-  private rendererDestroyed = false;
   constructor(private readonly options: ExamineWindowOptions) {
     this.root = document.createElement("main");
     this.root.className = "ac-examine-window";
@@ -115,7 +114,6 @@ export class ExamineCreaturePanel {
     },
   ): void {
     if (this.closed) return;
-    if (this.rendererDestroyed) this.renderer = this.createRenderer();
     const request = ++this.request;
     this.controller?.abort();
     this.controller = new AbortController();
@@ -153,8 +151,6 @@ export class ExamineCreaturePanel {
     this.controller?.abort();
     this.controller = null;
     this.renderer.clear();
-    this.renderer.destroy();
-    this.rendererDestroyed = true;
     this.root.hidden = true;
   }
   destroy(): void {
@@ -176,7 +172,6 @@ export class ExamineCreaturePanel {
     this.state.dataset.loading = loading ? "true" : "false";
   }
   private createRenderer(): ExamineObjectRenderer {
-    this.rendererDestroyed = false;
     return new ExamineObjectRenderer(this.canvas, this.datClient, (phase) =>
       this.setState(phase),
     );

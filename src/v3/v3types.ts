@@ -51,7 +51,18 @@ export interface V3PlacementGroupView {
   records: Uint8Array[];
 }
 
-export interface V3PlacementChunkView { chunkId: number; groups: V3PlacementGroupView[]; }
+export interface V3AttachedItemView {
+  parentSourceId: number;
+  modelIndex: number;
+  equipMask: number;
+  parentLocation: number;
+  placement: number;
+  offset: [number, number, number];
+  orientation: [number, number, number, number];
+  scale: [number, number, number];
+}
+
+export interface V3PlacementChunkView { chunkId: number; groups: V3PlacementGroupView[]; attachedItems: V3AttachedItemView[]; }
 
 export interface V3SceneModelView {
   originalModelId: number;

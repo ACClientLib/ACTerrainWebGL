@@ -105,9 +105,9 @@ export class ParticleSimulation {
     const maxLifetime = Math.max(0.001, p.lifespan + (this.randomValue() * 2 - 1) * p.lifespanRandom);
     const frameRotation = this.mulQuat(placementRotation, p.parentOrientation);
     const offset = this.randomOffset();
-    const worldOffset = this.rotate(frameRotation, this.scaleVector(offset, placementScale));
+    const worldOffset = this.rotate(frameRotation, this.scaleVector(this.add(p.offset, offset), placementScale));
     const parentOrigin = this.add(placementOrigin, this.rotate(placementRotation, this.scaleVector(p.parentOrigin, placementScale)));
-    const emissionOrigin = this.add(parentOrigin, this.rotate(frameRotation, this.scaleVector(p.offset, placementScale)));
+    const emissionOrigin = parentOrigin;
     const localA = this.randomVector(p.a, p.minA, p.maxA);
     const localB = this.randomVector(p.b, p.minB, p.maxB);
     const localC = this.randomVector(p.c, p.minC, p.maxC);

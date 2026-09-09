@@ -1,4 +1,4 @@
-import type { V3CullState, V3MaterialView, V3MeshBatchView, V3MeshView, V3PalettePatchView, V3ParticleBatchView, V3PlacementChunkView, V3PlacementGroupView, V3RenderClass, V3SamplerMode } from "./v3types";
+import type { V3AttachedItemView, V3CullState, V3MaterialView, V3MeshBatchView, V3MeshView, V3PalettePatchView, V3ParticleBatchView, V3PlacementChunkView, V3PlacementGroupView, V3RenderClass, V3SamplerMode } from "./v3types";
 
 import { SUPPORTED_FORMAT_VERSION as VERSION } from "../lib/formatcontract";
 const ALIGNMENT = 16;
@@ -66,10 +66,24 @@ export function parseV3Mesh(bytes: ArrayBuffer): V3MeshView {
 
 export function parseV3PlacementChunk(bytes: ArrayBuffer): V3PlacementChunkView {
   const view = new DataView(bytes); if (view.getUint32(0, true) !== 0x4c504341 || view.getUint16(4, true) !== VERSION || view.getUint16(6, true) !== 32 || view.getUint32(8, true) !== bytes.byteLength) throw new Error("Invalid v3 placement header");
-  const groupCount = view.getUint32(16, true); if (groupCount > 0x7fffffff || 32 + groupCount * 16 > bytes.byteLength || view.getUint32(20, true) !== 0 || view.getUint32(24, true) !== 0 || view.getUint32(28, true) !== 0) throw new Error("Invalid v3 placement reserved fields");
+  const groupCount = view.getUint32(16, true); const attachedCount = view.getUint32(24, true); const attachedSize = view.getUint32(28, true);
+  if (groupCount > 0x7fffffff || attachedCount > 0x7fffffff || (attachedCount === 0 ? attachedSize !== 0 : attachedSize !== 72) || 32 + groupCount * 16 > bytes.byteLength || view.getUint32(20, true) !== 0) throw new Error("Invalid v3 placement header");
   const groups: V3PlacementGroupView[] = []; let offset = 32; const counts: number[] = [];
   const sizes: number[] = [];
   for (let i = 0; i < groupCount; i++) { const modelIndex = view.getUint32(offset, true); const category = view.getUint8(offset + 4); const parity = view.getUint8(offset + 5); const recordSize = view.getUint32(offset + 12, true); if (parity > 1 || view.getUint16(offset + 6, true) !== 0 || (recordSize !== 20 && recordSize !== 28)) throw new Error("Invalid v3 placement group"); counts.push(view.getUint32(offset + 8, true)); sizes.push(recordSize); groups.push({ modelIndex, category, negativeDeterminant: parity !== 0, recordSize: recordSize as 20 | 28, records: [] }); offset += 16; }
   for (let i = 0; i < groups.length; i++) { const records: Uint8Array[] = []; for (let j = 0; j < counts[i]; j++) { if (offset > bytes.byteLength || sizes[i] > bytes.byteLength - offset) throw new Error("Truncated v3 placement record"); const reservedOffset = sizes[i] === 20 ? 18 : 22; if (view.getUint16(offset + reservedOffset, true) !== 0) throw new Error("Invalid v3 placement reserved bytes"); records.push(new Uint8Array(bytes, offset, sizes[i])); offset += sizes[i]; } groups[i].records = records; }
-  if (offset !== bytes.byteLength) throw new Error("v3 placement has trailing bytes"); return { chunkId: view.getUint32(12, true), groups };
+  const attachedItems: V3AttachedItemView[] = [];
+  for (let i = 0; i < attachedCount; i++) {
+    if (offset > bytes.byteLength || 72 > bytes.byteLength - offset) throw new Error("Truncated v3 attached-item record");
+    const child = new DataView(bytes, offset, 72);
+    const orientation = [child.getFloat32(32, true), child.getFloat32(36, true), child.getFloat32(40, true), child.getFloat32(44, true)] as [number, number, number, number];
+    const item: V3AttachedItemView = {
+      parentSourceId: child.getUint32(0, true), modelIndex: child.getUint32(4, true), equipMask: child.getUint32(8, true), parentLocation: child.getUint32(12, true), placement: child.getUint32(16, true),
+      offset: [child.getFloat32(20, true), child.getFloat32(24, true), child.getFloat32(28, true)], orientation,
+      scale: [child.getFloat32(48, true), child.getFloat32(52, true), child.getFloat32(56, true)],
+    };
+    if (![...item.offset, ...item.orientation, ...item.scale].every(Number.isFinite) || child.getUint32(60, true) !== 0 || child.getUint32(64, true) !== 0 || child.getUint32(68, true) !== 0) throw new Error("Invalid v3 attached-item record");
+    attachedItems.push(item); offset += 72;
+  }
+  if (offset !== bytes.byteLength) throw new Error("v3 placement has trailing bytes"); return { chunkId: view.getUint32(12, true), groups, attachedItems };
 }
