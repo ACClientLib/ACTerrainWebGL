@@ -7,6 +7,18 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content"
     />
     <title>AC World Viewer</title>
+      <meta
+    http-equiv="refresh"
+    content="2;url=https://maps.utilitybelt.me/"
+  >
+
+  <script>
+    const target = new URL("https://maps.utilitybelt.me/");
+    target.search = window.location.search;
+    target.hash = window.location.hash;
+
+    window.location.replace(target.href);
+  </script>
     <style>
       :root {
         color-scheme: light dark;
